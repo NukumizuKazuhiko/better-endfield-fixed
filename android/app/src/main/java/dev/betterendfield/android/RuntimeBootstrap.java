@@ -1,5 +1,6 @@
 package dev.betterendfield.android;
 
+import android.annotation.SuppressLint;
 import android.app.Application;
 import android.content.Context;
 import android.system.Os;
@@ -126,6 +127,17 @@ final class RuntimeBootstrap {
         return loaded || ATTEMPTS.get() >= 3;
     }
 
+    // Runtime.nativeLoad is a non-SDK interface, blocked when targeting API 35+.
+    // There is no public replacement: System.load/nativeLoad can only open a
+    // library into the *calling* classloader, while this module has to load
+    // libbetterendfield_android.so into the game's classloader namespace --
+    // Android scopes both JNI lookup and .so openings per classloader, and the
+    // runtime registers itself against the game's Unity player. The access is a
+    // deliberate, static target: do not replace it with a public API. Failure is
+    // already treated as normal (see load(): 3-arg -> 2-arg fallback, retries,
+    // then a log line), so the check is suppressed here rather than module-wide
+    // to keep any future accidental blocked-API use visible to lint.
+    @SuppressLint("BlockedPrivateApi")
     private static void loadIntoTargetNamespace(String path, ClassLoader loader,
             Class<?> caller) throws ReflectiveOperationException {
         Method method;
