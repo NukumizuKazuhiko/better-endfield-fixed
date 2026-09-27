@@ -1,0 +1,128 @@
+name: android-release
+
+# Manual release pipeline. The `release` build type inherits the debug signing
+# config (see android/app/build.gradle.kts), so no keystore secret is needed.
+# Tag creation is left to `gh release create` on purpose: a `push: tags`
+# trigger here would fire a second run off the tag this workflow just made.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.20)'
+        required: true
+        default: '3.3.20'
+      draft:
+        description: 'Create the release as a draft instead of publishing it'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install NDK / CMake / platform
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      - name: Fetch Dobby source (gitignored vendored dep)
+        run: |
+          mkdir -p tools/android-toolchain/dobby-1.0.5
+          curl -sfL https://github.com/BepInEx/Dobby/archive/refs/tags/v1.0.5.tar.gz \
+            | tar xz --strip-components=1 -C tools/android-toolchain/dobby-1.0.5
+          # v1.0.5 builds example/ unconditionally; it needs DobbyInstrument /
+          # DobbySymbolResolver which Better-Endfield disables. Drop the example.
+          sed -i '/add_subdirectory(example)/d' tools/android-toolchain/dobby-1.0.5/CMakeLists.txt
+          test -f tools/android-toolchain/dobby-1.0.5/CMakeLists.txt
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Stage the APK and the release notes
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          version_name=$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)
+          version_code=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' android/app/build.gradle.kts)
+          echo "gradle declares versionName=$version_name versionCode=$version_code"
+
+          # Refuse to tag a version the source does not actually declare, so a
+          # release can never be published under a version it does not carry.
+          if [ "$version_name" != "$REQUESTED_VERSION" ]; then
+            echo "::error::requested version '$REQUESTED_VERSION' does not match versionName '$version_name' in android/app/build.gradle.kts"
+            exit 1
+          fi
+
+          mkdir -p dist
+          apk="dist/betterendfield-${version_name}-${version_code}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          ls -l dist
+
+          # Notes are lifted from the matching CHANGELOG section so the release
+          # body cannot drift away from the changelog.
+          {
+            echo "Better Endfield (Android) ${version_name}"
+            echo
+            echo "versionName \`${version_name}\` / versionCode \`${version_code}\` / arm64-v8a / minSdk 29 / targetSdk 35."
+            echo
+            echo "APK: \`$(basename "$apk")\` ($(du -h "$apk" | cut -f1) uncompressed)"
+            echo
+            awk -v v="$version_name" '
+              $0 ~ ("^## " v "[[:space:]]*$") { found = 1; next }
+              found && $0 ~ "^## " { exit }
+              found { print }
+            ' CHANGELOG.md
+          } > dist/RELEASE_NOTES.md
+          echo "----- release notes -----"
+          cat dist/RELEASE_NOTES.md
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: better-endfield-release-apk
+          path: dist/*.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          IS_DRAFT: ${{ inputs.draft }}
+        run: |
+          set -euo pipefail
+
+          tag="v${REQUESTED_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::release $tag already exists; bump the version or delete that release first"
+            exit 1
+          fi
+
+          args=(--repo "$GITHUB_REPOSITORY" --title "$tag" --target "$GITHUB_SHA" --notes-file dist/RELEASE_NOTES.md)
+          if [ "$IS_DRAFT" = "true" ]; then
+            args+=(--draft)
+            echo "creating $tag as a draft"
+          else
+            echo "creating $tag"
+          fi
+
+          gh release create "$tag" dist/*.apk "${args[@]}"
