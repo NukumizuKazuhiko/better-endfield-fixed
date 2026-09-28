@@ -472,6 +472,13 @@ icall does not exist there.
 The Android client's managed readback contracts still require device verification;
 the Windows client's missing methods do not establish Android availability.
 
+GitHub Actions currently signs release APKs with an ephemeral debug key. The
+published 3.3.20 and 3.3.21 APKs have different signing certificates, so a
+standard Android installation cannot upgrade in place across those versions.
+Back up app data before uninstalling the old APK. The user's in-game report was
+made with a local debug build; the published APK passed CI build and signature
+verification but has not been retested in-game.
+
 Optional keys, with their defaults: `first_person_eye_forward=0.03`,
 `first_person_eye_height=0.05`, `first_person_near_clip=0.03`,
 `first_person_extend_look_range=false` (widens the vertical look range past the

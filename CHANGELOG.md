@@ -14,6 +14,7 @@
 - 客户端元数据复核发现当前 Windows 游戏缺少同步读回路径依赖的 `InternalGetData`、`GetIndexBuffer` 和 indexBufferTarget 方法；S4/S5 保持合同阻断，离线构建与测试不计作游戏内功能通过。
 - 对话状态采样改用已验证静态字段上的 `il2cpp_field_static_get_value`；管理器确实为空时判为非对话，读取、GC 根或 getter 失败时仍让出游戏相机。修复启用“对话时让出相机”后第一人称持续被 `DialogueUnavailable` 抑制、退出时 `patched frames=0` 的问题。
 - 用户在 Android 3.3.21 实机确认除“外部模型缩头兼容”以外的可操作第一人称项目通过；该项尚未测试。S4 同步 GPU 回读与依赖它的 S5 网格封口仍受已记录的接口门禁约束，不能据此声称 GPU 网格路径通过；用户反馈是游戏侧操作结果，不替代逐项运行日志和恢复证据。阶段状态见 [执行记录](docs/CAMERA_FIRST_PERSON_EXECUTION.md)。
+- 安装限制：GitHub Actions 的发行包沿用临时调试签名，`v3.3.21` 与 `v3.3.20` 的签名证书不同。普通 Android 设备不能直接覆盖升级；卸载旧版前须自行备份应用数据。用户的实机反馈来自本地 debug APK，GitHub Release APK 已通过独立构建与签名核验，但尚未在游戏中复测。
 
 - 第一人称眼位改用参考实现（RenoDX Endfield Enhancer）的公式：前向偏移沿视线方向的水平投影施加，高度偏移保持世界竖直，因此低头时眼睛向前贴近面部而不再随视线一起下沉。眼睛前移、眼睛高度与近裁剪面三项由硬编码改为配置项 `first_person_eye_forward` / `first_person_eye_height` / `first_person_near_clip`，默认值取参考实现的 0.03 / 0.05 / 0.03。
 - 第一人称新增「放宽俯仰范围」（`first_person_extend_look_range`，默认关闭）。开启后俯仰角在游戏自身限制之外继续跟随输入，上/下倍率取参考实现的 1.10 / 1.50，并按 ±89° 夹取；关闭时推给相机的朝向修正保持单位四元数，与改动前完全一致。
