@@ -1,4 +1,6 @@
 #include "../modules/camera/first_person_mesh.h"
+#include "../modules/camera/first_person_shadow.h"
+#include "../modules/camera/first_person_math.h"
 #include "../modules/camera/first_person_retry.h"
 #include <iostream>
 #include <stdexcept>
@@ -59,6 +61,76 @@ int main() {
         Check(!Build(split,{invalid},{0,1},{},false,true).error.empty(),"invalid index accepted");
         split[0].weight[0]=std::numeric_limits<double>::quiet_NaN();
         Check(!Build(split,{components},{0,1},{},false,true).error.empty(),"invalid weight accepted");
-        std::cout<<"first_person_mesh: retry lifecycle, geometry, seam, skin, concavity, and invalid-input tests passed\n";
+        // Part roles, ported from the upstream enhancer's camera_mesh.hpp.
+        Check(IsDedicatedHeadMesh("s_actor_aglina_face_lod0"),"dedicated head mesh not recognised");
+        Check(IsDedicatedHeadMesh("s_actor_aglina_hairshadow_lod0"),"hair shadow mesh not recognised");
+        Check(IsDedicatedHeadMesh("s_actor_aglina_eyeshadow_lod0"),"eye shadow mesh not recognised");
+        Check(IsDedicatedHeadMesh("s_actor_aglina_eyebrow_lod0"),"eyebrow mesh not recognised");
+        Check(!IsDedicatedHeadMesh("s_actor_aglina_body_lod0"),"body mesh classified as a head mesh");
+        Check(!IsDedicatedHeadMesh("s_actor_aglina_face_lod0_shadowproxy"),"shadow proxy accepted as a head mesh");
+        Check(!IsDedicatedHeadMesh("aglina_face_lod0"),"role without the actor prefix accepted");
+        Check(!IsDedicatedHeadMesh("s_actor_aglina_face"),"role without a lod suffix accepted");
+        Check(IsBodyMesh("s_actor_aglina_body_lod0"),"body mesh not recognised");
+        Check(!IsBodyMesh("s_actor_aglina_hair_lod0"),"head mesh classified as a body mesh");
+        Check(!IsBodyMesh("s_actor_aglina_shadowproxy_body_lod0"),"body shadow proxy accepted");
+        // Body skin hides only the triangles whose three vertices are dominated
+        // by head/neck weights, and only when the mesh was classified as a body.
+        std::vector<Vertex> skin_body{V(0,0,0,2),V(1,0,0,2),V(0,1,0,2)};
+        Part skin_tri{{0,1,2}};
+        Check(Build(skin_body,{skin_tri},{0,1,2},{},false,false,1.0,true).hidden_triangles==1,
+            "body-skin triangle over the neck opening not hidden");
+        Check(Build(skin_body,{skin_tri},{0,1,2},{},false,false,1.0,false).hidden_triangles==0,
+            "body-skin hide applied without the body flag");
+        std::vector<Vertex> mixed_skin{V(0,0,0,2),V(1,0,0,2),V(0,1,0,0)};
+        Part mixed_tri{{0,1,2}};
+        Check(Build(mixed_skin,{mixed_tri},{0,1,2},{},false,false,1.0,true).hidden_triangles==0,
+            "partially skinned triangle hidden");
+        // Camera math, ported from the upstream enhancer's camera_math.hpp.
+        using namespace BetterEndfield::FirstPersonMath;
+        Check(ExpandLookPitch(Quat{0,0,0,1},1.f,1.f)==0.f,"disabled look range produced an offset");
+        Check(std::abs(ExpandLookPitch(AxisAngle({1,0,0},-30.f),1.5f,1.f)+15.f)<1e-3f,
+            "upward look range not extended by 1.5");
+        Check(std::abs(ExpandLookPitch(AxisAngle({1,0,0},30.f),1.f,1.5f)-15.f)<1e-3f,
+            "downward look range not extended by 1.5");
+        Check(std::abs(ExpandLookPitch(AxisAngle({1,0,0},-80.f),2.f,2.f)+9.f)<1e-3f,
+            "extended pitch not clamped to 89 degrees");
+        Check(std::abs(LateralFacingYaw({1,0,0},{0,0,1})-45.f)<1e-3f,"strafe right did not turn 45");
+        Check(std::abs(LateralFacingYaw({-1,0,0},{0,0,1})+45.f)<1e-3f,"strafe left did not turn -45");
+        Check(LateralFacingYaw({0,0,1},{0,0,1})==0.f,"forward input turned the body");
+        Check(LateralFacingYaw({0,0,-1},{0,0,1})==0.f,"backpedal turned the body");
+        Check(std::abs(LateralFacingYaw({1,0,-1},{0,0,1})+45.f)<1e-3f,"backwards strafe sign inverted");
+        Check(LateralFacingYaw({0,0,0},{0,0,1})==0.f,"zero movement produced a facing yaw");
+        const Quat quarter=AxisAngle({0,1,0},90.f);
+        Check(std::abs(BlendRotation(Quat{0,0,0,1},quarter,0.f).w-1.f)<1e-6f,"blend at zero changed rotation");
+        Check(std::abs(BlendRotation(Quat{0,0,0,1},quarter,1.f).y-quarter.y)<1e-5f,"blend at one did not reach the target");
+        Check(Unit(BlendRotation(Quat{0,0,0,1},quarter,.5f)),"blend produced a non-unit quaternion");
+        Quat facing{};
+        Check(FacingRotation({0,0,1},{0,1,0},&facing)&&std::abs(Rotate(facing,{0,0,1}).z-1.f)<1e-5f,
+            "identity facing rotation not reconstructed");
+        Check(FacingRotation({1,0,0},{0,1,0},&facing)&&std::abs(Rotate(facing,{0,0,1}).x-1.f)<1e-5f,
+            "turned facing rotation not reconstructed");
+        Check(!FacingRotation({0,0,0},{0,1,0},&facing),"degenerate facing frame accepted");
+        using ShadowLease = BetterEndfield::FirstPerson::ShadowModeLease;
+        ShadowLease shadow;
+        Check(shadow.Acquire(1) && shadow.Observe(3)==ShadowLease::Refresh::Keep,
+            "shadow lease did not retain the original mode");
+        Check(shadow.Observe(1)==ShadowLease::Refresh::Reassert,
+            "game reset to the original mode should be eligible for reassertion");
+        Check(shadow.Observe(2)==ShadowLease::Refresh::Relinquish &&
+            shadow.PlanRestore(2,true)==ShadowLease::Restore::Done && !shadow.Acquire(2),
+            "an external mode change must not be overwritten in this session");
+        shadow={};
+        Check(shadow.Acquire(1) && shadow.PlanRestore(3,true)==ShadowLease::Restore::Write,
+            "our shadow-only mode should restore the saved mode");
+        shadow.RestoreResult(false);
+        Check(shadow.PlanRestore(-1,true)==ShadowLease::Restore::Retry,
+            "unavailable mode read should retain the restoration lease");
+        shadow.RestoreResult(false);shadow.RestoreResult(false);
+        Check(shadow.blocked && shadow.PlanRestore(3,true)==ShadowLease::Restore::Retry,
+            "repeated restore failure should exhaust the retry budget");
+        shadow={};shadow.Acquire(1);
+        Check(shadow.PlanRestore(3,false)==ShadowLease::Restore::Done && !shadow.owned,
+            "destroyed renderer should release its lease");
+        std::cout<<"first_person_mesh: retry lifecycle, geometry, seam, skin, body skin, roles, camera math, and invalid-input tests passed\n";
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

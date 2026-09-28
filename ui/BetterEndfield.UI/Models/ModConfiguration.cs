@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using BetterEndfield.UI.Services;
 
@@ -189,6 +189,30 @@ internal sealed class ModConfiguration
 
     public double FirstPersonNeckPlugScale { get; set; } = 1.0;
 
+    private double _firstPersonEyeForward = 0.03;
+    private double _firstPersonEyeHeight = 0.05;
+    private double _firstPersonNearClip = 0.03;
+
+    // Match the native camera contract; invalid numeric input never reaches a NumberBox or INI.
+    public double FirstPersonEyeForward
+    {
+        get => _firstPersonEyeForward;
+        set => _firstPersonEyeForward = double.IsFinite(value) ? Math.Clamp(value, 0, 0.5) : 0.03;
+    }
+    public double FirstPersonEyeHeight
+    {
+        get => _firstPersonEyeHeight;
+        set => _firstPersonEyeHeight = double.IsFinite(value) ? Math.Clamp(value, -0.5, 0.5) : 0.05;
+    }
+    public double FirstPersonNearClip
+    {
+        get => _firstPersonNearClip;
+        set => _firstPersonNearClip = double.IsFinite(value) ? Math.Clamp(value, 0.001, 1) : 0.03;
+    }
+    public bool FirstPersonExtendLookRange { get; set; } = false;
+
+    public FirstPersonExtras FirstPersonExtras { get; set; } = new();
+
     public static ModConfiguration CreateDefaults() => new();
 
     public string ToIni()
@@ -310,6 +334,11 @@ internal sealed class ModConfiguration
         text.AppendLine($"first_person_hide_head={Boolean(FirstPersonHideHead)}");
         text.AppendLine($"first_person_fill_neck_hole={Boolean(FirstPersonFillNeckHole)}");
         text.AppendLine($"first_person_neck_plug_scale={Number(FirstPersonNeckPlugScale)}");
+        text.AppendLine($"first_person_eye_forward={Number(FirstPersonEyeForward)}");
+        text.AppendLine($"first_person_eye_height={Number(FirstPersonEyeHeight)}");
+        text.AppendLine($"first_person_near_clip={Number(FirstPersonNearClip)}");
+        text.AppendLine($"first_person_extend_look_range={Boolean(FirstPersonExtendLookRange)}");
+        text.Append(FirstPersonExtras.ToIniLines());
         text.AppendLine($"first_person_fov={Number(FirstPersonFieldOfView)}");
         text.AppendLine($"first_person_hotkey={FirstPersonHotkey}");
         text.AppendLine($"toggle_hotkey={FreeCameraToggleHotkey}");
@@ -323,5 +352,80 @@ internal sealed class ModConfiguration
         text.AppendLine("[Launcher]");
         text.AppendLine($"Language={(LocalizationService.Instance.IsChinese ? "zh_CN" : "en_US")}");
         return text.ToString();
+    }
+}
+
+// Advanced first-person settings share normalization across full saves, partial
+// camera saves and migration. Disabling a feature does not discard its tuning.
+internal sealed class FirstPersonExtras
+{
+    private double _sideLookLimit = 60;
+    private int _animationMode;
+    private double _animationStrength = 0.35;
+    private double _transitionSeconds;
+
+    public bool Movement { get; set; }
+    public double SideLookLimit
+    {
+        get => _sideLookLimit;
+        set => _sideLookLimit = Normalize(value, 0, 90, 60);
+    }
+    public int AnimationMode
+    {
+        get => _animationMode;
+        set => _animationMode = value is >= 0 and <= 3 ? value : 0;
+    }
+    public double AnimationStrength
+    {
+        get => _animationStrength;
+        set => _animationStrength = Normalize(value, 0, 1, 0.35);
+    }
+    public bool YieldDialogue { get; set; }
+    public bool ThirdPersonInCombat { get; set; }
+    public double TransitionSeconds
+    {
+        get => _transitionSeconds;
+        set => _transitionSeconds = Normalize(value, 0, 1, 0);
+    }
+    public bool ExternalHeadScale { get; set; }
+
+    private static double Normalize(double value, double minimum, double maximum, double fallback) =>
+        double.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
+
+    public string ToIniLines()
+    {
+        static string Boolean(bool value) => value ? "true" : "false";
+        static string Number(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
+        return $"first_person_movement={Boolean(Movement)}" + Environment.NewLine +
+            $"first_person_side_look_limit={Number(SideLookLimit)}" + Environment.NewLine +
+            $"first_person_animation_mode={AnimationMode.ToString(CultureInfo.InvariantCulture)}" + Environment.NewLine +
+            $"first_person_animation_strength={Number(AnimationStrength)}" + Environment.NewLine +
+            $"first_person_yield_dialogue={Boolean(YieldDialogue)}" + Environment.NewLine +
+            $"first_person_third_person_in_combat={Boolean(ThirdPersonInCombat)}" + Environment.NewLine +
+            $"first_person_transition_seconds={Number(TransitionSeconds)}" + Environment.NewLine +
+            $"first_person_external_head_scale={Boolean(ExternalHeadScale)}" + Environment.NewLine;
+    }
+
+    public static FirstPersonExtras FromValues(IReadOnlyDictionary<string, string> values)
+    {
+        double Number(string key, double fallback) =>
+            values.TryGetValue(key, out string? text) &&
+            double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) &&
+            double.IsFinite(number) ? number : fallback;
+        bool Boolean(string key) => values.TryGetValue(key, out string? text) &&
+            text.Trim().ToLowerInvariant() is "true" or "1" or "yes" or "on";
+
+        double mode = Number("first_person_animation_mode", 0);
+        return new FirstPersonExtras
+        {
+            Movement = Boolean("first_person_movement"),
+            SideLookLimit = Number("first_person_side_look_limit", 60),
+            AnimationMode = mode is >= 0 and <= 3 && mode == Math.Truncate(mode) ? (int)mode : 0,
+            AnimationStrength = Number("first_person_animation_strength", 0.35),
+            YieldDialogue = Boolean("first_person_yield_dialogue"),
+            ThirdPersonInCombat = Boolean("first_person_third_person_in_combat"),
+            TransitionSeconds = Number("first_person_transition_seconds", 0),
+            ExternalHeadScale = Boolean("first_person_external_head_scale")
+        };
     }
 }

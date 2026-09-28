@@ -21,6 +21,14 @@ set(BETTER_ENDFIELD_STAGE_DIR "${CMAKE_BINARY_DIR}/stage/$<CONFIG>")
 set(BETTER_ENDFIELD_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shared/include")
 
 add_executable(BetterEndfield.FirstPersonMeshTests EXCLUDE_FROM_ALL tests/first_person_mesh_tests.cpp)
+add_executable(BetterEndfield.FirstPersonFacingTests EXCLUDE_FROM_ALL tests/first_person_facing_tests.cpp)
+add_executable(BetterEndfield.FirstPersonMotionTests EXCLUDE_FROM_ALL tests/first_person_motion_tests.cpp)
+add_executable(BetterEndfield.FirstPersonReadbackTests EXCLUDE_FROM_ALL tests/first_person_readback_tests.cpp)
+add_executable(BetterEndfield.FirstPersonCapVerticesTests EXCLUDE_FROM_ALL tests/first_person_cap_vertices_tests.cpp)
+add_executable(BetterEndfield.FirstPersonPolicyTests EXCLUDE_FROM_ALL tests/first_person_policy_tests.cpp)
+add_executable(BetterEndfield.FirstPersonDialogueTests EXCLUDE_FROM_ALL tests/first_person_dialogue_tests.cpp)
+add_executable(BetterEndfield.FirstPersonTransitionTests EXCLUDE_FROM_ALL tests/first_person_transition_tests.cpp)
+add_executable(BetterEndfield.FirstPersonScaleTests EXCLUDE_FROM_ALL tests/first_person_scale_tests.cpp)
 
 add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/shared/third_party/minhook"
@@ -35,6 +43,14 @@ function(better_endfield_target_defaults target)
         target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
     endif()
 endfunction()
+
+add_executable(BetterEndfield.FirstPersonCapUploadTests EXCLUDE_FROM_ALL tests/first_person_cap_upload_tests.cpp)
+better_endfield_target_defaults(BetterEndfield.FirstPersonCapUploadTests)
+target_link_libraries(BetterEndfield.FirstPersonCapUploadTests PRIVATE user32)
+
+add_executable(BetterEndfield.FirstPersonRestoreTests EXCLUDE_FROM_ALL tests/first_person_restore_tests.cpp)
+better_endfield_target_defaults(BetterEndfield.FirstPersonRestoreTests)
+target_link_libraries(BetterEndfield.FirstPersonRestoreTests PRIVATE user32)
 
 add_library(BetterEndfield.Host SHARED
     shared/host/bootstrap.cpp

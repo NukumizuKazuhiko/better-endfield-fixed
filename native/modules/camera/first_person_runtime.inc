@@ -49,7 +49,7 @@ struct FpAttribute {int attribute=0,format=0,dimension=0,stream=0;};
 struct FpBounds {float center[3]{},extents[3]{};};
 struct FpSubmesh {FpBounds bounds;int topology=0,index_start=0,index_count=0,base_vertex=0,first_vertex=0,vertex_count=0;};
 static_assert(sizeof(FpSubmesh)==48);
-struct FpReadback {void* pointer=nullptr;int version=0;int padding=0;};
+#include "first_person_readback_runtime.inc"
 
 struct FpEngine {
     using Resolve=void*(*)(const char*);
@@ -60,17 +60,6 @@ struct FpEngine {
     Query vertex_count=nullptr,stream_count=nullptr,submesh_count=nullptr,index_format=nullptr;
     QueryAt format=nullptr,dimension=nullptr,stream=nullptr,offset=nullptr,stride=nullptr;
     bool(*has_attribute)(void*,int)=nullptr;
-    BufferAt vertex_buffer=nullptr;
-    void*(*index_buffer)(void*)=nullptr;
-    Query buffer_count=nullptr,buffer_stride=nullptr;
-    void(*buffer_destroy)(void*)=nullptr;
-    void(*request)(void*,int,int,void*,FpReadback*)=nullptr;
-    void(*wait)(FpReadback*)=nullptr;
-    bool(*done)(FpReadback*)=nullptr;
-    bool(*error)(FpReadback*)=nullptr;
-    int(*data_size)(FpReadback*)=nullptr;
-    void*(*data)(FpReadback*,int)=nullptr;
-    bool(*supports_readback)()=nullptr;
     void*(*clone)(void*)=nullptr;
     void(*get_submesh)(void*,int,FpSubmesh*)=nullptr;
     void(*set_submesh)(void*,int,const FpSubmesh*,int)=nullptr;
@@ -115,14 +104,6 @@ struct FpEngine {
         BE_FieldDescriptorV1 d{"UnityEngine.CoreModule.dll","UnityEngine","Vector3","x","System.Single"};
         if(g_host->resolve_field(g_host->context,&d,&first)!=BE_Result_Ok||first.offset<0)return false;
         const int boxed=first.offset;
-        BE_ResolvedClassV1 request_type{};
-        uint32_t alignment=0;
-        if(g_host->resolve_class(g_host->context,"UnityEngine.CoreModule.dll","UnityEngine.Rendering","AsyncGPUReadbackRequest",&request_type)!=BE_Result_Ok||
-           FpValue<int32_t>(0,value_size,request_type.class_info,&alignment)!=sizeof(FpReadback)||
-           !CheckField("UnityEngine.Rendering","AsyncGPUReadbackRequest","m_Ptr",boxed)||
-           !CheckField("UnityEngine.Rendering","AsyncGPUReadbackRequest","m_Version",boxed+8)) {
-            Log("First person mesh: GPU request ABI mismatch.");return false;
-        }
         const char* fields[]={"<bounds>k__BackingField","<topology>k__BackingField","<indexStart>k__BackingField","<indexCount>k__BackingField","<baseVertex>k__BackingField","<firstVertex>k__BackingField","<vertexCount>k__BackingField"};
         const int offsets[]={0,24,28,32,36,40,44};
         for(int i=0;i<7;++i) if(!CheckField("UnityEngine.Rendering","SubMeshDescriptor",fields[i],boxed+offsets[i])) {
@@ -140,18 +121,6 @@ struct FpEngine {
         FP_BIND(stream,"UnityEngine.Mesh::GetVertexAttributeStream");
         FP_BIND(offset,"UnityEngine.Mesh::GetVertexAttributeOffset");
         FP_BIND(stride,"UnityEngine.Mesh::GetVertexBufferStride");
-        FP_BIND(vertex_buffer,"UnityEngine.Mesh::GetVertexBufferImpl");
-        FP_BIND(index_buffer,"UnityEngine.Mesh::GetIndexBufferImpl");
-        FP_BIND(buffer_count,"UnityEngine.GraphicsBuffer::get_count");
-        FP_BIND(buffer_stride,"UnityEngine.GraphicsBuffer::get_stride");
-        FP_BIND(buffer_destroy,"UnityEngine.GraphicsBuffer::DestroyBuffer");
-        FP_BIND(request,"UnityEngine.Rendering.AsyncGPUReadback::Request_Internal_GraphicsBuffer_2_Injected");
-        FP_BIND(wait,"UnityEngine.Rendering.AsyncGPUReadbackRequest::WaitForCompletion_Injected");
-        FP_BIND(done,"UnityEngine.Rendering.AsyncGPUReadbackRequest::IsDone_Injected");
-        FP_BIND(error,"UnityEngine.Rendering.AsyncGPUReadbackRequest::HasError_Injected");
-        FP_BIND(data_size,"UnityEngine.Rendering.AsyncGPUReadbackRequest::GetLayerDataSize_Injected");
-        FP_BIND(data,"UnityEngine.Rendering.AsyncGPUReadbackRequest::GetDataRaw_Injected");
-        FP_BIND(supports_readback,"UnityEngine.SystemInfo::SupportsAsyncGPUReadback");
         FP_BIND(clone,"UnityEngine.Object::Internal_CloneSingle");
         FP_BIND(get_submesh,"UnityEngine.Mesh::GetSubMesh_Injected");
         FP_BIND(set_submesh,"UnityEngine.Mesh::SetSubMesh_Injected");
@@ -165,26 +134,13 @@ struct FpEngine {
         FP_BIND(get_offscreen,"UnityEngine.SkinnedMeshRenderer::get_updateWhenOffscreen");
         FP_BIND(set_offscreen,"UnityEngine.SkinnedMeshRenderer::set_updateWhenOffscreen");
 #undef FP_BIND
-        ready=ok;
+        ready=g_fp_sync_readback.Init()&&ok;
         Log(std::string("First person mesh: named GPU readback/clone bindings ")+(ready?"ready.":"unavailable."));
         return ready;
     }
 };
 FpEngine g_fp_engine;
 
-bool FpReadBuffer(void* buffer,size_t expected,std::vector<uint8_t>& bytes) {
-    FpRoot owner(buffer);
-    auto& e=g_fp_engine;
-    if(!owner||expected==0||expected>128*1024*1024) {if(buffer)FpCall(e.buffer_destroy,buffer);return false;}
-    int count=FpValue<int>(-1,e.buffer_count,buffer),stride=FpValue<int>(-1,e.buffer_stride,buffer);
-    bool ok=count>0&&stride>0&&uint64_t(count)*stride>=expected;
-    FpReadback req{};
-    if(ok)ok=FpCall(e.request,buffer,int(expected),0,nullptr,&req)&&FpCall(e.wait,&req)&&
-        FpValue<bool>(false,e.done,&req)&&!FpValue<bool>(true,e.error,&req)&&FpValue<int>(-1,e.data_size,&req)==int(expected);
-    if(ok) {bytes.resize(expected);ok=FpCopy(bytes.data(),FpValue<void*>(nullptr,e.data,&req,0),expected);}
-    FpCall(e.buffer_destroy,buffer);
-    return ok;
-}
 struct FpSnapshot {
     int count=0,index_format=0;
     std::vector<FpAttribute> attributes;
@@ -194,7 +150,7 @@ struct FpSnapshot {
     std::vector<FpSubmesh> submeshes;
 };
 int FpFormatSize(int format) {const int sizes[]={4,2,1,1,2,2,1,1,2,2,4,4};return format>=0&&format<12?sizes[format]:0;}
-bool FpReadMesh(void* mesh,FpSnapshot& snapshot) {
+bool FpReadMeshSnapshot(void* mesh,FpSnapshot& snapshot) {
     auto& e=g_fp_engine;
     snapshot.count=FpValue<int>(-1,e.vertex_count,mesh);
     int streams=FpValue<int>(-1,e.stream_count,mesh),subs=FpValue<int>(-1,e.submesh_count,mesh);
@@ -213,8 +169,14 @@ bool FpReadMesh(void* mesh,FpSnapshot& snapshot) {
         if(!size||a.dimension<1||a.dimension>4||a.stream<0||a.stream>=streams||offset<0||offset+size*a.dimension>snapshot.strides[a.stream])return false;
         snapshot.attributes.push_back(a);snapshot.offsets.push_back(offset);
     }
+    size_t stream_bytes=0;
+    for(int s=0;s<streams;++s) {
+        const size_t bytes=size_t(snapshot.count)*snapshot.strides[s];
+        if(bytes>128*1024*1024-stream_bytes)return false;
+        stream_bytes+=bytes;
+    }
     for(int s=0;s<streams;++s)
-        if(!FpReadBuffer(FpValue<void*>(nullptr,e.vertex_buffer,mesh,s),size_t(snapshot.count)*snapshot.strides[s],snapshot.streams[s]))return false;
+        if(!g_fp_sync_readback.ReadMesh(mesh,s,false,size_t(snapshot.count)*snapshot.strides[s],snapshot.streams[s]))return false;
     snapshot.submeshes.resize(subs);
     size_t index_count=0;
     for(int s=0;s<subs;++s) {
@@ -223,13 +185,24 @@ bool FpReadMesh(void* mesh,FpSnapshot& snapshot) {
         index_count=std::max(index_count,size_t(sub.index_start)+size_t(sub.index_count));
     }
     if(!index_count||index_count>6000000)return false;
-    return FpReadBuffer(FpValue<void*>(nullptr,e.index_buffer,mesh),index_count*(snapshot.index_format?4:2),snapshot.indices);
+    return g_fp_sync_readback.ReadMesh(mesh,0,true,index_count*(snapshot.index_format?4:2),snapshot.indices);
+}
+bool FpReadMesh(void* mesh,FpSnapshot& snapshot) {
+    if (!mesh || !g_fp_sync_readback.Init() || !g_fp_sync_readback.Drain()) return false;
+    void* object=FpValue<void*>(nullptr,g_fp_engine.clone,mesh);
+    if (!object || object==mesh) return false;
+    FpRoot capture(object);
+    FpSynchronousReadback::Lease capture_lease{g_fp_sync_readback,capture,true};
+    if (!capture) return false;
+    const bool ok=FpReadMeshSnapshot(capture.object,snapshot);
+    return g_fp_sync_readback.Release(capture,true)&&ok;
 }
 template<class T> T FpLoad(const uint8_t* p) {T value{};std::memcpy(&value,p,sizeof(T));return value;}
 const uint8_t* FpChannel(const FpSnapshot& s,int attr,size_t vertex,FpAttribute& out) {
     for(size_t i=0;i<s.attributes.size();++i)if(s.attributes[i].attribute==attr) {
         out=s.attributes[i];return s.streams[out.stream].data()+vertex*s.strides[out.stream]+s.offsets[i];
-    }return nullptr;
+    }
+    return nullptr;
 }
 bool FpDecode(const FpSnapshot& snapshot,std::vector<FpMesh::Vertex>& vertices,std::vector<FpMesh::Part>& parts) {
     vertices.resize(snapshot.count);
@@ -300,6 +273,7 @@ struct FpPatch {
     FpRoot renderer,source,copy,shadow;
     std::vector<void*> bones;
     bool offscreen=false,assigned=false;
+    unsigned restore_failures=0;
 };
 struct FpMeshSession {
     std::vector<FpPatch> patches;
@@ -316,9 +290,13 @@ FpMeshSession g_fp_mesh_session;
 // mesh patch does for matched head parts (triangles removed, shadow proxy
 // kept), used wherever the mesh patch cannot reach: non-skinned renderers
 // and skinned ones whose patch attempts are exhausted.
-constexpr int kShadowCastingShadowsOnly=3;
-struct FpShadowHide { FpRoot renderer; int original_mode=-1; };
+constexpr int kShadowCastingShadowsOnly=BetterEndfield::FirstPerson::ShadowModeLease::kShadowsOnly;
+struct FpShadowHide { FpRoot renderer; BetterEndfield::FirstPerson::ShadowModeLease lease; };
 std::vector<FpShadowHide> g_fp_shadow_hides;
+unsigned g_fp_shadow_reports=0;
+void FpShadowReport(const char* reason) {
+    if(g_fp_shadow_reports<8) {++g_fp_shadow_reports;Log(std::string("First person shadow hide: ")+reason);}
+}
 
 int FpGetShadowMode(void* renderer) {
     // Resolved through the metadata contract system like every other managed
@@ -338,22 +316,51 @@ bool FpSetShadowMode(void* renderer,int mode) {
 }
 void FpApplyShadowHide(const HeadPartProbe& part) {
     if(!part.renderer)return;
-    for(const auto& hide:g_fp_shadow_hides)if(hide.renderer.object==part.renderer) {
-        // The game can reset renderer state on part or LOD rebuilds; assert again.
-        FpSetShadowMode(part.renderer,kShadowCastingShadowsOnly);
+    for(auto& hide:g_fp_shadow_hides)if(hide.renderer.object==part.renderer) {
+        const auto action=hide.lease.Observe(FpGetShadowMode(part.renderer));
+        if(action==BetterEndfield::FirstPerson::ShadowModeLease::Refresh::Reassert &&
+            !FpSetShadowMode(part.renderer,kShadowCastingShadowsOnly)) FpShadowReport("reassertion rejected");
+        if(action==BetterEndfield::FirstPerson::ShadowModeLease::Refresh::Relinquish)
+            FpShadowReport("another owner changed shadow mode; preserving its value");
         return;
     }
+    if(g_fp_shadow_hides.size()>=static_cast<size_t>(kMaxPartScanNodes))return;
     const int original=FpGetShadowMode(part.renderer);
-    if(original<0||original==kShadowCastingShadowsOnly)return;
-    if(!FpSetShadowMode(part.renderer,kShadowCastingShadowsOnly))return;
-    g_fp_shadow_hides.push_back(FpShadowHide{FpRoot(part.renderer),original});
+    FpRoot renderer(part.renderer);
+    BetterEndfield::FirstPerson::ShadowModeLease lease;
+    if(!renderer||!lease.Acquire(original))return;
+    // Acquire the GC root before writing; a failed setter may still have
+    // applied the value and must remain restorable on exit.
+    g_fp_shadow_hides.push_back(FpShadowHide{std::move(renderer),lease});
+    if(!FpSetShadowMode(part.renderer,kShadowCastingShadowsOnly)) {
+        FpShadowReport("initial shadow-only write rejected; restoration lease retained");return;
+    }
     Log("First person mesh: "+part.object_name+" set to shadow-only rendering (mesh patch unavailable; shadow retained).");
 }
-void FpReleaseShadowHides() {
-    for(auto& hide:g_fp_shadow_hides)
-        if(IsObjectAlive(hide.renderer.object)&&hide.original_mode>=0)
-            FpSetShadowMode(hide.renderer.object,hide.original_mode);
-    g_fp_shadow_hides.clear();
+void FpReleaseShadowHides(bool closing=false) {
+    std::vector<FpShadowHide> retained;
+    for(auto& hide:g_fp_shadow_hides) {
+        if(closing) {hide.lease.blocked=false;hide.lease.failures=0;}
+        const unsigned budget=closing?3:1;
+        for(unsigned attempt=0;attempt<budget&&hide.lease.owned;++attempt) {
+            const bool alive=IsObjectAlive(hide.renderer.object);
+            const int current=alive?FpGetShadowMode(hide.renderer.object):-1;
+            const auto action=hide.lease.PlanRestore(current,alive);
+            if(action==BetterEndfield::FirstPerson::ShadowModeLease::Restore::Done)break;
+            if(action==BetterEndfield::FirstPerson::ShadowModeLease::Restore::Retry) {
+                if(!hide.lease.blocked)hide.lease.RestoreResult(false);
+                continue;
+            }
+            const bool restored=FpSetShadowMode(hide.renderer.object,hide.lease.original)&&
+                FpGetShadowMode(hide.renderer.object)==hide.lease.original;
+            hide.lease.RestoreResult(restored);
+        }
+        if(hide.lease.owned) {
+            if(closing) FpShadowReport("shutdown restore exhausted; previous shadow mode could not be verified");
+            else {if(hide.lease.blocked)FpShadowReport("restore retry budget exhausted");retained.push_back(std::move(hide));}
+        }
+    }
+    g_fp_shadow_hides=std::move(retained);
 }
 
 void FpDestroy(void* mesh) {if(mesh&&IsObjectAlive(mesh)){void* p[]={mesh};InvokeVoid(Contract("unity.object.destroy"),nullptr,p);}}
@@ -365,8 +372,10 @@ bool FpRestore(FpPatch& patch) {
             if(!IsObjectAlive(patch.source.object)||!FpCall(e.set_mesh,patch.renderer.object,patch.source.object)||
                FpValue<void*>(nullptr,e.get_mesh,patch.renderer.object)!=patch.source.object)return false;
         }
-        if((current==patch.copy.object||current==patch.source.object)&&FpValue<bool>(false,e.get_offscreen,patch.renderer.object))
-            FpCall(e.set_offscreen,patch.renderer.object,patch.offscreen);
+        if((current==patch.copy.object||current==patch.source.object)&&
+           !patch.offscreen&&FpValue<bool>(false,e.get_offscreen,patch.renderer.object)&&
+           (!FpCall(e.set_offscreen,patch.renderer.object,false)||
+            FpValue<bool>(true,e.get_offscreen,patch.renderer.object)))return false;
         if(FpValue<void*>(nullptr,e.get_shadow,patch.renderer.object)==patch.source.object) {
             if(patch.shadow.object&&!IsObjectAlive(patch.shadow.object))return false;
             if(!FpCall(e.set_shadow,patch.renderer.object,patch.shadow.object)||FpValue<void*>(nullptr,e.get_shadow,patch.renderer.object)!=patch.shadow.object)return false;
@@ -374,17 +383,41 @@ bool FpRestore(FpPatch& patch) {
     }
     FpDestroy(patch.copy.object);patch.copy.Reset();return true;
 }
+bool FpTryRestore(FpPatch& patch) {
+    if (patch.restore_failures>=3) return false;
+    if (FpRestore(patch)) return true;
+    if (++patch.restore_failures==3)
+        Log("First person mesh: restore retry budget exhausted; clone retained.");
+    return false;
+}
 void ReleaseNeckCap() {
     FpReleaseShadowHides();
     std::vector<FpPatch> retained;
-    for(auto& patch:g_fp_mesh_session.patches)if(!FpRestore(patch))retained.push_back(std::move(patch));
+    for(auto& patch:g_fp_mesh_session.patches)if(!FpTryRestore(patch))retained.push_back(std::move(patch));
     g_fp_mesh_session.patches=std::move(retained);g_fp_mesh_session.attempts.Clear();g_fp_mesh_session.scanned=false;
     if(!g_fp_mesh_session.patches.empty())Log("First person mesh: restoration deferred; keeping assigned meshes alive.");
+}
+void FpCloseNeckCap() {
+    for (auto& patch:g_fp_mesh_session.patches) patch.restore_failures=0;
+    for (unsigned attempt=0;attempt<3&&!g_fp_mesh_session.patches.empty();++attempt) ReleaseNeckCap();
+    if (!g_fp_mesh_session.patches.empty()) {
+        Log("First person mesh: shutdown restore exhausted; original renderer state unverified.");
+        for (auto& patch:g_fp_mesh_session.patches) {
+            // A clone still assigned to a renderer must not be destroyed. Once
+            // host APIs go away, release handles explicitly rather than leave
+            // them dangling through module unload.
+            if (!patch.assigned) FpDestroy(patch.copy.object);
+            patch.copy.Reset();patch.shadow.Reset();patch.source.Reset();patch.renderer.Reset();
+        }
+        g_fp_mesh_session.patches.clear();
+    }
 }
 bool FpSameVertices(const FpSnapshot& a,const FpSnapshot& b) {
     return a.count==b.count&&a.strides==b.strides&&a.offsets==b.offsets&&a.attributes.size()==b.attributes.size()&&
         std::equal(a.attributes.begin(),a.attributes.end(),b.attributes.begin(),[](const auto& x,const auto& y){return x.attribute==y.attribute&&x.format==y.format&&x.dimension==y.dimension&&x.stream==y.stream;})&&a.streams==b.streams;
 }
+#include "first_person_cap_upload.inc"
+
 bool FpBuildPatch(const HeadPartProbe& part,FpPatch& patch,bool fill,float range) {
     auto& e=g_fp_engine;
     patch.renderer=FpRoot(part.renderer);patch.source=FpRoot(FpValue<void*>(nullptr,e.get_mesh,part.renderer));
@@ -393,41 +426,92 @@ bool FpBuildPatch(const HeadPartProbe& part,FpPatch& patch,bool fill,float range
     patch.offscreen=FpValue<bool>(false,e.get_offscreen,part.renderer);
     FpMesh::Frame frame;std::vector<uint8_t> kinds;
     if(!FpPalette(part.renderer,patch.source.object,patch.bones,kinds,frame))return false;
-    if(!part.matched&&!std::any_of(kinds.begin(),kinds.end(),[](auto k){return k!=0;}))return false;
+    // A matcher hit or an upstream-style dedicated-head role collapses the whole
+    // part. A body mesh is kept: it only loses the triangles whose three
+    // vertices are dominated by head/neck skin, which is what closes the neck
+    // opening from the body side.
+    const bool whole=part.matched||part.dedicated_head;
+    if(!whole&&!std::any_of(kinds.begin(),kinds.end(),[](auto k){return k!=0;}))return false;
     FpSnapshot original;
     if(!FpReadMesh(patch.source.object,original)) {Log("First person mesh: GPU capture failed for "+part.object_name);return false;}
     std::vector<FpMesh::Vertex> vertices;std::vector<FpMesh::Part> parts;
     if(!FpDecode(original,vertices,parts)){Log("First person mesh: unsupported vertex encoding for "+part.object_name);return false;}
-    auto result=FpMesh::Build(vertices,parts,kinds,frame,part.matched,fill&&!part.matched,range);
+    auto result=FpMesh::Build(vertices,parts,kinds,frame,whole,fill&&!whole,range,part.body_skin);
     if(!result.error.empty()){Log("First person mesh: "+result.error+" in "+part.object_name);return false;}
     if(!result.hidden_triangles&&!result.cap_triangles)return false;
+    auto caps=FpMesh::BuildCapVertices(vertices,parts,result);
+    if(caps.status!=FpMesh::CapVertexStatus::Ok) {
+        Log("First person mesh: cap allocation rejected ("+std::to_string(static_cast<int>(caps.status))+") for "+part.object_name);return false;
+    }
+    const bool extend=!caps.source_map.empty();
+    FpSnapshot expanded;
+    FpBounds cap_bounds{},source_bounds{};
+    if(extend) {
+        std::string error;
+        if(!g_fp_cap_upload.Init()) {Log("First person mesh: cap upload API/ABI unavailable for "+part.object_name);return false;}
+        // Expanding vertex streams without extending each BlendShape frame
+        // would leave shape data with the old vertex count. Keep this strictly
+        // cap-only so ordinary whole-head removal can still use such meshes.
+        if(FpValue<int>(-1,g_fp_cap_upload.blend_shape_count,patch.source.object)!=0) {
+            Log("First person mesh: cap expansion requires a mesh without BlendShapes for "+part.object_name);return false;
+        }
+        if(!FpCall(g_fp_cap_upload.get_bounds,patch.source.object,&source_bounds)||!FpCapBoundsEqual(source_bounds,source_bounds))return false;
+        if(!FpPrepareCapStreams(original,caps,source_bounds,expanded,cap_bounds,error)) {Log("First person mesh: "+error+" for "+part.object_name);return false;}
+    }
+    const FpSnapshot& expected=extend?expanded:original;
     patch.copy=FpRoot(FpValue<void*>(nullptr,e.clone,patch.source.object));
-    if(!patch.copy||patch.copy.object==patch.source.object){patch.copy.Reset();return false;}
+    if(!patch.copy||patch.copy.object==patch.source.object){
+        if(patch.copy.object&&patch.copy.object!=patch.source.object)FpDestroy(patch.copy.object);
+        patch.copy.Reset();return false;
+    }
+    if(extend&&FpValue<int>(-1,g_fp_cap_upload.blend_shape_count,patch.copy.object)!=0) {
+        FpDestroy(patch.copy.object);patch.copy.Reset();return false;
+    }
     std::vector<uint32_t> indices;std::vector<FpSubmesh> subs=original.submeshes;
     for(size_t s=0;s<result.parts.size();++s) {
-        auto& sub=subs[s];const auto& part_indices=result.parts[s].indices;
+        auto& sub=subs[s];const auto& part_indices=caps.parts[s].indices;
         sub.index_start=int(indices.size());sub.index_count=int(part_indices.size());sub.base_vertex=0;
+        sub.first_vertex=0;sub.vertex_count=0;
+        if(extend)sub.bounds=cap_bounds;
         if(!part_indices.empty()) {auto minmax=std::minmax_element(part_indices.begin(),part_indices.end());sub.first_vertex=int(*minmax.first);sub.vertex_count=int(*minmax.second-*minmax.first+1);}
         indices.insert(indices.end(),part_indices.begin(),part_indices.end());
     }
     int index_format=original.index_format;
-    if(original.count>65535)index_format=1;
+    if(expected.count>65535)index_format=1;
     size_t element=index_format?4:2;
     std::vector<uint8_t> bytes(indices.size()*element);
     for(size_t i=0;i<indices.size();++i) {
         if(index_format)std::memcpy(bytes.data()+i*4,&indices[i],4);
         else {uint16_t v=uint16_t(indices[i]);std::memcpy(bytes.data()+i*2,&v,2);}
     }
-    // Force a fresh index allocation on the private clone. Vertex streams stay
-    // unchanged, including HG's packed normals, skinning and material channels.
-    bool ok=FpCall(e.set_index_params,patch.copy.object,int(indices.size()+3),index_format)&&
+    // Only the detached clone is mutated. Opaque original streams remain byte
+    // identical; cap vertices copy all channels before changing normal/tangent.
+    bool ok=(!extend||FpUploadCapStreams(patch.copy.object,expected))&&FpCall(e.set_index_params,patch.copy.object,int(indices.size()<=6000000-3?indices.size()+3:indices.size()-3),index_format)&&
         FpCall(e.set_index_params,patch.copy.object,int(indices.size()),index_format)&&
         FpCall(e.set_index_data,patch.copy.object,bytes.data(),0,0,int(indices.size()),int(element),0);
+    ok=ok&&FpRestoreSubmeshCount(patch.copy.object,int(subs.size()));
     for(size_t s=0;ok&&s<subs.size();++s)ok=FpCall(e.set_submesh,patch.copy.object,int(s),&subs[s],10);
+    if(extend)ok=ok&&FpCall(g_fp_cap_upload.set_bounds,patch.copy.object,&cap_bounds);
     ok=ok&&FpCall(e.upload,patch.copy.object,false);
     FpSnapshot verified,source_after;
-    ok=ok&&FpReadMesh(patch.copy.object,verified)&&FpSameVertices(original,verified)&&verified.indices==bytes&&
-        FpReadMesh(patch.source.object,source_after)&&FpSameVertices(original,source_after)&&source_after.indices==original.indices;
+    ok=ok&&FpReadMesh(patch.copy.object,verified)&&FpSameVertices(expected,verified)&&verified.index_format==index_format&&verified.indices==bytes&&
+        FpReadMesh(patch.source.object,source_after)&&FpSameVertices(original,source_after)&&source_after.index_format==original.index_format&&source_after.indices==original.indices;
+    if(extend)ok=ok&&FpValue<int>(-1,g_fp_cap_upload.blend_shape_count,patch.copy.object)==0&&
+        FpValue<int>(-1,g_fp_cap_upload.blend_shape_count,patch.source.object)==0;
+    if(extend&&ok) {
+        FpBounds read_bounds{},source_bounds_after{};
+        ok=FpCall(g_fp_cap_upload.get_bounds,patch.copy.object,&read_bounds)&&FpCapBoundsEqual(read_bounds,cap_bounds)&&
+            FpCall(g_fp_cap_upload.get_bounds,patch.source.object,&source_bounds_after)&&FpCapBoundsEqual(source_bounds,source_bounds_after);
+    }
+    if(ok) {
+        ok=verified.submeshes.size()==subs.size();
+        for(size_t index=0;ok&&index<subs.size();++index) {
+            const auto& actual=verified.submeshes[index];const auto& wanted=subs[index];
+            ok=actual.index_start==wanted.index_start&&actual.index_count==wanted.index_count&&actual.base_vertex==0&&
+                actual.first_vertex==wanted.first_vertex&&actual.vertex_count==wanted.vertex_count&&
+                (!extend||FpCapBoundsEqual(actual.bounds,wanted.bounds));
+        }
+    }
     std::vector<void*> bones_now;std::vector<uint8_t> kinds_now;FpMesh::Frame unused;
     ok=ok&&FpPalette(part.renderer,patch.copy.object,bones_now,kinds_now,unused)&&bones_now==patch.bones&&
         FpValue<void*>(nullptr,e.get_mesh,part.renderer)==patch.source.object&&
@@ -443,7 +527,7 @@ bool FpBuildPatch(const HeadPartProbe& part,FpPatch& patch,bool fill,float range
     ok=FpCall(e.set_shadow,part.renderer,shadow)&&FpValue<void*>(nullptr,e.get_shadow,part.renderer)==shadow&&
         FpCall(e.set_offscreen,part.renderer,true)&&FpCall(e.set_mesh,part.renderer,patch.copy.object)&&
         FpValue<void*>(nullptr,e.get_mesh,part.renderer)==patch.copy.object;
-    if(!ok){Log("First person mesh: renderer binding failed for "+part.object_name);FpRestore(patch);return false;}
+    if(!ok){Log("First person mesh: renderer binding failed for "+part.object_name);FpTryRestore(patch);return false;}
     Log("First person mesh: "+part.object_name+", hidden="+std::to_string(result.hidden_triangles)+
         ", cap="+std::to_string(result.cap_triangles)+", rings="+std::to_string(result.rings)+", GPU verified, original shadow retained.");
     return true;
@@ -455,7 +539,7 @@ void EnsureNeckCap() {
     // so Init failure must not leave this function.
     if(!g_first_person_hide_head.load()||!g_first_person.head)return;
     auto& state=g_fp_mesh_session;auto& e=g_fp_engine;
-    const bool readback=g_fp_engine.Init()&&FpValue<bool>(false,e.supports_readback);
+    const bool readback=g_fp_engine.Init();
     const bool fill=g_first_person_fill_neck_hole.load();const float range=g_first_person_neck_plug_scale.load();
     if(state.scanned&&(fill!=state.fill||range!=state.range))ReleaseNeckCap();
     if(state.scanned&&g_first_person_pump_frames-state.last_scan<30)return;
@@ -466,7 +550,7 @@ void EnsureNeckCap() {
             FpRoot bones(Invoke(Contract("unity.skinned_mesh_renderer.bones.get"),it->renderer.object,nullptr));
             std::vector<void*> current;stale=!bones||!FpArray(bones.object,current)||current!=it->bones;
         }
-        if(stale&&FpRestore(*it)) {
+        if(stale&&FpTryRestore(*it)) {
             state.attempts.Forget(it->renderer.object);
             it=state.patches.erase(it);
         } else ++it;
@@ -495,7 +579,7 @@ void EnsureNeckCap() {
             else if(patch.copy&&patch.assigned)state.patches.push_back(std::move(patch));
         } catch(const std::exception& error) {
             Log(std::string("First person mesh: capture/build aborted: ")+error.what());
-            if(!FpRestore(patch))state.patches.push_back(std::move(patch));
+            if(!FpTryRestore(patch))state.patches.push_back(std::move(patch));
         }
         // Process one renderer per frame to avoid capturing every LOD at once.
         state.last_scan=g_first_person_pump_frames-30;
@@ -506,7 +590,7 @@ void EnsureNeckCap() {
     // Skinned parts still owned by the patch pipeline (source readable,
     // retries left) are left alone; everything else matched is covered.
     for(const auto& part:parts) {
-        if(!part.renderer||!part.matched)continue;
+        if(!part.renderer||!(part.matched||part.dedicated_head))continue;
         if(std::any_of(state.patches.begin(),state.patches.end(),
             [&](const auto& p){return p.renderer.object==part.renderer;}))continue;
         if(readback&&part.skinned&&part.vertex_count>0) {
@@ -521,7 +605,6 @@ void ReleaseHeadPartHide() {
     g_first_person.head_hide_applied=false;
     ReleaseNeckCap();
 }
-void ReapplyHeadPartHide() {EnsureNeckCap();}
 
 void ExitGameFirstPersonMode() {
     void* controller=FindSnapshotCameraController();

@@ -151,9 +151,9 @@ The bottom of the panel shows the current process's runtime log (a 150-line ring
 
 Free-camera extensions default to no mouse-look hook on mobile (there is no cursor to hook), and the camera configuration uses `schema_version=3` with explicit key names, pinning the panel buttons to the codes the desktop module polls.
 
-First-person part hiding has two paths: parts the GPU mesh patch can handle are unchanged; parts it cannot reach (non-skinned renderers, or patch attempts exhausted) switch to a shadow-casting-only renderer mode - nothing drawn in cameras, shadows kept. That property is read and written through the metadata contract system because Android's engine icall table is only partially implemented; a failed mesh-patch init no longer blocks this fallback either. The game can reset renderer state on part or LOD rebuilds, so the module re-asserts it.
+First-person part hiding has two paths: parts with a complete readback contract can use the GPU mesh patch; parts it cannot reach (non-skinned renderers, unavailable contracts, or exhausted patch attempts) switch to a shadow-casting-only renderer mode, hiding the part from cameras while keeping its shadow. That property is read and written through metadata contracts because Android's engine icall table is only partially implemented; failed mesh-patch initialization does not block this fallback. The current Windows client lacks managed methods required by the synchronous readback path, so S4/S5 mesh behavior remains pending. The game can reset renderer state on part or LOD rebuilds, so the module re-asserts it.
 
-The Android version is currently 3.3.20 (versionCode 30320) while desktop remains 3.3.0; the two version numbers are not yet unified.
+The Android version is currently 3.3.21 (versionCode 30321) while desktop remains 3.3.0; the two version numbers are not yet unified.
 
 For platform internals, contract evidence and the desktop-hotkey-to-panel-button mapping see [`android/README.md`](android/README.md).
 
@@ -189,3 +189,7 @@ Android debug APKs are built by `.github/workflows/android-build.yml` on GitHub 
 Better Endfield is an unofficial, experimental open-source project. It is not affiliated with, endorsed by, or associated with Hypergryph, Mountain Contour, or GRYPHLINE. Please use responsibly and adhere to all relevant terms of service.
 
 This repository is an independently maintained derivative of [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield); upstream attribution, the derivation statement and the current modification status are in [Upstream & Project Origin](#upstream--project-origin) above.
+
+MinHook is bundled under its own license. The first-person camera work additionally ports the MIT-licensed [RenoDX Endfield Enhancer](https://github.com/ItsTheSewerRat/renodx) (branch `endfield-enhancer`, by ItsTheSewerRat); the ported scope and attribution are recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Android 3.3.21 exposes eye position, near clip, extended vertical look, movement facing, animation, dialogue and combat camera yield, transition duration, and an explicit external-model head-scale option. New behaviors default to off. Android settings are loaded at game start, so fully stop and restart the game after saving. The head-scale option removes the head shadow. The user reports that the operable first-person features passed on an Android device except the external-model head-scale option, which was not tested. S4 GPU readback and the dependent S5 mesh cap remain blocked by their API contract; the user report does not establish those paths as validated. See the [execution record](docs/CAMERA_FIRST_PERSON_EXECUTION.md).

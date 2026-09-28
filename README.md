@@ -78,6 +78,10 @@ docs/                          运行时接口、研究结论与集成交接文�
 
 ## 模块 ABI
 
+第一人称当前开发入口：[S0–S8 路线图](docs/CAMERA_FIRST_PERSON_ROADMAP_20260928.md)、[执行合同与验收记录](docs/CAMERA_FIRST_PERSON_EXECUTION.md)、[上游源码复核](docs/CAMERA_UPSTREAM_SOURCE_AUDIT_20260928.md)。开发阶段状态与已发布功能分开记录。
+
+Android 3.3.21 设置页可编辑眼位前移、高度、近裁剪、放宽俯仰范围，以及朝向跟随、侧看阈值、动画模式与强度、对话/战斗时让出相机、过渡时长和外部改模缩头兼容选项。新增行为默认关闭；Android 保存后须强停并重启游戏才会载入新配置。外部缩头模式会失去头部阴影，需显式选择。用户已反馈除外部模型缩头兼容外的可操作项目在 Android 实机通过；该选项未测试。S4 同步 GPU 读取与 S5 网格封口仍受接口门禁阻断，不作为通过项；逐项日志与恢复证据见执行记录。
+
 模块 ABI 使用纯 C 接口。模块通过程序集、命名空间、类、方法、参数和字段描述符动态解析 IL2CPP；Hook 入口由当前进程的 IL2CPP ABI 与 PE 可执行区间共同验证，不保存客户端地址或文件哈希条件。
 
 ## 加载方式
@@ -184,9 +188,9 @@ Android 端由同一份模块源码编译（`android/`），经 LSPosed 挂接�
 
 自由相机扩展在移动端默认关闭鼠标视角钩子（手机没有可挂的光标），相机配置使用 `schema_version=3` 并显式写入键名，使面板按钮与桌面模块轮询的键码保持钉定。
 
-第一人称的部件隐藏分两条路径：GPU 网格补丁能处理的部位照旧；补丁覆盖不到的部位（非蒙皮渲染器，或补丁重试已耗尽）改用仅投射阴影的渲染器模式——相机不再绘制该部位，影子保留。该属性经元数据契约读写，因为 Android 的引擎 icall 表只有部分实现、直接调用并不存在；网格补丁引擎初始化失败也不会阻断这条兜底路径。游戏在部件或 LOD 重建时可能重置渲染器状态，模块会重申一次。
+第一人称的部件隐藏分两条路径：具备完整读取合同的部位可尝试 GPU 网格补丁；补丁无法处理的部位（非蒙皮渲染器、合同不可用或补丁重试已耗尽）改用仅投射阴影的渲染器模式——相机不再绘制该部位，影子保留。该属性经元数据契约读写，因为 Android 的引擎 icall 表只有部分实现、直接调用并不存在；网格补丁引擎初始化失败也不会阻断这条兜底路径。当前 Windows 客户端缺同步读取所需的 managed 方法，S4/S5 网格路径仍待补合同与实机验收。游戏在部件或 LOD 重建时可能重置渲染器状态，模块会重申一次。
 
-当前 Android 端版本为 3.3.20（versionCode 30320），桌面端仍为 3.3.0，两端版本号暂不统一。
+当前 Android 端版本为 3.3.21（versionCode 30321），桌面端仍为 3.3.0，两端版本号暂不统一。
 
 平台实现细节、契约证据与「桌面热键 ↔ 面板按钮」对照表见 [`android/README.md`](android/README.md)。
 
@@ -292,7 +296,7 @@ load_host=true
 
 ## 许可与风险
 
-本项目以 [AGPL-3.0-only](LICENSE) 发布。第三方 MinHook 保留其原许可证，副本位于 `native/shared/third_party/minhook`。
+本项目以 [AGPL-3.0-only](LICENSE) 发布。第三方 MinHook 保留其原许可证，副本位于 `native/shared/third_party/minhook`。第一人称相机部分另移植了 MIT 许可的 [RenoDX Endfield Enhancer](https://github.com/ItsTheSewerRat/renodx)（分支 `endfield-enhancer`，作者 ItsTheSewerRat），移植范围与署名见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 本项目是 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield) 的独立维护派生版本，原项目署名、派生关系与当前修改状态见上文「上游与项目来源」。
 

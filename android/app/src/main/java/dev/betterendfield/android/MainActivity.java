@@ -12,6 +12,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
+import android.widget.AdapterView;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -86,6 +87,18 @@ public final class MainActivity extends Activity {
     private ValueSlider cameraSpeed;
     private ValueSlider cameraFov;
     private ValueSlider firstPersonFov;
+    private ValueSlider firstPersonEyeForward;
+    private ValueSlider firstPersonEyeHeight;
+    private ValueSlider firstPersonNearClip;
+    private SettingRow firstPersonExtendLookRangeRow;
+    private SettingRow firstPersonMovementRow;
+    private ValueSlider firstPersonSideLookLimit;
+    private Spinner firstPersonAnimationMode;
+    private ValueSlider firstPersonAnimationStrength;
+    private SettingRow firstPersonYieldDialogueRow;
+    private SettingRow firstPersonThirdPersonInCombatRow;
+    private ValueSlider firstPersonTransitionSeconds;
+    private SettingRow firstPersonExternalHeadScaleRow;
     private SettingRow dashRow;
     private SettingRow dashAglinaRow;
     private SettingRow dashLiinoRow;
@@ -777,6 +790,82 @@ public final class MainActivity extends Activity {
                 ModuleSettings.getFirstPersonFieldOfView(this), 75.0));
         firstPersonFov.onChanged(this::saveCameraSettings);
         cameraCard.add(firstPersonFov);
+        firstPersonEyeForward = new ValueSlider(this, getString(R.string.camera_fp_eye_forward), "",
+                ModuleSettings.FP_EYE_FORWARD_MINIMUM, ModuleSettings.FP_EYE_FORWARD_MAXIMUM, 500, 4);
+        firstPersonEyeForward.setValue((float) ModuleSettings.parse(
+                ModuleSettings.getFirstPersonEyeForward(this), 0.03));
+        firstPersonEyeForward.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonEyeForward);
+        firstPersonEyeHeight = new ValueSlider(this, getString(R.string.camera_fp_eye_height), "",
+                ModuleSettings.FP_EYE_HEIGHT_MINIMUM, ModuleSettings.FP_EYE_HEIGHT_MAXIMUM, 1000, 4);
+        firstPersonEyeHeight.setValue((float) ModuleSettings.parse(
+                ModuleSettings.getFirstPersonEyeHeight(this), 0.05));
+        firstPersonEyeHeight.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonEyeHeight);
+        firstPersonNearClip = new ValueSlider(this, getString(R.string.camera_fp_near_clip), "",
+                ModuleSettings.FP_NEAR_CLIP_MINIMUM, ModuleSettings.FP_NEAR_CLIP_MAXIMUM, 999, 4);
+        firstPersonNearClip.setValue((float) ModuleSettings.parse(
+                ModuleSettings.getFirstPersonNearClip(this), 0.03));
+        firstPersonNearClip.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonNearClip);
+        firstPersonExtendLookRangeRow = row(R.string.camera_fp_extend_look_range,
+                R.string.camera_fp_extend_look_range_hint, null);
+        firstPersonExtendLookRangeRow.initialize(ModuleSettings.isFirstPersonExtendLookRange(this));
+        firstPersonExtendLookRangeRow.onChanged((button, checked) -> saveCameraSettings());
+        cameraCard.add(firstPersonExtendLookRangeRow);
+        ModuleSettings.FirstPersonAdvanced advanced = ModuleSettings.getFirstPersonAdvanced(this);
+        cameraCard.addGroupLabel(getString(R.string.camera_fp_advanced));
+        firstPersonMovementRow = row(R.string.camera_fp_movement, R.string.camera_fp_movement_hint, null);
+        firstPersonMovementRow.initialize(advanced.movement());
+        firstPersonMovementRow.onChanged((button, checked) -> saveCameraSettings());
+        cameraCard.add(firstPersonMovementRow);
+        firstPersonSideLookLimit = new ValueSlider(this, getString(R.string.camera_fp_side_look_limit),
+                getString(R.string.degree_suffix), 0, 90, 900, 4);
+        firstPersonSideLookLimit.setValue((float) advanced.sideLookLimit());
+        firstPersonSideLookLimit.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonSideLookLimit);
+        cameraCard.addGroupLabel(getString(R.string.camera_fp_animation_mode));
+        firstPersonAnimationMode = new Spinner(this);
+        ArrayAdapter<String> animationModes = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item,
+                new String[]{getString(R.string.camera_fp_animation_off), getString(R.string.camera_fp_animation_body),
+                        getString(R.string.camera_fp_animation_head), getString(R.string.camera_fp_animation_realistic)});
+        animationModes.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        firstPersonAnimationMode.setAdapter(animationModes);
+        firstPersonAnimationMode.setBackgroundResource(R.drawable.bg_input);
+        firstPersonAnimationMode.setPadding(dp(10), dp(8), dp(4), dp(8));
+        firstPersonAnimationMode.setSelection(advanced.animationMode(), false);
+        firstPersonAnimationMode.setContentDescription(getString(R.string.camera_fp_animation_mode));
+        firstPersonAnimationMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                saveCameraSettings();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        cameraCard.add(firstPersonAnimationMode);
+        firstPersonAnimationStrength = new ValueSlider(this, getString(R.string.camera_fp_animation_strength),
+                "", 0, 1, 1000, 4);
+        firstPersonAnimationStrength.setValue((float) advanced.animationStrength());
+        firstPersonAnimationStrength.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonAnimationStrength);
+        firstPersonYieldDialogueRow = row(R.string.camera_fp_yield_dialogue, R.string.camera_fp_yield_dialogue_hint, null);
+        firstPersonYieldDialogueRow.initialize(advanced.yieldDialogue());
+        firstPersonYieldDialogueRow.onChanged((button, checked) -> saveCameraSettings());
+        cameraCard.add(firstPersonYieldDialogueRow);
+        firstPersonThirdPersonInCombatRow = row(R.string.camera_fp_third_person_in_combat,
+                R.string.camera_fp_third_person_in_combat_hint, null);
+        firstPersonThirdPersonInCombatRow.initialize(advanced.thirdPersonInCombat());
+        firstPersonThirdPersonInCombatRow.onChanged((button, checked) -> saveCameraSettings());
+        cameraCard.add(firstPersonThirdPersonInCombatRow);
+        firstPersonTransitionSeconds = new ValueSlider(this, getString(R.string.camera_fp_transition_seconds),
+                getString(R.string.camera_fp_seconds), 0, 1, 1000, 4);
+        firstPersonTransitionSeconds.setValue((float) advanced.transitionSeconds());
+        firstPersonTransitionSeconds.onChanged(this::saveCameraSettings);
+        cameraCard.add(firstPersonTransitionSeconds);
+        firstPersonExternalHeadScaleRow = row(R.string.camera_fp_external_head_scale,
+                R.string.camera_fp_external_head_scale_hint, null);
+        firstPersonExternalHeadScaleRow.initialize(advanced.externalHeadScale());
+        firstPersonExternalHeadScaleRow.onChanged((button, checked) -> saveCameraSettings());
+        cameraCard.add(firstPersonExternalHeadScaleRow);
         return cameraCard;
     }
 
@@ -863,7 +952,16 @@ public final class MainActivity extends Activity {
                 fillNeckRow.isChecked(),
                 cameraSpeed.getValue(),
                 cameraFov.getValue(),
-                firstPersonFov.getValue());
+                firstPersonFov.getValue(),
+                firstPersonEyeForward.getValue(),
+                firstPersonEyeHeight.getValue(),
+                firstPersonNearClip.getValue(),
+                firstPersonExtendLookRangeRow.isChecked(),
+                new ModuleSettings.FirstPersonAdvanced(firstPersonMovementRow.isChecked(),
+                        firstPersonSideLookLimit.getValue(), firstPersonAnimationMode.getSelectedItemPosition(),
+                        firstPersonAnimationStrength.getValue(), firstPersonYieldDialogueRow.isChecked(),
+                        firstPersonThirdPersonInCombatRow.isChecked(),
+                        firstPersonTransitionSeconds.getValue(), firstPersonExternalHeadScaleRow.isChecked()));
         afterEnhancementChange();
     }
 
@@ -898,6 +996,19 @@ public final class MainActivity extends Activity {
         hideHeadRow.setAvailable(firstPerson);
         fillNeckRow.setAvailable(firstPerson && hideHeadRow.isChecked());
         firstPersonFov.setAvailable(firstPerson);
+        firstPersonEyeForward.setAvailable(firstPerson);
+        firstPersonEyeHeight.setAvailable(firstPerson);
+        firstPersonNearClip.setAvailable(firstPerson);
+        firstPersonExtendLookRangeRow.setAvailable(firstPerson);
+        firstPersonMovementRow.setAvailable(firstPerson);
+        firstPersonSideLookLimit.setAvailable(firstPerson && firstPersonMovementRow.isChecked());
+        firstPersonAnimationMode.setEnabled(firstPerson);
+        firstPersonAnimationMode.setAlpha(firstPerson ? 1f : 0.42f);
+        firstPersonAnimationStrength.setAvailable(firstPerson && firstPersonAnimationMode.getSelectedItemPosition() != 0);
+        firstPersonYieldDialogueRow.setAvailable(firstPerson);
+        firstPersonThirdPersonInCombatRow.setAvailable(firstPerson);
+        firstPersonTransitionSeconds.setAvailable(firstPerson);
+        firstPersonExternalHeadScaleRow.setAvailable(firstPerson && hideHeadRow.isChecked());
 
         boolean dash = dashRow.isChecked();
         dashAglinaRow.setAvailable(dash);

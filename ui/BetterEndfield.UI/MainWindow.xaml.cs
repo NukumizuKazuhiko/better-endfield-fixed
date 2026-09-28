@@ -489,6 +489,33 @@ public sealed partial class MainWindow : Window
         await SaveCameraEnhancementAsync();
     }
 
+    private async void FirstPersonAnimationModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        await SaveCameraEnhancementAsync();
+
+    private FirstPersonExtras ReadFirstPersonExtras() => new()
+    {
+        Movement = FirstPersonMovementToggle.IsOn,
+        SideLookLimit = FirstPersonSideLookLimitNumberBox.Value,
+        AnimationMode = FirstPersonAnimationModeComboBox.SelectedIndex,
+        AnimationStrength = FirstPersonAnimationStrengthNumberBox.Value / 100.0,
+        YieldDialogue = FirstPersonYieldDialogueToggle.IsOn,
+        ThirdPersonInCombat = FirstPersonThirdPersonInCombatToggle.IsOn,
+        TransitionSeconds = FirstPersonTransitionSecondsNumberBox.Value,
+        ExternalHeadScale = FirstPersonExternalHeadScaleToggle.IsOn
+    };
+
+    private void ApplyFirstPersonExtras(FirstPersonExtras extras)
+    {
+        FirstPersonMovementToggle.IsOn = extras.Movement;
+        FirstPersonSideLookLimitNumberBox.Value = extras.SideLookLimit;
+        FirstPersonAnimationModeComboBox.SelectedIndex = extras.AnimationMode;
+        FirstPersonAnimationStrengthNumberBox.Value = extras.AnimationStrength * 100.0;
+        FirstPersonYieldDialogueToggle.IsOn = extras.YieldDialogue;
+        FirstPersonThirdPersonInCombatToggle.IsOn = extras.ThirdPersonInCombat;
+        FirstPersonTransitionSecondsNumberBox.Value = extras.TransitionSeconds;
+        FirstPersonExternalHeadScaleToggle.IsOn = extras.ExternalHeadScale;
+    }
+
     private async void ActionsToggle_Toggled(object sender, RoutedEventArgs e) => await SaveActionsAsync();
 
     private async Task SaveActionsAsync()
@@ -591,7 +618,12 @@ public sealed partial class MainWindow : Window
                 Value(FirstPersonFieldOfViewNumberBox, 75.0),
                 FirstPersonNeckPlugToggle.IsOn,
                 Value(FirstPersonNeckPlugScaleNumberBox, 100.0) / 100.0,
-                ReadFreeCameraExtras());
+                ReadFreeCameraExtras(),
+                firstPersonEyeForward: Value(FirstPersonEyeForwardNumberBox, 0.03),
+                firstPersonEyeHeight: Value(FirstPersonEyeHeightNumberBox, 0.05),
+                firstPersonNearClip: Value(FirstPersonNearClipNumberBox, 0.03),
+                firstPersonExtendLookRange: FirstPersonExtendLookRangeToggle.IsOn,
+                firstPersonExtras: ReadFirstPersonExtras());
             ShowStatus(
                 "相机增强设置已更新",
                 $"配置已保存；按 {toggleHotkey} 自由视角，按 {pauseHotkey} 冻结世界，按 {firstPersonHotkey} 第一人称。",
@@ -2495,6 +2527,11 @@ public sealed partial class MainWindow : Window
             FirstPersonFieldOfView = FirstPersonFieldOfViewNumberBox.Value,
             FirstPersonFillNeckHole = FirstPersonNeckPlugToggle.IsOn,
             FirstPersonNeckPlugScale = FirstPersonNeckPlugScaleNumberBox.Value / 100.0,
+            FirstPersonEyeForward = double.IsFinite(FirstPersonEyeForwardNumberBox.Value) ? FirstPersonEyeForwardNumberBox.Value : 0.03,
+            FirstPersonEyeHeight = double.IsFinite(FirstPersonEyeHeightNumberBox.Value) ? FirstPersonEyeHeightNumberBox.Value : 0.05,
+            FirstPersonNearClip = double.IsFinite(FirstPersonNearClipNumberBox.Value) ? FirstPersonNearClipNumberBox.Value : 0.03,
+            FirstPersonExtendLookRange = FirstPersonExtendLookRangeToggle.IsOn,
+            FirstPersonExtras = ReadFirstPersonExtras(),
             FreeCameraExtras = ReadFreeCameraExtras()
         };
         return true;
@@ -2574,6 +2611,11 @@ public sealed partial class MainWindow : Window
         FirstPersonFieldOfViewNumberBox.Value = configuration.FirstPersonFieldOfView;
         FirstPersonNeckPlugToggle.IsOn = configuration.FirstPersonFillNeckHole;
         FirstPersonNeckPlugScaleNumberBox.Value = configuration.FirstPersonNeckPlugScale * 100.0;
+        FirstPersonEyeForwardNumberBox.Value = configuration.FirstPersonEyeForward;
+        FirstPersonEyeHeightNumberBox.Value = configuration.FirstPersonEyeHeight;
+        FirstPersonNearClipNumberBox.Value = configuration.FirstPersonNearClip;
+        FirstPersonExtendLookRangeToggle.IsOn = configuration.FirstPersonExtendLookRange;
+        ApplyFirstPersonExtras(configuration.FirstPersonExtras);
         ApplyFreeCameraExtras(configuration.FreeCameraExtras);
 
         _initializing = wasInitializing;
@@ -3671,6 +3713,34 @@ public sealed partial class MainWindow : Window
         FirstPersonNeckPlugToggle.OffContent = isZh ? "保留空心" : "Leave the opening open";
         FirstPersonNeckPlugToggle.OnContent = isZh ? "用补面遮挡颈部" : "Cover the neck opening";
         FirstPersonNeckPlugScaleNumberBox.Header = isZh ? "颈部开口识别范围（%）" : "Neck Opening Detection Range (%)";
+        FirstPersonEyeForwardNumberBox.Header = isZh ? "眼位前移（米）" : "Eye Forward Offset (m)";
+        FirstPersonEyeHeightNumberBox.Header = isZh ? "眼位高度偏移（米）" : "Eye Height Offset (m)";
+        FirstPersonNearClipNumberBox.Header = isZh ? "近裁剪距离（米）" : "Near Clip Distance (m)";
+        FirstPersonExtendLookRangeToggle.Header = isZh ? "扩展上下观察范围" : "Extend Vertical Look Range";
+        FirstPersonExtendLookRangeToggle.OffContent = isZh ? "标准范围" : "Standard range";
+        FirstPersonExtendLookRangeToggle.OnContent = isZh ? "扩展范围" : "Extended range";
+        FirstPersonMovementToggle.Header = isZh ? "身体跟随观察方向" : "Body Follows View Direction";
+        FirstPersonMovementToggle.OffContent = isZh ? "关闭" : "Disabled";
+        FirstPersonMovementToggle.OnContent = isZh ? "启用朝向跟随" : "Follow view direction";
+        FirstPersonSideLookLimitNumberBox.Header = isZh ? "站定侧看范围（度）" : "Standing Side-Look Limit (degrees)";
+        FirstPersonAnimationModeComboBox.Header = isZh ? "动画视角跟随" : "Animation Camera Motion";
+        string[] animationModes = isZh ? ["关闭", "身体", "头部", "真实（含翻滚）"] : ["Off", "Body", "Head", "Realistic (with roll)"];
+        for (int index = 0; index < animationModes.Length; index++)
+            if (FirstPersonAnimationModeComboBox.Items[index] is ComboBoxItem item) item.Content = animationModes[index];
+        FirstPersonAnimationStrengthNumberBox.Header = isZh ? "动画跟随强度（%）" : "Animation Motion Strength (%)";
+        FirstPersonYieldDialogueToggle.Header = isZh ? "对话时交回游戏相机" : "Use Game Camera During Dialogue";
+        FirstPersonYieldDialogueToggle.OffContent = isZh ? "关闭" : "Disabled";
+        FirstPersonYieldDialogueToggle.OnContent = isZh ? "对话期间暂停第一人称" : "Suspend first person during dialogue";
+        FirstPersonThirdPersonInCombatToggle.Header = isZh ? "战斗时交回游戏相机" : "Use Game Camera During Combat";
+        FirstPersonThirdPersonInCombatToggle.OffContent = isZh ? "关闭" : "Disabled";
+        FirstPersonThirdPersonInCombatToggle.OnContent = isZh ? "战斗期间暂停第一人称" : "Suspend first person during combat";
+        FirstPersonTransitionSecondsNumberBox.Header = isZh ? "视角过渡时长（秒，0 为关闭）" : "Perspective Transition (s, 0 = off)";
+        FirstPersonExternalHeadScaleToggle.Header = isZh ? "外部改模手动兼容（缩小头骨）" : "Manual External Mod Compatibility (Scale Head)";
+        FirstPersonExternalHeadScaleToggle.OffContent = isZh ? "关闭" : "Disabled";
+        FirstPersonExternalHeadScaleToggle.OnContent = isZh ? "启用手动兼容" : "Manual compatibility enabled";
+        FirstPersonExternalHeadScaleHint.Text = isZh
+            ? "仅在外部改模与网格隐藏冲突时手动开启。缩小头骨会影响头部阴影；默认关闭。"
+            : "Enable manually only when an external model mod conflicts with mesh hiding. Scaling the head affects head shadows; disabled by default.";
         FirstPersonHotkeyBox.Header = isZh ? "第一人称切换热键" : "First-Person Hotkey";
         FirstPersonHotkeyBox.PlaceholderText = isZh ? "默认 -（减号），支持 -、F7、NUMPAD-" : "Default - (minus), e.g. -, F7, NUMPAD-";
         FirstPersonFieldOfViewNumberBox.Header = isZh ? "第一人称视野（FOV）" : "First-Person Field of View";

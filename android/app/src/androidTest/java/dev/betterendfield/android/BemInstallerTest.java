@@ -6,6 +6,9 @@ import java.io.*;
 import java.nio.file.Files;
 
 public final class BemInstallerTest extends Instrumentation {
+    public void testCameraSettingsRoundTrip() {
+        CameraSettingsTest.run(this);
+    }
     private File directory;
     private String method;
     private String realInput;

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using BetterEndfield.UI.Models;
@@ -218,14 +218,20 @@ internal static class ConfigurationService
         double firstPersonFieldOfView = 75.0,
         bool firstPersonFillNeckHole = true,
         double firstPersonNeckPlugScale = 1.0,
-        FreeCameraExtras? extras = null)
+        FreeCameraExtras? extras = null,
+        string? configurationPath = null,
+        double? firstPersonEyeForward = null,
+        double? firstPersonEyeHeight = null,
+        double? firstPersonNearClip = null,
+        bool? firstPersonExtendLookRange = null,
+        FirstPersonExtras? firstPersonExtras = null)
     {
         static string Boolean(bool value) => value ? "true" : "false";
         static string Number(double value) =>
             value.ToString("0.########", CultureInfo.InvariantCulture);
 
-        string path = GetNativeConfigurationPath(string.Empty);
-        Directory.CreateDirectory(SettingsDirectory);
+        string path = configurationPath ?? GetNativeConfigurationPath(string.Empty);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         await NativeConfigurationWriteLock.WaitAsync();
         try
         {
@@ -233,7 +239,20 @@ internal static class ConfigurationService
                 ? await File.ReadAllTextAsync(path)
                 : string.Empty;
             // Callers that do not edit the extras keep the values already saved.
-            extras ??= FreeCameraExtras.FromValues(ReadIniSection(existing, "betterendfield.camera"));
+            var cameraValues = ReadIniSection(existing, "betterendfield.camera");
+            extras ??= FreeCameraExtras.FromValues(cameraValues);
+            firstPersonExtras ??= FirstPersonExtras.FromValues(cameraValues);
+            firstPersonEyeForward ??= ConfigurationService.Number(cameraValues, "first_person_eye_forward", 0.03);
+            firstPersonEyeHeight ??= ConfigurationService.Number(cameraValues, "first_person_eye_height", 0.05);
+            firstPersonNearClip ??= ConfigurationService.Number(cameraValues, "first_person_near_clip", 0.03);
+            firstPersonExtendLookRange ??= ConfigurationService.Boolean(cameraValues, "first_person_extend_look_range", false);
+            var firstPerson = new ModConfiguration
+            {
+                FirstPersonEyeForward = firstPersonEyeForward.Value,
+                FirstPersonEyeHeight = firstPersonEyeHeight.Value,
+                FirstPersonNearClip = firstPersonNearClip.Value,
+                FirstPersonExtendLookRange = firstPersonExtendLookRange.Value
+            };
             string section =
                 "[betterendfield.camera]" + Environment.NewLine +
                 "schema_version=4" + Environment.NewLine +
@@ -245,6 +264,11 @@ internal static class ConfigurationService
                 "first_person_hide_head=" + Boolean(firstPersonHideHead) + Environment.NewLine +
                 "first_person_fill_neck_hole=" + Boolean(firstPersonFillNeckHole) + Environment.NewLine +
                 "first_person_neck_plug_scale=" + Number(firstPersonNeckPlugScale) + Environment.NewLine +
+                "first_person_eye_forward=" + Number(firstPerson.FirstPersonEyeForward) + Environment.NewLine +
+                "first_person_eye_height=" + Number(firstPerson.FirstPersonEyeHeight) + Environment.NewLine +
+                "first_person_near_clip=" + Number(firstPerson.FirstPersonNearClip) + Environment.NewLine +
+                "first_person_extend_look_range=" + Boolean(firstPerson.FirstPersonExtendLookRange) + Environment.NewLine +
+                firstPersonExtras.ToIniLines() +
                 "first_person_fov=" + Number(firstPersonFieldOfView) + Environment.NewLine +
                 "first_person_hotkey=" + firstPersonHotkey + Environment.NewLine +
                 "toggle_hotkey=" + freeCameraHotkey + Environment.NewLine +
@@ -391,10 +415,10 @@ internal static class ConfigurationService
     }
 
     public static async Task<ModConfiguration> LoadModConfigurationAsync(
-        string mapperPath)
+        string mapperPath, string? configurationPath = null)
     {
         var configuration = ModConfiguration.CreateDefaults();
-        string path = GetNativeConfigurationPath(mapperPath);
+        string path = configurationPath ?? GetNativeConfigurationPath(mapperPath);
         if (!File.Exists(path))
         {
             return configuration;
@@ -617,6 +641,11 @@ internal static class ConfigurationService
             values, "first_person_hotkey", configuration.FirstPersonHotkey);
         configuration.FirstPersonFieldOfView = Number(
             values, "first_person_fov", configuration.FirstPersonFieldOfView);
+        configuration.FirstPersonEyeForward = Number(values, "first_person_eye_forward", configuration.FirstPersonEyeForward);
+        configuration.FirstPersonEyeHeight = Number(values, "first_person_eye_height", configuration.FirstPersonEyeHeight);
+        configuration.FirstPersonNearClip = Number(values, "first_person_near_clip", configuration.FirstPersonNearClip);
+        configuration.FirstPersonExtendLookRange = Boolean(values, "first_person_extend_look_range", configuration.FirstPersonExtendLookRange);
+        configuration.FirstPersonExtras = FirstPersonExtras.FromValues(values);
         configuration.FreeCameraExtras = FreeCameraExtras.FromValues(values);
         if (cameraSectionPresent && cameraSchemaVersion < 4)
         {
@@ -648,7 +677,12 @@ internal static class ConfigurationService
                 configuration.FirstPersonFieldOfView,
                 configuration.FirstPersonFillNeckHole,
                 configuration.FirstPersonNeckPlugScale,
-                configuration.FreeCameraExtras);
+                configuration.FreeCameraExtras, configurationPath,
+                configuration.FirstPersonEyeForward,
+                configuration.FirstPersonEyeHeight,
+                configuration.FirstPersonNearClip,
+                configuration.FirstPersonExtendLookRange,
+                configuration.FirstPersonExtras);
         }
         return configuration;
     }

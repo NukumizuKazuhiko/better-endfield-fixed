@@ -38,6 +38,13 @@ final class ModuleSettings {
     private static final String CAMERA_SPEED = "camera_movement_speed";
     private static final String CAMERA_FOV = "camera_field_of_view";
     private static final String CAMERA_FP_FOV = "camera_first_person_fov";
+    private static final String CAMERA_FP_EYE_FORWARD = "camera_first_person_eye_forward";
+    private static final String CAMERA_FP_EYE_HEIGHT = "camera_first_person_eye_height";
+    private static final String CAMERA_FP_NEAR_CLIP = "camera_first_person_near_clip";
+    private static final String CAMERA_FP_EXTEND_LOOK_RANGE = "camera_first_person_extend_look_range";
+    static final float FP_EYE_FORWARD_MINIMUM = 0f, FP_EYE_FORWARD_MAXIMUM = 0.5f;
+    static final float FP_EYE_HEIGHT_MINIMUM = -0.5f, FP_EYE_HEIGHT_MAXIMUM = 0.5f;
+    static final float FP_NEAR_CLIP_MINIMUM = 0.001f, FP_NEAR_CLIP_MAXIMUM = 1f;
     static final String CAMERA_CONFIGURATION = "camera_configuration";
 
     // betterendfield.actions — the desktop sustained special dash.
@@ -156,6 +163,69 @@ final class ModuleSettings {
         return preferences(context).getString(CAMERA_FP_FOV, "75");
     }
 
+    static String getFirstPersonEyeForward(Context context) {
+        return preferences(context).getString(CAMERA_FP_EYE_FORWARD, "0.03");
+    }
+
+    static String getFirstPersonEyeHeight(Context context) {
+        return preferences(context).getString(CAMERA_FP_EYE_HEIGHT, "0.05");
+    }
+
+    static String getFirstPersonNearClip(Context context) {
+        return preferences(context).getString(CAMERA_FP_NEAR_CLIP, "0.03");
+    }
+
+    static boolean isFirstPersonExtendLookRange(Context context) {
+        return preferences(context).getBoolean(CAMERA_FP_EXTEND_LOOK_RANGE, false);
+    }
+
+    /** Advanced camera preferences share one normalized save/read contract. */
+    record FirstPersonAdvanced(boolean movement, double sideLookLimit, int animationMode,
+            double animationStrength, boolean yieldDialogue, boolean thirdPersonInCombat, double transitionSeconds,
+            boolean externalHeadScale) {
+        FirstPersonAdvanced {
+            sideLookLimit = bounded(sideLookLimit, 60, 0, 90);
+            animationMode = animationMode >= 0 && animationMode <= 3 ? animationMode : 0;
+            animationStrength = bounded(animationStrength, 0.35, 0, 1);
+            transitionSeconds = bounded(transitionSeconds, 0, 0, 1);
+        }
+
+        String toIniLines() {
+            return "first_person_movement=" + movement + "\n"
+                    + "first_person_side_look_limit=" + number(sideLookLimit) + "\n"
+                    + "first_person_animation_mode=" + animationMode + "\n"
+                    + "first_person_animation_strength=" + number(animationStrength) + "\n"
+                    + "first_person_yield_dialogue=" + yieldDialogue + "\n"
+                    + "first_person_third_person_in_combat=" + thirdPersonInCombat + "\n"
+                    + "first_person_transition_seconds=" + number(transitionSeconds) + "\n"
+                    + "first_person_external_head_scale=" + externalHeadScale + "\n";
+        }
+
+        void store(SharedPreferences.Editor edit) {
+            edit.putBoolean("camera_first_person_movement", movement)
+                    .putString("camera_first_person_side_look_limit", number(sideLookLimit))
+                    .putInt("camera_first_person_animation_mode", animationMode)
+                    .putString("camera_first_person_animation_strength", number(animationStrength))
+                    .putBoolean("camera_first_person_yield_dialogue", yieldDialogue)
+                    .putBoolean("camera_first_person_third_person_in_combat", thirdPersonInCombat)
+                    .putString("camera_first_person_transition_seconds", number(transitionSeconds))
+                    .putBoolean("camera_first_person_external_head_scale", externalHeadScale);
+        }
+    }
+
+    static FirstPersonAdvanced getFirstPersonAdvanced(Context context) {
+        SharedPreferences prefs = preferences(context);
+        return new FirstPersonAdvanced(
+                prefs.getBoolean("camera_first_person_movement", false),
+                parse(prefs.getString("camera_first_person_side_look_limit", "60"), 60),
+                prefs.getInt("camera_first_person_animation_mode", 0),
+                parse(prefs.getString("camera_first_person_animation_strength", "0.35"), 0.35),
+                prefs.getBoolean("camera_first_person_yield_dialogue", false),
+                prefs.getBoolean("camera_first_person_third_person_in_combat", false),
+                parse(prefs.getString("camera_first_person_transition_seconds", "0"), 0),
+                prefs.getBoolean("camera_first_person_external_head_scale", false));
+    }
+
     static void setCameraSettings(
             Context context,
             boolean disableDither,
@@ -166,7 +236,15 @@ final class ModuleSettings {
             boolean fillNeck,
             double movementSpeed,
             double fieldOfView,
-            double firstPersonFov) {
+            double firstPersonFov,
+            double eyeForward,
+            double eyeHeight,
+            double nearClip,
+            boolean extendLookRange,
+            FirstPersonAdvanced advanced) {
+        eyeForward = bounded(eyeForward, 0.03, 0.0, 0.5);
+        eyeHeight = bounded(eyeHeight, 0.05, -0.5, 0.5);
+        nearClip = bounded(nearClip, 0.03, 0.001, 1.0);
         // World pause is a free-camera sub-mode on desktop: its hotkey is only
         // read while the free camera is armed, so offering it alone would be a
         // switch that does nothing.
@@ -185,6 +263,11 @@ final class ModuleSettings {
                         + "movement_speed=" + number(movementSpeed) + "\n"
                         + "field_of_view=" + number(fieldOfView) + "\n"
                         + "first_person_fov=" + number(firstPersonFov) + "\n"
+                        + "first_person_eye_forward=" + number(eyeForward) + "\n"
+                        + "first_person_eye_height=" + number(eyeHeight) + "\n"
+                        + "first_person_near_clip=" + number(nearClip) + "\n"
+                        + "first_person_extend_look_range=" + extendLookRange + "\n"
+                        + advanced.toIniLines()
                         + "toggle_hotkey=" + Hotkeys.FREE_CAMERA_NAME + "\n"
                         + "pause_hotkey=" + Hotkeys.WORLD_PAUSE_NAME + "\n"
                         + "first_person_hotkey=" + Hotkeys.FIRST_PERSON_NAME + "\n"
@@ -211,7 +294,7 @@ final class ModuleSettings {
                         + "keyframe_clear_hotkey=" + Hotkeys.KEYFRAME_CLEAR_NAME + "\n"
                         + "vmd_play_hotkey=" + Hotkeys.VMD_PLAY_NAME + "\n"
                 : "";
-        preferences(context)
+        SharedPreferences.Editor edit = preferences(context)
                 .edit()
                 .putBoolean(CAMERA_DITHER, disableDither)
                 .putBoolean(CAMERA_FREE, freeCamera)
@@ -222,8 +305,13 @@ final class ModuleSettings {
                 .putString(CAMERA_SPEED, number(movementSpeed))
                 .putString(CAMERA_FOV, number(fieldOfView))
                 .putString(CAMERA_FP_FOV, number(firstPersonFov))
-                .putString(CAMERA_CONFIGURATION, configuration)
-                .commit();
+                .putString(CAMERA_FP_EYE_FORWARD, number(eyeForward))
+                .putString(CAMERA_FP_EYE_HEIGHT, number(eyeHeight))
+                .putString(CAMERA_FP_NEAR_CLIP, number(nearClip))
+                .putBoolean(CAMERA_FP_EXTEND_LOOK_RANGE, extendLookRange)
+                .putString(CAMERA_CONFIGURATION, configuration);
+        advanced.store(edit);
+        edit.commit();
     }
 
     // ----------------------------------------------------------- sustained dash
@@ -295,7 +383,11 @@ final class ModuleSettings {
                 isFirstPersonFillNeck(context),
                 parse(getCameraSpeed(context), 5.0),
                 parse(getCameraFieldOfView(context), 60.0),
-                parse(getFirstPersonFieldOfView(context), 75.0));
+                parse(getFirstPersonFieldOfView(context), 75.0),
+                parse(getFirstPersonEyeForward(context), 0.03),
+                parse(getFirstPersonEyeHeight(context), 0.05),
+                parse(getFirstPersonNearClip(context), 0.03),
+                isFirstPersonExtendLookRange(context), getFirstPersonAdvanced(context));
         setSustainedDashSettings(
                 context,
                 isSustainedDashEnabled(context),
@@ -317,6 +409,10 @@ final class ModuleSettings {
         String text = String.format(Locale.ROOT, "%.4f", value);
         return text.contains(".")
                 ? text.replaceFirst("0+$", "").replaceFirst("\\.$", "") : text;
+    }
+
+    private static double bounded(double value, double fallback, double minimum, double maximum) {
+        return Double.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
     }
 
     // -------------------------------------------------------------------- voice

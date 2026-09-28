@@ -16,6 +16,8 @@ import java.util.Locale;
  * floats from an ini file. Typing a float into a text box on a phone is a poor
  * trade, so the Android page bounds each value and exposes it as a slider; the
  * configuration written out is still the same float the desktop module parses.
+ * Precision controls retain their exact stored value until the user moves the
+ * slider, so saving another setting cannot quantize a first-person eye offset.
  */
 final class ValueSlider extends LinearLayout {
     /** Slider resolution. The step is (maximum - minimum) / STEPS. */
@@ -26,13 +28,24 @@ final class ValueSlider extends LinearLayout {
     private final float minimum;
     private final float maximum;
     private final String unit;
+    private final int steps;
+    private final int decimalPlaces;
+    private float preciseValue;
     private Runnable listener = () -> {};
 
     ValueSlider(Context context, String label, String unit, float minimum, float maximum) {
+        this(context, label, unit, minimum, maximum, STEPS, -1);
+    }
+
+    ValueSlider(Context context, String label, String unit, float minimum, float maximum,
+            int steps, int decimalPlaces) {
         super(context);
         this.minimum = minimum;
         this.maximum = maximum;
         this.unit = unit;
+        this.steps = steps;
+        this.decimalPlaces = decimalPlaces;
+        this.preciseValue = minimum;
         setOrientation(VERTICAL);
         setPadding(dp(14), dp(10), dp(14), dp(12));
         setBackgroundResource(R.drawable.bg_setting_row);
@@ -58,7 +71,7 @@ final class ValueSlider extends LinearLayout {
         addView(heading, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         bar = new SeekBar(context);
-        bar.setMax(STEPS);
+        bar.setMax(steps);
         // The platform SeekBar draws a 2dp track and a small thumb, both of which
         // disappear against this palette. Supplying the drawables directly is the
         // only way to get a track that is visible and a thumb that is a
@@ -75,6 +88,7 @@ final class ValueSlider extends LinearLayout {
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) preciseValue = minimum + (maximum - minimum) * progress / (float) steps;
                 showValue();
                 // Only a drag should rewrite the configuration; the initial
                 // setValue() call must not look like a user edit.
@@ -90,12 +104,14 @@ final class ValueSlider extends LinearLayout {
 
     void setValue(float current) {
         float clamped = Math.max(minimum, Math.min(maximum, current));
-        bar.setProgress(Math.round((clamped - minimum) / (maximum - minimum) * STEPS));
+        preciseValue = clamped;
+        bar.setProgress(Math.round((clamped - minimum) / (maximum - minimum) * steps));
         showValue();
     }
 
     float getValue() {
-        return minimum + (maximum - minimum) * bar.getProgress() / (float) STEPS;
+        return decimalPlaces >= 0 ? preciseValue
+                : minimum + (maximum - minimum) * bar.getProgress() / (float) steps;
     }
 
     void onChanged(Runnable changed) {
@@ -109,6 +125,10 @@ final class ValueSlider extends LinearLayout {
 
     private void showValue() {
         float current = getValue();
+        if (decimalPlaces >= 0) {
+            value.setText(String.format(Locale.ROOT, "%." + decimalPlaces + "f%s", current, unit));
+            return;
+        }
         value.setText(current >= 10f
                 ? String.format(Locale.ROOT, "%.0f%s", current, unit)
                 : String.format(Locale.ROOT, "%.1f%s", current, unit));

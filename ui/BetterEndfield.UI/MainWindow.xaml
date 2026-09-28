@@ -1547,6 +1547,72 @@
                                                 Value="100"
                                                 ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
                                         </Grid>
+                                        <ToggleSwitch
+                                            x:Name="FirstPersonExtendLookRangeToggle"
+                                            Header="扩展上下观察范围"
+                                            OffContent="标准范围" OnContent="扩展范围"
+                                            Toggled="CameraEnhancementToggle_Toggled" />
+                                        <Grid ColumnSpacing="12" RowSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <NumberBox x:Name="FirstPersonEyeForwardNumberBox"
+                                                Header="眼位前移（米）" Minimum="0" Maximum="0.5"
+                                                SmallChange="0.01" Value="0.03" SpinButtonPlacementMode="Compact"
+                                                ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                            <NumberBox x:Name="FirstPersonEyeHeightNumberBox" Grid.Column="1"
+                                                Header="眼位高度偏移（米）" Minimum="-0.5" Maximum="0.5"
+                                                SmallChange="0.01" Value="0.05" SpinButtonPlacementMode="Compact"
+                                                ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                        </Grid>
+                                        <NumberBox x:Name="FirstPersonNearClipNumberBox"
+                                            Header="近裁剪距离（米）" Minimum="0.001" Maximum="1"
+                                            SmallChange="0.001" Value="0.03" SpinButtonPlacementMode="Compact"
+                                            ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                        <ToggleSwitch x:Name="FirstPersonMovementToggle"
+                                            Header="身体跟随观察方向" OffContent="关闭" OnContent="启用朝向跟随"
+                                            Toggled="CameraEnhancementToggle_Toggled" />
+                                        <NumberBox x:Name="FirstPersonSideLookLimitNumberBox"
+                                            Header="站定侧看范围（度）" Minimum="0" Maximum="90"
+                                            SmallChange="5" Value="60" SpinButtonPlacementMode="Compact"
+                                            ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                        <Grid ColumnSpacing="12" RowSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="FirstPersonAnimationModeComboBox"
+                                                Header="动画视角跟随" SelectedIndex="0" HorizontalAlignment="Stretch"
+                                                SelectionChanged="FirstPersonAnimationModeComboBox_SelectionChanged">
+                                                <ComboBoxItem Content="关闭" />
+                                                <ComboBoxItem Content="身体" />
+                                                <ComboBoxItem Content="头部" />
+                                                <ComboBoxItem Content="真实（含翻滚）" />
+                                            </ComboBox>
+                                            <NumberBox x:Name="FirstPersonAnimationStrengthNumberBox" Grid.Column="1"
+                                                Header="动画跟随强度（%）" Minimum="0" Maximum="100"
+                                                SmallChange="5" Value="35" SpinButtonPlacementMode="Compact"
+                                                ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                        </Grid>
+                                        <ToggleSwitch x:Name="FirstPersonYieldDialogueToggle"
+                                            Header="对话时交回游戏相机" OffContent="关闭" OnContent="对话期间暂停第一人称"
+                                            Toggled="CameraEnhancementToggle_Toggled" />
+                                        <ToggleSwitch x:Name="FirstPersonThirdPersonInCombatToggle"
+                                            Header="战斗时交回游戏相机" OffContent="关闭" OnContent="战斗期间暂停第一人称"
+                                            Toggled="CameraEnhancementToggle_Toggled" />
+                                        <NumberBox x:Name="FirstPersonTransitionSecondsNumberBox"
+                                            Header="视角过渡时长（秒，0 为关闭）" Minimum="0" Maximum="1"
+                                            SmallChange="0.05" Value="0" SpinButtonPlacementMode="Compact"
+                                            ValueChanged="CameraEnhancementNumberBox_ValueChanged" />
+                                        <StackPanel Spacing="4">
+                                            <ToggleSwitch x:Name="FirstPersonExternalHeadScaleToggle"
+                                                Header="外部改模手动兼容（缩小头骨）" OffContent="关闭" OnContent="启用手动兼容"
+                                                Toggled="CameraEnhancementToggle_Toggled" />
+                                            <TextBlock x:Name="FirstPersonExternalHeadScaleHint"
+                                                Style="{StaticResource FieldHintStyle}" TextWrapping="Wrap"
+                                                Text="仅在外部改模与网格隐藏冲突时手动开启。缩小头骨会影响头部阴影；默认关闭。" />
+                                        </StackPanel>
                                         <Grid ColumnSpacing="12" RowSpacing="12">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />

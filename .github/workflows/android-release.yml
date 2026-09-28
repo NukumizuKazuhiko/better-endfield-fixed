@@ -10,7 +10,7 @@ on:
       version:
         description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.20)'
         required: true
-        default: '3.3.20'
+        default: '3.3.21'
       draft:
         description: 'Create the release as a draft instead of publishing it'
         type: boolean

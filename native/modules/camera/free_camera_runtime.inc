@@ -877,7 +877,7 @@ void ExitFreeCamera(const char* reason) {
 
 bool EnterFreeCamera() {
     if (g_first_person_active.load(std::memory_order_acquire)) {
-        ExitFirstPerson("switching to free camera");
+        ExitFirstPerson("switching to free camera",true);
     }
     void* camera = Invoke(Contract("unity.camera.main"), nullptr, nullptr);
     void* transform = Invoke(Contract("unity.component.transform"), camera, nullptr);

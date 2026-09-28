@@ -442,3 +442,53 @@ overflow menu, choose `Hide`, and turn off the `Games` filter. LSPosed applies
 that filter globally and Android classifies Endfield as a game.
 
 The module declares its recommended scope in `META-INF/xposed/scope.list`.
+
+## First-person camera
+
+The first-person camera is shared desktop source: Android compiles
+`native/modules/camera/module.cpp` directly into `betterendfield_desktop_features`,
+so both platforms run the same behaviour with no second implementation. The eye
+anchor follows the head bone resolved from the player model. Its forward offset
+is applied along the horizontal projection of the view direction while the
+height offset stays world-vertical, so looking down moves the eye towards the
+face instead of dragging it downwards.
+
+`first_person_hide_head` hides the head parts of the player model. A name-token
+hit (`head`, `face`, `hair`, `brow`, `eyelid`, `eyes`, `iris`, `mouth`, `horn`)
+or an upstream-style role name (`s_actor_..._lodN` carrying a `_face_`, `_hair_`,
+`_brow_`, `_eyebrow_`, `_iris_`, `_eyeshadow_` or `_hairshadow_` segment, and not
+`shadowproxy`) collapses the whole part. A body mesh
+(`s_actor_..._body_..._lodN`) is kept and only loses the triangles whose three
+vertices are dominated by head/neck skin — the ring of body geometry around the
+neck opening. `first_person_fill_neck_hole` requests a cap for the remaining
+opening when the GPU mesh path passes its runtime contract checks.
+
+Where the GPU mesh patch cannot run (non-skinned renderers, unavailable readback
+contracts, or parts whose patch retries are exhausted), matched parts fall back to
+`ShadowCastingMode.ShadowsOnly`: not drawn by the camera, shadows kept. That
+property is read and written through runtime-invoke contracts, because the
+Android icall table implements only part of the engine surface and the direct
+icall does not exist there.
+The Android client's managed readback contracts still require device verification;
+the Windows client's missing methods do not establish Android availability.
+
+Optional keys, with their defaults: `first_person_eye_forward=0.03`,
+`first_person_eye_height=0.05`, `first_person_near_clip=0.03`,
+`first_person_extend_look_range=false` (widens the vertical look range past the
+game's own pitch clamp: 1.10x up, 1.50x down, clamped to ±89 degrees),
+`first_person_neck_plug_scale=1.0`. The module app writes the keys it exposes;
+any key it does not write falls back to the default listed here.
+
+The 3.3.21 app also exposes `first_person_movement=false`,
+`first_person_side_look_limit=60` (0–90 degrees),
+`first_person_animation_mode=0` (0 off, 1 body, 2 head, 3 realistic),
+`first_person_animation_strength=0.35` (0–1),
+`first_person_yield_dialogue=false`, `first_person_third_person_in_combat=false`,
+`first_person_transition_seconds=0`
+(0–1), and `first_person_external_head_scale=false`. Fully stop and restart
+the game after saving; the native module reads a startup snapshot. The
+external head-scale option also removes the head shadow. The combat option
+hands camera control back to the game during combat and restores first person
+after combat. The user reports the operable first-person settings passed on
+Android 3.3.21 except external head scale, which was not tested. The GPU mesh
+readback and cap path still requires separate contract and runtime evidence.

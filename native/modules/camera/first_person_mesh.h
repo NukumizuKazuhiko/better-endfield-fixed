@@ -8,10 +8,29 @@
 #include <limits>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace BetterEndfield::FirstPersonMesh {
+// Part roles and their classification, ported from RenoDX Endfield Enhancer
+// (camera_mesh.hpp). `role` is the lowercased name of the renderer's
+// GameObject, which is the same string the upstream runtime feeds these
+// predicates. Everything below is pure CPU work and has no managed dependency.
+inline bool IsDedicatedHeadMesh(std::string_view role) {
+    if (role.rfind("s_actor_", 0) != 0 || role.find("_lod") == std::string_view::npos ||
+        role.find("shadowproxy") != std::string_view::npos) return false;
+    for (const std::string_view part : {"_face_", "_hair_", "_brow_", "_eyebrow_",
+                                        "_iris_", "_eyeshadow_", "_hairshadow_"})
+        if (role.find(part) != std::string_view::npos) return true;
+    return false;
+}
+// The body mesh carries the neck opening: its skin weights reach up into the
+// head, so it needs the vertex-level test below rather than a whole-part hide.
+inline bool IsBodyMesh(std::string_view role) {
+    return role.rfind("s_actor_", 0) == 0 && role.find("_body_") != std::string_view::npos &&
+           role.find("_lod") != std::string_view::npos && role.find("shadowproxy") == std::string_view::npos;
+}
 struct Point { double x=0, y=0, z=0; };
 inline Point operator+(Point a, Point b) { return {a.x+b.x,a.y+b.y,a.z+b.z}; }
 inline Point operator-(Point a, Point b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
@@ -119,7 +138,8 @@ inline bool Triangulate(const std::vector<uint32_t>& loop,const std::vector<Vert
     triangles=std::move(candidate); return true;
 }
 inline Result Build(const std::vector<Vertex>& vertices,const std::vector<Part>& parts,
-    const std::vector<uint8_t>& bone_kind,const Frame& neck,bool hide_all,bool fill,double range=1.0) {
+    const std::vector<uint8_t>& bone_kind,const Frame& neck,bool hide_all,bool fill,double range=1.0,
+    bool body_skin=false) {
     Result result; result.parts=parts;
     if(vertices.empty()||vertices.size()>200000||bone_kind.empty()) {result.error="invalid vertex or bone count";return result;}
     for(const auto& v:vertices) {
@@ -143,15 +163,24 @@ inline Result Build(const std::vector<Vertex>& vertices,const std::vector<Part>&
         auto a=root(part.indices[i]),b=root(part.indices[i+1]),c=root(part.indices[i+2]);parents[b]=a;parents[c]=a;
     }
     std::vector<double> total(vertices.size()),head(vertices.size());
+    // Body-skin pass, ported from the upstream body_skin branch. A triangle of
+    // the body mesh is hidden when all three of its vertices are dominated by
+    // head/neck skin weights: that is the lip of body geometry around the neck
+    // opening, which no whole-part hide ever reaches. The per-vertex sum is only
+    // built when the mesh was classified as a body mesh.
+    std::vector<double> skin_head_weight(body_skin?vertices.size():0);
     for(uint32_t i=0;i<vertices.size();++i) for(int j=0;j<4;++j) {
         auto w=vertices[i].weight[j]; if(w==0) continue;
         total[root(i)]+=w;
-        if(bone_kind[vertices[i].bone[j]]==1) head[root(i)]+=w;
+        const auto kind=bone_kind[vertices[i].bone[j]];
+        if(kind==1) head[root(i)]+=w;
+        if(body_skin&&(kind==1||kind==2)) skin_head_weight[i]+=w;
     }
     for(auto& part:result.parts) for(size_t i=0;i<part.indices.size();i+=3) {
         auto a=part.indices[i],b=part.indices[i+1],c=part.indices[i+2];
         if(a==b||a==c||b==c) continue;
-        if(hide_all||head[root(a)]>0.5*total[root(a)]) {
+        const bool head_skin=body_skin&&skin_head_weight[a]>0.5&&skin_head_weight[b]>0.5&&skin_head_weight[c]>0.5;
+        if(hide_all||head[root(a)]>0.5*total[root(a)]||head_skin) {
             part.indices[i+1]=a;part.indices[i+2]=a;++result.hidden_triangles;
         }
     }

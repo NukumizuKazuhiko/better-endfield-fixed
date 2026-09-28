@@ -23,3 +23,35 @@
   sampling follows EIEM's `camera_player.h` (Bezier evaluation, Euler signs,
   180 degree basis, 0.07 scale and 5 degree FOV defaults) and `vmd_parser.h`
   (camera record layout).
+
+## RenoDX Endfield Enhancer
+
+- Source: https://github.com/ItsTheSewerRat/renodx, branch `endfield-enhancer`
+  (path `src/games/endfield-enhancer/`). That branch extends the RenoDX HDR addon
+  at https://github.com/clshortfuse/renodx.
+- Author: `ItsTheSewerRat` ("ItsaRat"). RenoDX itself is by Carlos Lopez Jr. and
+  contributors.
+- License: MIT
+- Used in: the first-person camera implementation under
+  `native/modules/camera/`. Ported with names, namespaces and the surrounding
+  platform layer adapted; the expressions, constants and evaluation order are
+  kept as published.
+  - `first_person_math.h` — ported from the upstream `camera_math.hpp`:
+    `Vec3`/`Quat` and their operators, `Rotate`, `AxisAngle`, `ExpandLookPitch`,
+    `LateralFacingYaw`, `Unit`, `BlendRotation`, `FacingRotation` and the
+    constants they carry (0.382683432, 45, 89, 57.295779513).
+  - `first_person_facing.h` and `first_person_facing_runtime.inc` — lateral
+    interpolation and movement eligibility adapted from `camera_movement.hpp`.
+  - `first_person_motion.h` and `first_person_motion_runtime.inc` — animation
+    rotation decomposition and bind-pose axes adapted from `camera_motion.hpp`.
+  - `first_person_mesh.h` — the part-role predicates `IsDedicatedHeadMesh` and
+    `IsBodyMesh`, and the body-skin triangle test inside `Build`, are ported from
+    the upstream `camera_mesh.hpp` (`s_actor_` / `_lod` / `shadowproxy` role
+    rules, the `_face_`/`_hair_`/`_brow_`/`_eyebrow_`/`_iris_`/`_eyeshadow_`/
+    `_hairshadow_` token list, and the half-weight body-skin rule).
+  - `module.cpp` — the eye-anchor formula (a horizontal `planar` forward offset
+    plus a world-vertical height offset, so looking down does not drag the eye
+    downwards), the `first_person_eye_height` (0.05), `first_person_eye_forward`
+    (0.03) and `first_person_near_clip` (0.03) defaults, and the
+    `first_person_extend_look_range` multipliers (1.10 up / 1.50 down) come from
+    the upstream `camera.hpp`.
