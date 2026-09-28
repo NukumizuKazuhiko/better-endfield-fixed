@@ -1,0 +1,303 @@
+package dev.betterendfield.android
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+/**
+ * The third-party model package manager.
+ *
+ * Everything the installer does happens on its own worker and reports through
+ * static fields, so this screen is a poller plus a list: it never blocks on a
+ * texture conversion, and a conversion that is still running when the user comes
+ * back is shown where it left off rather than restarted.
+ */
+@Composable
+fun BemInstallScreen(state: BemInstallState) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) state.import(uri)
+    }
+    var pendingRemoval by remember { mutableStateOf<BemPackage?>(null) }
+
+    Surface(
+        color = Be.Colors.background,
+        contentColor = Be.Colors.textPrimary,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier
+                    .widthIn(max = Be.Size.contentMaxWidth)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        start = Be.Space.gutter,
+                        end = Be.Space.gutter,
+                        top = Be.Space.page,
+                        bottom = Be.Space.footer,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(Be.Space.l),
+            ) {
+                SectionCard(
+                    eyebrow = "BEM · PACKAGE MANAGER",
+                    title = stringResource(R.string.custom_model_title),
+                    subtitle = "一个包管理全部外观。选择与启用状态保存后，下次启动游戏生效。",
+                ) {}
+
+                PrimaryButton(
+                    text = "导入 BEM 包",
+                    onClick = { picker.launch(arrayOf("*/*")) },
+                    enabled = !state.busy,
+                )
+
+                GhostButton(
+                    text = "保存模型选择",
+                    onClick = { state.saveAll() },
+                    enabled = !state.busy && state.packages.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                PanelCard {
+                    ListCaption("处理状态")
+                    BodyText(state.status, Modifier.padding(top = 9.dp))
+                    if (state.busy) {
+                        ProgressBar(
+                            fraction = state.percent.takeIf { it >= 0 }?.let { it / 100f },
+                            modifier = Modifier.padding(top = Be.Space.xl),
+                        )
+                        BodyText(
+                            text = progressLine(state.percent, state.elapsedSeconds),
+                            modifier = Modifier.padding(top = Be.Space.m),
+                        )
+                        GhostButton(
+                            text = "取消当前操作",
+                            onClick = { state.cancel() },
+                            enabled = !state.removing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = Be.Space.l),
+                        )
+                    }
+                }
+
+                BodyText("导入时保留原始纹理。只有贴图在游戏中显示异常时，才需要单独转换手机纹理。")
+
+                ListCaption(
+                    text = "已安装的模型包",
+                    modifier = Modifier.padding(start = Be.Space.hairline, top = Be.Space.l),
+                )
+
+                val broken = state.indexBroken
+                if (broken != null) {
+                    StatusBlock(broken, modifier = Modifier.padding(top = Be.Space.m))
+                } else if (state.packages.isEmpty()) {
+                    PanelCard {
+                        Text(
+                            text = "还没有模型包\n点击上方「导入 BEM 包」添加模型。",
+                            color = Be.Colors.textSecondary,
+                            fontSize = 14.sp,
+                            lineHeight = 21.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = Be.Space.page),
+                        )
+                    }
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(Be.Space.l),
+                    ) {
+                        state.packages.forEach { pkg ->
+                            PackageCard(
+                                pkg = pkg,
+                                busy = state.busy,
+                                onConvert = { state.convert(pkg.generation) },
+                                onRemove = { pendingRemoval = pkg },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val target = pendingRemoval
+    if (target != null) {
+        AlertDialog(
+            onDismissRequest = { pendingRemoval = null },
+            containerColor = Be.Colors.panelHigh,
+            titleContentColor = Be.Colors.textPrimary,
+            textContentColor = Be.Colors.textSecondary,
+            title = { Text("移除「${target.name}」？") },
+            text = {
+                Text("将删除此模型包的安装文件和配置。下载目录中的原始 BEM 文件会保留，可重新导入。游戏内已加载的模型需重启游戏后恢复。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.remove(target.generation)
+                    pendingRemoval = null
+                }) { Text("移除", color = Be.Colors.danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoval = null }) {
+                    Text("取消", color = Be.Colors.textSecondary)
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun PackageCard(
+    pkg: BemPackage,
+    busy: Boolean,
+    onConvert: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    PanelCard {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = pkg.name,
+                color = Be.Colors.textPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = pkg.enabled,
+                onCheckedChange = { pkg.enabled = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Be.Colors.accent,
+                    checkedTrackColor = Be.Colors.accentSoft,
+                    checkedBorderColor = Color.Transparent,
+                    uncheckedThumbColor = Be.Colors.switchThumbOff,
+                    uncheckedTrackColor = Be.Colors.switchTrackOff,
+                    uncheckedBorderColor = Color.Transparent,
+                ),
+            )
+        }
+
+        Text(
+            text = if (pkg.convertedTextures) "手机纹理已就绪" else "原始纹理 · 可按需转换",
+            color = Be.Colors.textSecondary,
+            fontSize = Be.Type.bodySmall,
+            modifier = Modifier.padding(top = Be.Space.hairline),
+        )
+
+        if (pkg.minorVersion >= 1) {
+            pkg.optionGroups.forEach { group ->
+                if (pkg.visibleGroups[group.id] != false) {
+                    FieldLabel(group.name, top = Be.Space.page)
+                    SelectField(
+                        options = group.choices.map { it.name },
+                        selectedIndex = group.choices
+                            .indexOfFirst { it.id == pkg.selectedOption(group.id) }
+                            .coerceAtLeast(0),
+                        onSelect = { choiceIndex ->
+                            pkg.chooseOption(group.id, group.choices[choiceIndex].id)
+                        },
+                    )
+                }
+            }
+        } else {
+            FieldLabel("启动外观")
+            SelectField(
+                options = pkg.appearances,
+                selectedIndex = pkg.appearanceIndex,
+                onSelect = { pkg.appearanceIndex = it },
+            )
+        }
+
+        pkg.problem?.let { message ->
+            Text(
+                text = message,
+                color = Be.Colors.danger,
+                fontSize = Be.Type.bodySmall,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(top = Be.Space.l),
+            )
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = Be.Space.xxl),
+            horizontalArrangement = Arrangement.spacedBy(Be.Space.m),
+        ) {
+            if (!pkg.convertedTextures) {
+                GhostButton(
+                    text = "转换纹理",
+                    onClick = onConvert,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            GhostButton(
+                text = "移除模型包",
+                onClick = onRemove,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** The flat two-tone bar; null draws the indeterminate state. */
+@Composable
+private fun ProgressBar(fraction: Float?, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Be.Colors.track),
+    ) {
+        val resolved = fraction?.coerceIn(0.004f, 1f) ?: 1f
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(resolved)
+                .background(
+                    if (fraction == null) Be.Colors.accent.copy(alpha = 0.45f) else Be.Colors.accent,
+                ),
+        )
+    }
+}
+
+private fun progressLine(percent: Int, elapsedSeconds: Long): String {
+    val phase = if (percent < 0) "正在处理" else "当前 mip 编码：$percent%"
+    return "$phase · 已用 ${elapsedSeconds / 60}分${elapsedSeconds % 60}秒"
+}

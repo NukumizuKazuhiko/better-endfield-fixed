@@ -1,5 +1,11 @@
+// Explicit imports: inside a build script `java` resolves to Gradle's java
+// extension, so `java.util.zip.ZipFile` has to be imported by name.
+import java.io.File
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -9,6 +15,11 @@ android {
 
     buildFeatures {
         buildConfig = true
+        // The settings app and the BEM package manager are Compose surfaces.
+        // The in-game panel deliberately is NOT: it runs inside the hooked game
+        // process, where loading a single Compose class is fatal - see the
+        // GameOverlay header comment and proguard-rules.pro.
+        compose = true
     }
 
     defaultConfig {
@@ -17,8 +28,8 @@ android {
         // needs Android 10. The legacy API 82 build was dropped in 3.3.0.
         minSdk = 29
         targetSdk = 35
-        versionCode = 30321
-        versionName = "3.3.21"
+        versionCode = 30322
+        versionName = "3.3.22"
         testInstrumentationRunner = "dev.betterendfield.android.BemInstallerTest"
 
         ndk {
@@ -38,7 +49,17 @@ android {
             isJniDebuggable = true
         }
         release {
-            isMinifyEnabled = false
+            // Compose's synthetic classes and kotlin.Metadata cost ~21 MB of
+            // dex when they survive into the APK; R8 shrink+obfuscate brings the
+            // release build back down (8.60 MB here). The optimiser stage also
+            // stays off: its class merging folds game-process classes into
+            // holders whose <clinit> instantiates Compose, which crashes the
+            // hooked game process - see proguard-rules.pro. The module's names
+            // that are read from outside the type system -- the libxposed entry
+            // point in META-INF/xposed/java_init.list, and the JNI symbols of
+            // libbetterendfield_installer.so -- are pinned in proguard-rules.pro
+            // and asserted by verifyReleaseEntryPoints.
+            isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -134,7 +155,324 @@ tasks.named("preBuild").configure {
     dependsOn(verifyDesktopModelHookParity)
 }
 
+// The module's own Java sources, scanned by the verification task below for
+// `native` declarations. Declared here because the task's receiver is a Task,
+// where `fileTree` is not resolvable.
+val moduleJavaSources = fileTree("src/main/java") { include("**/*.java") }
+
+// R8 can delete a class that is only reachable through a name held in a
+// resource or in a native symbol, and nothing in the build would notice: the
+// APK still installs, still launches, and simply never hooks anything. Three
+// kinds of name are resolved from outside the Java type system:
+//
+//   * META-INF/xposed/java_init.list -> the libxposed entry class, instantiated
+//     reflectively by the framework;
+//   * the Java_dev_betterendfield_android_* exports of the .so files this APK
+//     ships, whose export name *is* the class and method name, plus the one
+//     method JNI looks up with GetStaticMethodID;
+//   * the merged manifest's components, which AGP turns into keep rules.
+//
+// proguard-rules.pro answers all three, and this task refuses to trust it: it
+// reads the packaged APK and R8's own mapping.txt and fails the build when a
+// name that the framework or the native code resolves as a string is gone or
+// was renamed. mapping.txt is the authority here, because a class name can
+// survive in the dex string table (as an unrelated literal, or in a synthesized
+// member's signature) while the class itself was renamed.
+val verifyReleaseEntryPoints by tasks.registering {
+    description = "Asserts the R8-processed release APK still carries the framework and JNI entry points."
+    val apkDirectory = layout.buildDirectory.dir("outputs/apk/release")
+    val mappingOutput = layout.buildDirectory.file("outputs/mapping/release/mapping.txt")
+    inputs.dir(apkDirectory)
+    inputs.files(moduleJavaSources)
+    inputs.file(mappingOutput).withPropertyName("r8Mapping").optional()
+    doLast {
+        val apks: List<File> = apkDirectory.get().asFile
+            .listFiles { file -> file.extension == "apk" && !file.name.contains("unsigned") }
+            ?.sortedBy { it.name }
+            .orEmpty()
+        check(apks.isNotEmpty()) { "no release APK to verify in ${apkDirectory.get().asFile}" }
+
+        // Classes named in META-INF/xposed/java_init.list.
+        val frameworkEntryClasses = listOf("dev.betterendfield.android.XposedEntry")
+        // Manifest-declared components: AGP generates these keep rules, this
+        // asserts they were actually generated for the merged manifest.
+        val manifestComponents = listOf(
+            "Ldev/betterendfield/android/ModuleApplication;",
+            "Ldev/betterendfield/android/MainActivity;",
+            "Ldev/betterendfield/android/BemInstallActivity;",
+            "Lio/github/libxposed/service/XposedProvider;"
+        )
+        // Methods the native code reaches by name without being an export:
+        // GetStaticMethodID(owner, "conversionProgress", "(Ljava/lang/String;IIIIF)V")
+        // in src/main/cpp/installer/install_jni.cpp. A renamed method here
+        // returns null and the conversion aborts with no progress at all.
+        val jniCallbacks = mapOf(
+            "dev.betterendfield.android.BemInstaller" to listOf("conversionProgress")
+        )
+        // Exports with no Java declaration behind them any more. The panel-to-
+        // runtime channel moved from JNI to plain files (see the
+        // NativeCommandBridge header comment), and the prebuilt library still
+        // carries the old entry points, so they cannot come out of the dex --
+        // they are simply never resolved. R8 renaming that class is harmless.
+        val obsoleteJniExports = setOf(
+            "dev.betterendfield.android.NativeCommandBridge.key",
+            "dev.betterendfield.android.NativeCommandBridge.releaseKeys",
+            "dev.betterendfield.android.NativeCommandBridge.status",
+            "dev.betterendfield.android.NativeCommandBridge.submit",
+            "dev.betterendfield.android.NativeCommandBridge.probeIl2Cpp"
+        )
+
+        // Every `native` method in the module's own Java sources, qualified with
+        // the class declaring it. A JNI export name is the mangled form of
+        // exactly that pair, so this is what the shipped libraries may resolve.
+        // Comments are stripped, and `native` must follow a run of member
+        // modifiers at the start of a line: the word also appears in prose and,
+        // unstripped, inside literals such as "native load attempt " -- a looser
+        // scan reads that literal plus the following ATTEMPTS.get() as a native
+        // method named get(). Unmodified `native void f();` declarations would
+        // not match, which the pinned set below turns into a visible drift.
+        val declaredNatives: Set<String> = moduleJavaSources.files
+            .filter { it.isFile }
+            .flatMap { source: File ->
+                val text = source.readText()
+                    .replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), " ")
+                    .replace(Regex("""//[^\n]*"""), " ")
+                val packageName = Regex("""^\s*package\s+([\w.]+)\s*;""", RegexOption.MULTILINE)
+                    .find(text)?.groupValues?.get(1) ?: return@flatMap emptyList()
+                val className = Regex("""\b(?:class|interface)\s+(\w+)""")
+                    .find(text)?.groupValues?.get(1) ?: return@flatMap emptyList()
+                Regex(
+                    """^[ \t]*(?:(?:public|protected|private|static|final|synchronized|abstract|strictfp)[ \t]+)*native\b[^;(){}]*?\b(\w+)\s*\(""",
+                    RegexOption.MULTILINE
+                ).findAll(text)
+                    .map { match -> "$packageName.$className.${match.groupValues[1]}" }
+                    .toList()
+            }
+            .toSet()
+        // A regex that stops matching would silently disable the checks below,
+        // so pin the set that is known to exist today.
+        val expectedNatives = setOf(
+            "dev.betterendfield.android.BemInstaller.inspectNative",
+            "dev.betterendfield.android.BemInstaller.convertNative",
+            "dev.betterendfield.android.BemInstaller.cancelNative"
+        )
+        check(declaredNatives.containsAll(expectedNatives)) {
+            "native-method scan drifted: found ${declaredNatives.sorted()}, " +
+                "expected at least ${expectedNatives.sorted()}"
+        }
+        check(declaredNatives.intersect(obsoleteJniExports).isEmpty()) {
+            "the obsolete-JNI list and the Java sources disagree about " +
+                declaredNatives.intersect(obsoleteJniExports).sorted()
+        }
+
+        val mappingFile = mappingOutput.get().asFile
+        val mappingLines: List<String> = if (mappingFile.isFile) mappingFile.readLines() else emptyList()
+        if (mappingLines.isEmpty()) {
+            logger.warn(
+                "no R8 mapping at $mappingFile: the renamed-class checks are " +
+                    "downgraded to the dex string table for this run")
+        }
+        // mapping.txt prints "<original> -> <obfuscated>:" for a class and
+        // indents its members, so an identity mapping means "R8 kept this name".
+        fun mappingHeader(owner: String): String? =
+            mappingLines.firstOrNull { it.startsWith("$owner -> ") }
+        fun keptNames(owner: String, references: MutableList<String>) {
+            if (mappingLines.isEmpty()) return
+            val header = mappingHeader(owner)
+            if (header == null) {
+                references.add("$owner is absent from mapping.txt")
+            } else if (header != "$owner -> $owner:") {
+                references.add("$owner was renamed (${header.substringAfter("-> ")})")
+            }
+        }
+
+        // The classes the hooked game process actually executes. They must stay
+        // their own classes rather than being folded into a shared holder with
+        // the library - see the "hooked game process must stay Compose-free"
+        // block in proguard-rules.pro for the merged-<clinit> evidence.
+        val gameProcessClasses = listOf(
+            "dev.betterendfield.android.XposedEntry",         // libxposed entry
+            "dev.betterendfield.android.RuntimeBootstrap",    // module attach
+            "dev.betterendfield.android.RuntimeLog",          // journal
+            "dev.betterendfield.android.GameOverlay",         // the in-game panel
+            "dev.betterendfield.android.OverlayFeatures",
+            "dev.betterendfield.android.NativeCommandBridge", // file relay
+            "dev.betterendfield.android.ModuleConfigurations",
+            "dev.betterendfield.android.ModuleSettings",
+            "dev.betterendfield.android.Hotkeys",
+            "dev.betterendfield.android.FrameworkSettings",
+        )
+
+        apks.forEach { apk: File ->
+            val archive = ZipFile(apk)
+            try {
+                // DEX strings are NUL-terminated MUTF-8, so a name survives as
+                // "<name>\u0000" in the string table. Decoding the dex as
+                // ISO-8859-1 keeps every byte addressable as one character.
+                val dex = StringBuilder()
+                val nativeLibraries = sortedMapOf<String, String>()
+                var entryList = ""
+                val entries = archive.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    when {
+                        entry.name.startsWith("classes") && entry.name.endsWith(".dex") ->
+                            dex.append(archive.getInputStream(entry).readBytes()
+                                .toString(Charsets.ISO_8859_1))
+                        entry.name.endsWith(".so") ->
+                            nativeLibraries[entry.name.substringAfterLast('/')] =
+                                archive.getInputStream(entry).readBytes()
+                                    .toString(Charsets.ISO_8859_1)
+                        entry.name == "META-INF/xposed/java_init.list" ->
+                            entryList = archive.getInputStream(entry).readBytes()
+                                .toString(Charsets.UTF_8)
+                    }
+                }
+
+                // 1. Names that must appear in the dex at all.
+                val missing = (frameworkEntryClasses.map { "L$it;".replace('.', '/') }
+                    + manifestComponents)
+                    .filterNot { dex.contains("$it\u0000") }
+                check(missing.isEmpty()) {
+                    "${apk.name} lost names that are resolved at runtime: " +
+                        missing.joinToString { it.trim('L', ';') }
+                }
+                check(entryList.contains("dev.betterendfield.android.XposedEntry")) {
+                    "${apk.name} does not declare the libxposed entry point"
+                }
+
+                // 2. Every JNI export shipped in every native library must be
+                //    backed by a Java declaration, and that declaration must
+                //    still carry its original name.
+                val unaccounted = mutableListOf<String>()
+                nativeLibraries.forEach { (library, bytes) ->
+                    val prefix = "Java_dev_betterendfield_android_"
+                    var at = bytes.indexOf(prefix)
+                    while (at >= 0) {
+                        var end = at + prefix.length
+                        while (end < bytes.length &&
+                            (bytes[end].isLetterOrDigit() || bytes[end] == '_')) end++
+                        // C++ mangles the enclosing function, so the tail after
+                        // the JNI name is garbage (e.g. "..._convertNativeE3"):
+                        // a prefix match is the honest test.
+                        val qualified = "dev.betterendfield.android." +
+                            bytes.substring(at + prefix.length, end).replaceFirst('_', '.')
+                        val known = declaredNatives.any { qualified.startsWith(it) } ||
+                            obsoleteJniExports.any { qualified.startsWith(it) }
+                        if (!known) unaccounted.add("$library!$qualified")
+                        at = bytes.indexOf(prefix, at + prefix.length)
+                    }
+                }
+                check(unaccounted.isEmpty()) {
+                    "${apk.name} ships JNI exports no keep rule or Java declaration " +
+                        "accounts for: ${unaccounted.sorted()}"
+                }
+
+                // 3. Class names. mapping.txt is the authority: R8 prints an
+                //    identity line for every class it retains.
+                val renames = mutableListOf<String>()
+                (frameworkEntryClasses
+                    + declaredNatives.map { it.substringBeforeLast('.') }
+                    + jniCallbacks.keys)
+                    .distinct()
+                    .forEach { keptNames(it, renames) }
+                check(renames.isEmpty()) {
+                    "${apk.name} lets R8 rewrite a class name that is resolved " +
+                        "from outside the JVM: ${renames.sorted()}"
+                }
+
+                // 4. Method names. mapping.txt is deliberately NOT the witness
+                //    here: R8 prints no mapping entry for a `native` method,
+                //    because its name is already fixed by the JNI symbol
+                //    contract. Measured on this build -- inspectNative,
+                //    convertNative and cancelNative occur zero times in
+                //    mapping.txt, while conversionProgress, a plain kept method,
+                //    occurs on three lines. So the dex string table is used: if
+                //    a keep rule stops applying, R8 renames declaration and call
+                //    sites together and the original name leaves the dex.
+                val lostMethods = (declaredNatives.map { it.substringAfterLast('.') }
+                    + jniCallbacks.values.flatten())
+                    .distinct()
+                    .filterNot { dex.contains("$it\u0000") }
+                check(lostMethods.isEmpty()) {
+                    "${apk.name} lost method names that the native code resolves " +
+                        "by string: ${lostMethods.sorted()}"
+                }
+
+                // 5. Nothing on the game path was folded into a shared holder.
+                //    R8's optimiser merges classes that are never instantiated
+                //    into one holder, and the holders pool <clinit> bodies with
+                //    whatever else was folded in. That is how NativeCommandBridge
+                //    shipped inside a class whose initialiser instantiates
+                //    androidx.compose.ui.BiasAbsoluteAlignment: the panel runs in
+                //    the hooked game process, which must never load Compose.
+                //
+                //    mapping.txt distinguishes the two ways a class can vanish.
+                //    Folded: its members are mapped but it has no class header,
+                //    because the members now live in someone else's class.
+                //    Shrunk: it has no trace at all, because javac inlined its
+                //    constants and nothing referenced it (Hotkeys is the example).
+                //    Only the first is a failure - a shrunk class has no code on
+                //    the game path. Measured with the optimiser on: Hotkeys had 0
+                //    mapping lines, while NativeCommandBridge had 48 and
+                //    ModuleSettings 304.
+                if (mappingLines.isNotEmpty()) {
+                    val mappedOwners: Set<String> = mappingLines
+                        .filter { it.isNotEmpty() && !it[0].isWhitespace() && !it.startsWith("#") }
+                        .mapNotNull { line ->
+                            val arrow = line.indexOf(" -> ")
+                            if (arrow > 0 && line.endsWith(":")) line.substring(0, arrow) else null
+                        }
+                        .toSet()
+                    val folded = gameProcessClasses.filter { owner ->
+                        owner !in mappedOwners && mappingLines.any { it.contains("$owner.") }
+                    }
+                    check(folded.isEmpty()) {
+                        "${apk.name} folded classes that run inside the hooked game " +
+                            "process into shared holders: ${folded.sorted()}. Those " +
+                            "holders pool <clinit> bodies with the rest of the " +
+                            "library, which is how Compose initialisation reaches " +
+                            "the game process. The optimiser has to stay off - see " +
+                            "proguard-rules.pro."
+                    }
+                }
+
+                logger.lifecycle(
+                    "Verified ${apk.name}: framework entry, ${manifestComponents.size} " +
+                        "manifest components, ${declaredNatives.size} JNI exports across " +
+                        "${nativeLibraries.size} libraries, class names unrenamed in " +
+                        "mapping.txt, ${jniCallbacks.values.sumOf { it.size }} JNI " +
+                        "callback names intact and ${gameProcessClasses.size} " +
+                        "game-process classes unmerged")
+            } finally {
+                archive.close()
+            }
+        }
+    }
+}
+
+tasks.matching { it.name == "packageRelease" }.configureEach {
+    finalizedBy(verifyReleaseEntryPoints)
+}
+
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")
+
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
+    implementation(composeBom)
+    // Compose is bundled into the module dex, not just the settings app: the
+    // module process hosts the settings UI, which is composed. The in-game panel
+    // is deliberately NOT Compose - it runs in the hooked game process, where a
+    // single Compose class is fatal - see proguard-rules.pro.
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.runtime:runtime")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.savedstate:savedstate-compose:1.5.0")
+    implementation("androidx.core:core-ktx:1.19.1")
 }

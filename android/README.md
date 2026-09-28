@@ -260,23 +260,78 @@ than pretending on an older one.
 
 ## Android settings UI
 
-The settings screen is split into Model Replacement, Third-party Models,
-Character Voice, Enhancements and Diagnostics pages.
-It uses a dependency-free native Android dark card layout with the desktop
-amber accent, a segmented page switcher, and the existing desktop
-`Assets/shared/gilberta.png` artwork as both the launcher icon and settings
-header mark.
-The model page reads the generated Android `character-presets.json` and
-`character-names.json` resources and currently exposes 32 replacement models and
-4,210 final actions, plus final-action looping, model scale, and the desktop
-Logo/login-band theme switch. Saving a preset serializes the same schema-5
-model configuration consumed by the desktop module. The voice page retains the
-per-character language table and Android catalog materializer workflow.
+The settings screen is a tree of four tabs — 首页 (overview), 体验 (interface,
+camera, actions), 角色 (appearance, login display, voice) and 工具 (in-game
+panel, diagnostics, journal, about) — plus four sub-pages reached from a card:
+第一人称, 角色外观, 运行日志 and 关于. Both kinds of page are addressed by one
+integer because the shell switches on one value; `SettingsPage.parentOf` is what
+keeps a sub-page's parent tab highlighted, so "which tab am I in" stays
+answerable two levels down.
+
+It is written in Kotlin with Jetpack Compose, in an industrial palette: a
+near-black ground, one white text ramp (`#F2F2EE` / `#A8A8A8` / `#777777`) and a
+single yellow accent (`#F4E900`). There is no second hue anywhere — a green or
+teal "success" colour would break the palette's discipline even when it is only
+used once. Layers step by fill rather than by outline: page `#0A0A0A`, panel
+`#121212`, row `#191919`, field `#1D1D1D`. The palette sheet names three greys;
+the fourth (the row) exists because a row sits *on* a panel and the panel cannot
+serve as its own row fill without flattening the card. The mix is held at roughly
+76% black/grey, 18% white/grey text and 6% yellow, so the accent is spent only on
+the primary action, the current selection and key state. The palette has exactly
+one theme; there is no light variant, because the panel is read over a dark game
+frame and next to a dark launcher. Colour tokens live in `UiTokens.kt`, and
+`colors.xml` keeps only the two values the window theme needs, so there is one
+source of truth rather than two copies to keep in step.
+
+| File | Role |
+|---|---|
+| `UiTokens.kt`, `UiTheme.kt` | palette, spacing, radii, and the Material colour/typography/shape mapping |
+| `UiComponents.kt` | the shared vocabulary: section cards, switch rows, sliders, pickers, buttons, tabs, swatches, HSV wheel |
+| `SettingsState.kt` | every setting as Compose state, plus the configuration strings the native modules parse, the page tree, and the journal body |
+| `SettingsShell.kt` | header, tabs, responsive shell, and the back-and-title row a sub-page gets |
+| `HomePage.kt` | overview: modules the next launch will load, pending changes, current appearance and login display, shortcuts |
+| `ExperiencePage.kt` | interface, camera (general / free / first-person entry), sustained dash |
+| `FirstPersonPage.kt` | the first-person sub-page: basic, display, control, animation, scene behaviour |
+| `SettingsPages.kt` | the characters tab: appearance entry, login display, per-character voice, and the appearance sub-page |
+| `ToolPages.kt` | the tools tab: in-game panel, diagnostics, journal sub-page, about sub-page |
+| `MainActivity.kt` | the settings Activity (Kotlin, edge-to-edge) |
+| `BemInstallState.kt`, `BemInstallScreen.kt`, `BemInstallActivity.kt` | the BEM package manager |
+| `GameOverlay.java` | the in-game panel — deliberately plain Java/View, not Compose (runs in the hooked game process) |
+
+The camera card is the one place the page tree does not map one-to-one onto the
+preference store. "Default FOV" and the free camera's FOV are the same stored
+key: the desktop module reads `field_of_view` as the free camera's baseline and
+as the target its "reset view" hotkey returns to. It is therefore offered once,
+under the general camera group, and the free camera group points at it. Two
+sliders bound to one value would drift apart as soon as one of them was dragged.
+
+The overview page deliberately does not claim that a change has taken effect. It
+counts the writes made since the screen was opened and says they will apply on
+the next launch; the published snapshot carries a generation number, but nothing
+on the settings side can see which generation the running game process read, so a
+comparison there would be a guess presented as a fact.
+
+Stock Material controls (switch, slider, dropdown) are reused but their colours
+are overridden, so Material cannot reintroduce its own tonal surfaces into the
+palette. Press feedback is a fill step rather than a ripple, because a ripple
+reads as a second accent on a surface that is allowed exactly one.
+
+Bottom navigation on phones and a navigation rail at 720 dp and above are two
+arrangements of one composition, so a setting cannot exist on one layout and be
+missing from the other. The model page reads the generated Android
+`character-presets.json` and `character-names.json` resources and currently
+exposes 32 replacement models and 4,210 final actions, plus final-action looping,
+model scale, and the desktop Logo/login-band theme switch. Saving a preset
+serializes the same schema-5 model configuration consumed by the desktop module.
+The voice page retains the per-character language table and Android catalog
+materializer workflow.
 
 The model page exposes the desktop loop modes: native LoopTime, forced looping,
 and dual-Playable crossfade with editable loop start, loop end, and blend
-duration. Logo and login-band colors can be selected from swatches or entered
-as an exact `#RRGGBB` value.
+duration. Logo and login-band colours can be selected from swatches, from the HSV
+ring, or entered as an exact `#RRGGBB` value. A precision slider keeps the exact
+stored number in its readout until the slider is actually dragged, so saving an
+unrelated setting cannot silently round a first-person eye offset.
 
 ## Character rules and embedded comparison table
 
@@ -373,6 +428,18 @@ Research catalogs and source PCK/CHK files stay under ignored
 - Android NDK 27.2.12479018
 - CMake 3.22.1
 
+The settings app and the BEM package manager are Kotlin + Jetpack Compose. It is
+bundled into the module dex, not kept to a settings-only surface, because the
+module process hosts the settings Activity. The in-game panel is deliberately
+**not** Compose: it runs inside the hooked game process, which cannot load a
+single Compose class - see the panel section below. AGP 9 compiles Kotlin itself,
+so `org.jetbrains.kotlin.android` must **not** be applied - doing so is a build
+error, not a warning. Only the Compose compiler plugin
+(`org.jetbrains.kotlin.plugin.compose`) is applied, and the Kotlin Gradle plugin
+is raised to the same version in the root build file (2.4.20) because the Compose
+compiler refuses to run against a different Kotlin compiler. The Compose BOM is
+`2026.09.00`.
+
 The repository-local toolchain is under `tools/android-toolchain`. Build without
 network access from the repository root:
 
@@ -381,6 +448,46 @@ network access from the repository root:
 ```
 
 The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+The release build runs R8 (`isMinifyEnabled = true`). Compose's synthetic classes
+and `kotlin.Metadata` cost roughly 21 MB of dex when they survive into the APK:
+the unminified Compose build measured 27.95 MB, against 6.61 MB for the
+pre-Compose 3.3.20. R8 shrink + obfuscate brings the release APK to 8.60 MB.
+
+The optimiser stage is deliberately **off** (`-dontoptimize` in
+`proguard-rules.pro`). R8 merges classes that are never instantiated into one
+shared holder, and that holder's `<clinit>` pools the initialisers of everything
+folded into it. Measured here: `NativeCommandBridge` - a static-only class whose
+`status()` is polled from inside the game process - was folded into `Lr4;`, whose
+`<clinit>` instantiates `androidx.compose.ui.BiasAbsoluteAlignment` and friends.
+The game process calls `status()` on its normal path, so it ran that initialiser
+and crashed with no Java stack at all. Keeping the class name cannot prevent this:
+the class survives, its side effects are moved elsewhere. Turning the optimiser
+off costs about 1.5 MB (about 7.0 MB to 8.60 MB) and is the only reliable fix.
+This is why the in-game panel being plain View is necessary but not sufficient -
+the optimiser can put a dependency back into the game process on its own.
+
+Names that are read from outside the Java type system are pinned in
+`android/app/proguard-rules.pro`:
+
+- the libxposed entry class, which the framework instantiates from
+  `META-INF/xposed/java_init.list` (no root in the APK references it, so R8
+  would otherwise delete it rather than rename it);
+- `dev.betterendfield.android.BemInstaller`, whose name and method names *are*
+  the JNI symbols exported by `libbetterendfield_installer.so`, plus the
+  `conversionProgress` callback that `install_jni.cpp` resolves with
+  `GetStaticMethodID`.
+
+`:app:verifyReleaseEntryPoints` re-checks all of that against the packaged APK -
+entry class, JNI symbols, the `conversionProgress` descriptor, the four manifest
+components, and, as a fifth check, that the ten classes on the game path still
+exist as their own classes rather than folded holders. It is finalized onto
+`packageRelease`, so `:app:assembleRelease` fails instead of producing an APK
+whose entry points were renamed or whose game-process classes were merged. That
+fifth check distinguishes a *folded* class (mapped members, no class header in
+`mapping.txt`) from a *shrunk* one (no mapping lines at all, e.g. `Hotkeys`,
+whose constants javac inlined), so it does not flag a class that simply has no
+code on the game path. Debug builds stay unminified and do not run it.
 
 The `android-apk` workflow (`.github/workflows/android-build.yml`) builds that
 debug APK on GitHub Actions for every push to `main` or the fix branch and every
@@ -401,7 +508,14 @@ The settings page uses bottom navigation on phones and a navigation rail at
 entry is separate from login-model settings. The enhancement page owns the
 overlay switch and preview; the BEM page only manages packages. The framework
 entry attaches a collapsed BE icon directly to the scoped Unity application's
-Activity. Tapping it expands the panel, dragging repositions it, and the panel
+Activity. The host is a plain `FrameLayout`; the panel body is built from
+framework Views, deliberately - **not** a Compose composition. The panel runs
+inside the hooked game process, which cannot load a single Compose class, and
+3.3.21 crashed on game entry because the panel was Compose there. The host stays
+a framework View too, because it has to survive the game's content view being
+rebuilt underneath it mid-frame, and a View tree stays valid with no lifecycle
+owner - recomposition was the only thing that needed one. Tapping the icon expands
+the panel, dragging repositions it, and the panel
 survives pause/resume/destroy: game SDKs can re-call `setContentView`, which
 either strips our host from the content view or leaves it attached but buried
 under the freshly added game view, so the panel re-attaches the host to the
@@ -428,7 +542,8 @@ is also zip-aligned for Android 16 page-size compatibility.
 
 ## LSPosed scope troubleshooting
 
-Third-party BEM packages are managed from the separate `第三方模型` page.
+Third-party BEM packages are managed from the `角色外观` sub-page under the
+characters tab.
 Import validates every appearance and preserves the original package bytes;
 texture conversion is optional. If textures look wrong in game, choose
 `转换手机纹理` on that package's management card. A successful conversion
@@ -473,11 +588,11 @@ The Android client's managed readback contracts still require device verificatio
 the Windows client's missing methods do not establish Android availability.
 
 GitHub Actions currently signs release APKs with an ephemeral debug key. The
-published 3.3.20 and 3.3.21 APKs have different signing certificates, so a
-standard Android installation cannot upgrade in place across those versions.
-Back up app data before uninstalling the old APK. The user's in-game report was
-made with a local debug build; the published APK passed CI build and signature
-verification but has not been retested in-game.
+published 3.3.20, 3.3.21 and 3.3.22 APKs each have a different signing
+certificate, so a standard Android installation cannot upgrade in place across
+those versions. Back up app data before uninstalling the old APK. The user's
+in-game report was made with a local debug build; the published APK passed CI
+build and signature verification but has not been retested in-game.
 
 Optional keys, with their defaults: `first_person_eye_forward=0.03`,
 `first_person_eye_height=0.05`, `first_person_near_clip=0.03`,
@@ -486,7 +601,7 @@ game's own pitch clamp: 1.10x up, 1.50x down, clamped to ±89 degrees),
 `first_person_neck_plug_scale=1.0`. The module app writes the keys it exposes;
 any key it does not write falls back to the default listed here.
 
-The 3.3.21 app also exposes `first_person_movement=false`,
+The 3.3.22 app also exposes `first_person_movement=false`,
 `first_person_side_look_limit=60` (0–90 degrees),
 `first_person_animation_mode=0` (0 off, 1 body, 2 head, 3 realistic),
 `first_person_animation_strength=0.35` (0–1),

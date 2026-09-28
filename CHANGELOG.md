@@ -2,6 +2,16 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22
+
+- 修复 hook 后游戏闪退（无日志）的第一处根因。3.3.21 把游戏内控制面板从 Java/View 改写为 Kotlin/Jetpack Compose，而面板代码运行在被 hook 的游戏进程里，该进程无法加载任何 Compose 类，一进游戏即崩。面板现已恢复为纯 Java/View 实现（沿用 3.3.20 的实现），配色与文案同步到新版工业黄黑白 token；配套应用与 BEM 包管理器仍为 Compose，两者运行在不同进程，互不影响。
+- 修复同类根因的第二处，它在 release 构建里独立存在：R8 优化器把游戏进程内的静态工具类横向合并进一个共享宿主类，宿主类的静态初始化因此带上 `androidx.compose.ui.*` 的构造；游戏进程第一次调用该桥即崩溃，且不留 Java 堆栈。`proguard-rules.pro` 现关闭优化器（`-dontoptimize`，裁剪与混淆保留），release 体积由约 7.0 MB 增至 8.60 MB。该问题与面板是否 Compose 无关——即便面板是纯 View，优化器仍会把依赖塞回游戏进程。
+- 构建门禁 `verifyReleaseEntryPoints` 由四类检查扩为五类：新增「游戏进程内执行的类未被优化器折叠」断言。判据取 `mapping.txt` 的足迹形状——被折叠的类有成员行但无类头行，被合法删除的类一行都没有——避免把常量已被 javac 内联的死类误判为缺陷。
+- 配套应用、BEM 包管理器与设置页重写为 Kotlin + Jetpack Compose，采用单一底色、面板色与强调色的扁平工业配色；手机用底部标签、≥720 dp 用侧栏，两种布局由同一套组合驱动。
+- 发行构建开启 R8（`isMinifyEnabled = true`），为框架入口类、JNI 导出符号与 JNI 回调方法补 keep 规则，并新增 `:app:verifyReleaseEntryPoints` 门禁在打包后核对产物。
+- 版本说明：本次仅有 Android 端递进（3.3.21 → 3.3.22，versionCode 30321 → 30322），Windows 桌面端仍为 3.3.0。
+- 安装限制：GitHub Actions 的发行包沿用临时调试签名，各版本签名证书互不相同。普通 Android 设备不能直接覆盖升级；卸载旧版前须自行备份应用数据。
+
 ## 3.3.21
 
 - 双端设置接入眼位、近裁剪、朝向、动画、对话/战斗让出、过渡和显式外部改模缩头选项；新增能力默认关闭。Android 保存后须强停并重启游戏。

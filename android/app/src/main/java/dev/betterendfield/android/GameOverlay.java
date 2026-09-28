@@ -34,15 +34,23 @@ import java.util.function.Supplier;
  * SYSTEM_ALERT_WINDOW permission, no foreground service and no second process.
  */
 final class GameOverlay {
-    private static final int ACCENT = 0xFFFFC845;
-    private static final int ACCENT_INK = 0xFF120E03;
-    private static final int PANEL = 0xF00C1016;
-    private static final int ROW = 0xFF1B222B;
-    private static final int ROW_PRESSED = 0xFF2A3341;
-    private static final int TEXT = 0xFFF4F6F8;
-    private static final int TEXT_DIM = 0xFFA7B0BC;
-    private static final int TEXT_MUTED = 0xFF75808E;
-    private static final int BORDER = 0xFF2B333E;
+    // These mirror the overlay tokens of the Compose palette (UiTokens.kt,
+    // Be.Colors.overlay*). They are duplicated rather than referenced because
+    // this class runs inside the hooked game process, where loading a single
+    // androidx.compose class is fatal - the whole point of this file staying
+    // plain View is that the game process never touches Compose at all.
+    // Change them together with UiTokens.kt.
+    private static final int ACCENT = 0xFFF4E900;        // Be.Colors.accent
+    private static final int ACCENT_PRESSED = 0xFFE8DC00; // Be.Colors.accentPressed
+    private static final int ACCENT_INK = 0xFF0A0A0A;     // Be.Colors.accentInk
+    private static final int PANEL = 0xF20A0A0A;          // Be.Colors.overlayPanel
+    private static final int FIELD = 0xFF121212;          // Be.Colors.overlayField
+    private static final int ROW = 0xFF1D1D1D;            // Be.Colors.overlayRow
+    private static final int ROW_PRESSED = 0xFF2A2A2A;    // Be.Colors.overlayPressed
+    private static final int TEXT = 0xFFF2F2EE;           // Be.Colors.textPrimary
+    private static final int TEXT_DIM = 0xFFA8A8A8;       // Be.Colors.textSecondary
+    private static final int TEXT_MUTED = 0xFF777777;     // Be.Colors.textMuted
+    private static final int BORDER = 0xFF303030;         // Be.Colors.outline
 
     private final Activity activity;
     private final FrameLayout host;
@@ -303,10 +311,10 @@ final class GameOverlay {
 
         if (!current.anyControl()) {
             content.addView(notice("还没有需要即时操作的功能。\n"
-                    + "在「画面增强」页启用隐藏 HUD、自由视角或第一人称后，按钮会出现在这里。"));
+                    + "在「体验」页启用隐藏 HUD、自由镜头或第一人称后，按钮会出现在这里。"));
         }
 
-        content.addView(ghost(preview ? "结束预览" : "打开增强设置",
+        content.addView(ghost(preview ? "结束预览" : "打开体验设置",
                 view -> {
                     if (preview) {
                         remove();
@@ -375,7 +383,7 @@ final class GameOverlay {
         view.setTextSize(9);
         view.setTextColor(TEXT_DIM);
         view.setPadding(dp(10), dp(9), dp(10), dp(9));
-        view.setBackground(surface(0xFF141A22, 13, BORDER));
+        view.setBackground(surface(FIELD, 13, BORDER));
         view.setContentDescription("运行日志，点按刷新，长按复制全部");
         view.setOnClickListener(v -> updateJournal());
         view.setOnLongClickListener(v -> {
@@ -573,7 +581,7 @@ final class GameOverlay {
         LinearLayout pad = new LinearLayout(activity);
         pad.setOrientation(LinearLayout.VERTICAL);
         pad.setPadding(dp(10), dp(10), dp(10), dp(10));
-        pad.setBackground(surface(0xFF141A22, 13, BORDER));
+        pad.setBackground(surface(FIELD, 13, BORDER));
 
         pad.addView(label("移动（按住）", 11, TEXT_MUTED));
 
@@ -632,7 +640,7 @@ final class GameOverlay {
         TextView view = label(message, 12, TEXT_DIM);
         view.setLineSpacing(dp(3), 1f);
         view.setPadding(dp(13), dp(12), dp(13), dp(12));
-        view.setBackground(surface(0xFF11161C, 13, BORDER));
+        view.setBackground(surface(FIELD, 13, BORDER));
         view.setLayoutParams(stacked(12));
         return view;
     }
@@ -645,7 +653,7 @@ final class GameOverlay {
         view.setTextColor(ACCENT_INK);
         view.setGravity(Gravity.CENTER);
         view.setMinimumHeight(dp(48));
-        view.setBackground(pressable(ACCENT, 0xFFE0A513, 14));
+        view.setBackground(pressable(ACCENT, ACCENT_PRESSED, 14));
         view.setOnClickListener(listener);
         return view;
     }
@@ -710,7 +718,7 @@ final class GameOverlay {
         try {
             activity.startActivity(intent);
         } catch (RuntimeException unavailable) {
-            toast("无法打开增强设置");
+            toast("无法打开体验设置");
         }
     }
 
