@@ -6,9 +6,12 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.1 is an experimental prerelease: the in-game Compose handle
+Version 3.3.22-alpha.5 is an experimental prerelease: the in-game Compose handle
 appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
-still need device acceptance.
+still need device acceptance. The camera module's motion presets, keyframes and
+VMD parameters are now configurable from the app, but the motion stack itself has
+never been validated on a device on either platform, so its first acceptance run
+is also Windows' first.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -164,12 +167,12 @@ else is on the settings screen.
 | Time freeze | `8` | switch on the page, button on the panel |
 | First person | `-` | switch on the page, button on the panel |
 | Free-camera movement | arrows, PageUp/PageDown | press-and-hold pad on the panel |
-| Camera roll / FOV in-out / view reset | `Numpad7`, `Numpad9`, `Numpad1`, `Numpad3`, `Numpad5` | buttons on the panel |
+| Camera roll / FOV in-out / view reset | `Numpad7`, `Numpad9`, `Numpad1`, `Numpad3`, `Numpad5` | roll and FOV are press-and-hold, view reset is a tap |
 | Motion preset play/stop | `Numpad8` | button on the panel |
 | Keyframe record/play/clear | `Numpad0`, `Numpad2`, `Numpad4` | buttons on the panel |
-| VMD replay | `Numpad6` | pinned in the configuration, no panel button |
+| VMD replay | `Numpad6` | pinned in the configuration, no panel button (no import path yet) |
 | Runtime journal | none | read-only list on the panel, plus "save log to file" |
-| Movement speed, both FOVs, head/neck options | ini values | sliders and switches on the page |
+| Movement speed, both FOVs, head/neck options, motion presets and keyframe/VMD parameters | ini values | sliders and switches on the page and its sub-pages |
 | Sustained special dash | none | Enhancements page only |
 
 The panel only offers a control whose module was actually configured to load. A
@@ -692,3 +695,27 @@ hands camera control back to the game during combat and restores first person
 after combat. The user reports the operable first-person settings passed on
 Android 3.3.21 except external head scale, which was not tested. The GPU mesh
 readback and cap path still requires separate contract and runtime evidence.
+
+Since 3.3.22-alpha.5 the same app also writes the free camera's motion, keyframe
+and VMD parameters: `motion_preset=orbit` (`orbit` | `dolly_zoom` | `crane` |
+`truck`, and `ParseMotionPreset` also takes the short aliases `dolly` and `pan`,
+both of which this screen normalises to the long form), `motion_speed=1`
+(-20 to 20), `orbit_speed=20` (-180 to 180 deg/s), `motion_duration=0`
+(0 means unlimited; 0 to 600 s), `motion_target_height=1.2` (-5 to 5, the
+anchor's height above the controlled character), `keyframe_segment_seconds=3`
+(0.2 to 60), `keyframe_loop=false`, `vmd_camera_scale=0.07` (0.001 to 10),
+`vmd_camera_fov_bias=5` (-60 to 60 deg) and `vmd_camera_loop=false`. Those
+ranges are exactly the ones the native module clamps to, so a value the settings
+screen accepts is never rewritten on the way into the game; non-finite input
+falls back to the defaults above.
+
+`vmd_camera_file` is written empty on purpose. There is no import path yet that
+puts a `.vmd` somewhere the game process can read, and an empty value makes the
+native side take its existing "no VMD camera file is configured" branch instead
+of reusing a path left over from a desktop configuration. `mouse_invert_y` and
+`mouse_sensitivity` are written at their own defaults and deliberately have no
+UI, because the phone still has no steering input: `g_mouse_dx/dy` stays 0 while
+the mouse hook is compiled out, so the free camera can move, rise, roll and zoom
+but cannot turn. The panel's zoom buttons are press-and-hold rather than a 180 ms
+tap, matching what the desktop keys mean - a tap only steps the lens by about
+3.6 degrees.

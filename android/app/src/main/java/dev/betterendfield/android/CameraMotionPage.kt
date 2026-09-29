@@ -1,0 +1,145 @@
+package dev.betterendfield.android
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+
+/**
+ * The motion sub-page: camera presets, keyframes and VMD parameters.
+ *
+ * Split from the camera card because these are eight numeric targets plus two
+ * switches, which buries the three on/off decisions the card is really about.
+ * Everything here is a parameter of a feature whose buttons live in the in-game
+ * panel, so the page is also the inventory of what the panel can drive once the
+ * free camera is armed.
+ *
+ * The rows are dimmed rather than hidden when the free camera is off: the
+ * desktop module only polls the preset, keyframe and VMD hotkeys while the free
+ * camera is armed, so with the camera off these values would be written but
+ * never read - and a row that silently does nothing reads as broken.
+ */
+@Composable
+fun CameraMotionPage(state: SettingsState) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
+        SectionCard(
+            eyebrow = stringResource(R.string.camera_card_eyebrow),
+            title = stringResource(R.string.page_camera_motion),
+            subtitle = stringResource(R.string.camera_motion_subtitle),
+            status = state.cameraCardStatus,
+        ) {
+            GroupLabel(stringResource(R.string.motion_group_preset), top = Be.Space.l)
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                FieldLabel(stringResource(R.string.motion_preset_label), top = Be.Space.none)
+                SelectField(
+                    options = listOf(
+                        stringResource(R.string.motion_preset_orbit),
+                        stringResource(R.string.motion_preset_dolly_zoom),
+                        stringResource(R.string.motion_preset_crane),
+                        stringResource(R.string.motion_preset_truck),
+                    ),
+                    selectedIndex = state.motionPreset,
+                    onSelect = state::updateMotionPreset,
+                    enabled = state.cameraMotionAvailable,
+                )
+                BodyText(stringResource(R.string.motion_preset_hint))
+                SliderRow(
+                    label = stringResource(R.string.motion_speed_label),
+                    value = state.motionSpeed,
+                    onValueChange = state::updateMotionSpeed,
+                    valueRange = -20f..20f,
+                    unit = stringResource(R.string.motion_speed_unit),
+                    steps = 400,
+                    decimals = 1,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.motion_orbit_speed_label),
+                    value = state.orbitSpeed,
+                    onValueChange = state::updateOrbitSpeed,
+                    valueRange = -180f..180f,
+                    unit = stringResource(R.string.motion_orbit_speed_unit),
+                    // One degree per stop, so the integer readout is the stored
+                    // value rather than a rounded version of it.
+                    steps = 360,
+                    decimals = 0,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.motion_duration_label),
+                    value = state.motionDuration,
+                    onValueChange = state::updateMotionDuration,
+                    valueRange = 0f..600f,
+                    unit = stringResource(R.string.camera_fp_seconds),
+                    steps = 600,
+                    decimals = 0,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.motion_target_height_label),
+                    value = state.motionTargetHeight,
+                    onValueChange = state::updateMotionTargetHeight,
+                    valueRange = -5f..5f,
+                    steps = 100,
+                    decimals = 1,
+                    enabled = state.cameraMotionAvailable,
+                )
+            }
+
+            GroupLabel(stringResource(R.string.motion_group_keyframe))
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                SliderRow(
+                    label = stringResource(R.string.motion_keyframe_segment_label),
+                    value = state.keyframeSegmentSeconds,
+                    onValueChange = state::updateKeyframeSegmentSeconds,
+                    valueRange = 0.2f..60f,
+                    unit = stringResource(R.string.camera_fp_seconds),
+                    steps = 598,
+                    decimals = 1,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SwitchRow(
+                    title = stringResource(R.string.motion_keyframe_loop),
+                    description = stringResource(R.string.motion_keyframe_loop_hint),
+                    checked = state.keyframeLoop,
+                    onCheckedChange = state::updateKeyframeLoop,
+                    enabled = state.cameraMotionAvailable,
+                )
+                BodyText(stringResource(R.string.motion_keyframe_note))
+            }
+
+            GroupLabel(stringResource(R.string.motion_group_vmd))
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                SliderRow(
+                    label = stringResource(R.string.motion_vmd_scale_label),
+                    value = state.vmdScale,
+                    onValueChange = state::updateVmdScale,
+                    valueRange = 0.001f..10f,
+                    steps = 1000,
+                    decimals = 3,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.motion_vmd_fov_bias_label),
+                    value = state.vmdFovBias,
+                    onValueChange = state::updateVmdFovBias,
+                    valueRange = -60f..60f,
+                    unit = stringResource(R.string.degree_suffix),
+                    steps = 600,
+                    decimals = 1,
+                    enabled = state.cameraMotionAvailable,
+                )
+                SwitchRow(
+                    title = stringResource(R.string.motion_vmd_loop),
+                    description = stringResource(R.string.motion_vmd_loop_hint),
+                    checked = state.vmdLoop,
+                    onCheckedChange = state::updateVmdLoop,
+                    enabled = state.cameraMotionAvailable,
+                )
+                BodyText(stringResource(R.string.motion_vmd_note))
+            }
+        }
+    }
+}

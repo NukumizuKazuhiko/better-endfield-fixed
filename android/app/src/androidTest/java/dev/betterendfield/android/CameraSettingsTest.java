@@ -22,7 +22,8 @@ final class CameraSettingsTest {
             check("0.03".equals(ModuleSettings.getFirstPersonNearClip(isolated)), "clip default");
             check(!ModuleSettings.isFirstPersonExtendLookRange(isolated), "look range default");
             ModuleSettings.setCameraSettings(isolated, false, false, false, true, true, true,
-                    5, 60, 75, 0.1234, -0.25, 0.001, true, ModuleSettings.getFirstPersonAdvanced(isolated));
+                    5, 60, 75, 0.1234, -0.25, 0.001, true, ModuleSettings.getFirstPersonAdvanced(isolated),
+                    ModuleSettings.getCameraMotion(isolated));
             ModuleSettings.republishConfigurations(isolated);
             String ini = ModuleConfigurations.read(preferences).camera();
             check(ini.contains("first_person_eye_forward=0.1234\n"), "forward round trip");
@@ -40,39 +41,36 @@ final class CameraSettingsTest {
             check(ModuleConfigurations.read(preferences).camera().contains(
                     "first_person_extend_look_range=true\n"), "disabled/re-enabled retains switch");
             ModuleSettings.setCameraSettings(isolated, false, false, false, true, true, true,
-                    5, 60, 75, -1, 2, 0, false, ModuleSettings.getFirstPersonAdvanced(isolated));
+                    5, 60, 75, -1, 2, 0, false, ModuleSettings.getFirstPersonAdvanced(isolated),
+                    ModuleSettings.getCameraMotion(isolated));
             ini = ModuleConfigurations.read(preferences).camera();
             check(ini.contains("first_person_eye_forward=0\n"), "forward lower bound");
             check(ini.contains("first_person_eye_height=0.5\n"), "height upper bound");
             check(ini.contains("first_person_near_clip=0.001\n"), "clip lower bound");
             ModuleSettings.setCameraSettings(isolated, false, false, false, true, true, true,
-                    5, 60, 75, 2, -2, 2, false, ModuleSettings.getFirstPersonAdvanced(isolated));
+                    5, 60, 75, 2, -2, 2, false, ModuleSettings.getFirstPersonAdvanced(isolated),
+                    ModuleSettings.getCameraMotion(isolated));
             ini = ModuleConfigurations.read(preferences).camera();
             check(ini.contains("first_person_eye_forward=0.5\n"), "forward upper bound");
             check(ini.contains("first_person_eye_height=-0.5\n"), "height lower bound");
             check(ini.contains("first_person_near_clip=1\n"), "clip upper bound");
             ModuleSettings.setCameraSettings(isolated, false, false, false, true, true, true,
                     5, 60, 75, Double.NaN, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, false,
-                    ModuleSettings.getFirstPersonAdvanced(isolated));
+                    ModuleSettings.getFirstPersonAdvanced(isolated),
+                    ModuleSettings.getCameraMotion(isolated));
             ini = ModuleConfigurations.read(preferences).camera();
             check(ini.contains("first_person_eye_forward=0.03\n"), "nonfinite forward fallback");
             check(ini.contains("first_person_eye_height=0.05\n"), "nonfinite height fallback");
             check(ini.contains("first_person_near_clip=0.03\n"), "nonfinite clip fallback");
-            boolean[] sliderChecks = new boolean[3];
-            instrumentation.runOnMainSync(() -> {
-                ValueSlider slider = new ValueSlider(isolated, "clip", "", 0.001f, 1f, 999, 4);
-                slider.setValue(0.03f);
-                sliderChecks[0] = slider.getValue() == 0.03f;
-                slider.setValue(0.1234f);
-                sliderChecks[1] = slider.getValue() == 0.1234f;
-                slider.setAvailable(false);
-                slider.setAvailable(true);
-                sliderChecks[2] = slider.getValue() == 0.1234f;
-            });
-            check(sliderChecks[0], "slider retains exact default");
-            check(sliderChecks[1], "slider retains unedited stored precision");
-            check(sliderChecks[2], "availability preserves value");
+            // The three slider assertions that used to sit here drove
+            // ValueSlider, the hand-rolled View the 3.3.22 Compose rewrite
+            // deleted. The rule they covered - keep the exact stored number in
+            // the readout until the user actually drags - now lives in
+            // SliderRow's own state, which only a Compose test host can reach.
+            // Leaving the dead calls behind is what stopped this whole source
+            // set from compiling.
             testAdvanced(isolated);
+            testMotion(isolated);
         } finally {
             preferences.edit().clear().commit();
         }
@@ -88,7 +86,8 @@ final class CameraSettingsTest {
                 ModuleSettings.parse(ModuleSettings.getFirstPersonEyeForward(context), 0.03),
                 ModuleSettings.parse(ModuleSettings.getFirstPersonEyeHeight(context), 0.05),
                 ModuleSettings.parse(ModuleSettings.getFirstPersonNearClip(context), 0.03),
-                ModuleSettings.isFirstPersonExtendLookRange(context), ModuleSettings.getFirstPersonAdvanced(context));
+                ModuleSettings.isFirstPersonExtendLookRange(context), ModuleSettings.getFirstPersonAdvanced(context),
+                ModuleSettings.getCameraMotion(context));
     }
 
     private static void testAdvanced(Context context) {
@@ -98,13 +97,15 @@ final class CameraSettingsTest {
                 && defaults.transitionSeconds() == 0 && !defaults.externalHeadScale(), "advanced defaults off");
         check(defaults.sideLookLimit() == 60 && defaults.animationStrength() == 0.35, "advanced tuning defaults");
         ModuleSettings.setCameraSettings(context, false, false, false, true, true, true,
-                5, 60, 75, 0.03, 0.05, 0.03, false, defaults);
+                5, 60, 75, 0.03, 0.05, 0.03, false, defaults,
+                ModuleSettings.getCameraMotion(context));
         check(ModuleConfigurations.read(FrameworkSettings.open(context)).camera().contains(
                 "first_person_third_person_in_combat=false\n"), "combat INI default off");
         ModuleSettings.FirstPersonAdvanced configured = new ModuleSettings.FirstPersonAdvanced(
                 true, 42.5, 3, 0.1234, true, true, 0.2468, true);
         ModuleSettings.setCameraSettings(context, false, false, false, true, true, true,
-                5, 60, 75, 0.03, 0.05, 0.03, false, configured);
+                5, 60, 75, 0.03, 0.05, 0.03, false, configured,
+                ModuleSettings.getCameraMotion(context));
         ModuleSettings.republishConfigurations(context);
         check(configured.equals(ModuleSettings.getFirstPersonAdvanced(context)), "advanced round trip");
         String ini = ModuleConfigurations.read(FrameworkSettings.open(context)).camera();
@@ -116,7 +117,8 @@ final class CameraSettingsTest {
             check(ini.contains(line + "\n"), line);
         }
         ModuleSettings.setCameraSettings(context, false, false, false, false, true, true,
-                5, 60, 75, 0.03, 0.05, 0.03, false, configured);
+                5, 60, 75, 0.03, 0.05, 0.03, false, configured,
+                ModuleSettings.getCameraMotion(context));
         ModuleSettings.republishConfigurations(context);
         check(configured.equals(ModuleSettings.getFirstPersonAdvanced(context)), "disabled advanced retained");
         saveStored(context, true);
@@ -134,5 +136,67 @@ final class CameraSettingsTest {
                 Double.POSITIVE_INFINITY, false, false, Double.NaN, false);
         check(bounded.sideLookLimit() == 60 && bounded.animationMode() == 0
                 && bounded.animationStrength() == 0.35 && bounded.transitionSeconds() == 0, "advanced finite fallback");
+    }
+
+    /**
+     * The motion/keyframe/VMD block. The desktop module clamps these values
+     * again on its own side, so the only thing worth asserting here is that the
+     * settings screen writes the same keys with the same ranges: a mismatch
+     * would show up as a number that changes on its own between the page and
+     * the game.
+     */
+    private static void testMotion(Context context) {
+        ModuleSettings.CameraMotion defaults = ModuleSettings.getCameraMotion(context);
+        check(!defaults.invertY() && defaults.sensitivity() == 0.1, "motion look defaults");
+        check("orbit".equals(defaults.preset()) && defaults.speed() == 1.0
+                && defaults.orbitSpeed() == 20.0, "motion preset defaults");
+        check(defaults.duration() == 0 && defaults.targetHeight() == 1.2
+                && defaults.segmentSeconds() == 3.0, "motion timing defaults");
+        check(!defaults.keyframeLoop() && defaults.vmdScale() == 0.07
+                && defaults.vmdFovBias() == 5.0 && !defaults.vmdLoop(), "motion VMD defaults");
+
+        ModuleSettings.CameraMotion configured = new ModuleSettings.CameraMotion(
+                true, 0.42, "dolly_zoom", -3.5, 90, 12.5, -2.25, 7.5, true, 0.5, -12.5, true);
+        ModuleSettings.setCameraSettings(context, false, true, false, false, true, true,
+                5, 60, 75, 0.03, 0.05, 0.03, false,
+                ModuleSettings.getFirstPersonAdvanced(context), configured);
+        ModuleSettings.republishConfigurations(context);
+        check(configured.equals(ModuleSettings.getCameraMotion(context)), "motion round trip");
+        String ini = ModuleConfigurations.read(FrameworkSettings.open(context)).camera();
+        for (String line : new String[]{"mouse_invert_y=true", "mouse_sensitivity=0.42",
+                "motion_preset=dolly_zoom", "motion_speed=-3.5", "orbit_speed=90",
+                "motion_duration=12.5", "motion_target_height=-2.25",
+                "keyframe_segment_seconds=7.5", "keyframe_loop=true",
+                "vmd_camera_scale=0.5", "vmd_camera_fov_bias=-12.5", "vmd_camera_loop=true"}) {
+            check(ini.contains(line + "\n"), line);
+        }
+        // The file is not configurable on Android yet, but the key has to be
+        // present and empty so the native reader reports "not configured"
+        // instead of falling back to a stale desktop path.
+        check(ini.contains("vmd_camera_file=\n"), "empty VMD file key");
+
+        ModuleSettings.CameraMotion bounded = new ModuleSettings.CameraMotion(
+                false, 9, "nope", 100, -900, 9999, 99, 0.01, false, 99, -900, false);
+        check(bounded.sensitivity() == 0.5 && "orbit".equals(bounded.preset())
+                && bounded.speed() == 20 && bounded.orbitSpeed() == -180
+                && bounded.duration() == 600 && bounded.targetHeight() == 5
+                && bounded.segmentSeconds() == 0.2 && bounded.vmdScale() == 10
+                && bounded.vmdFovBias() == -60, "motion bounds");
+        bounded = new ModuleSettings.CameraMotion(false, Double.NaN, null, Double.NaN,
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, false, Double.NaN, Double.NaN, false);
+        check(bounded.sensitivity() == 0.1 && bounded.speed() == 1.0 && bounded.orbitSpeed() == 20.0
+                && bounded.duration() == 0 && bounded.targetHeight() == 1.2
+                && bounded.segmentSeconds() == 3.0 && bounded.vmdScale() == 0.07
+                && bounded.vmdFovBias() == 5.0 && "orbit".equals(bounded.preset()),
+                "motion finite fallback");
+        // An unparsable preset must land on orbit rather than on "index -1" when
+        // the page maps the name back to a picker position.
+        check(ModuleSettings.presetName(" DolLy_Zoom ").equals("dolly_zoom"), "preset name trimmed");
+        check(ModuleSettings.presetName("truck").equals("truck"), "preset name kept");
+        // ParseMotionPreset accepts these two short forms as well, so the store
+        // has to agree or the round trip would quietly rewrite the preset.
+        check(ModuleSettings.presetName("dolly").equals("dolly_zoom"), "dolly alias");
+        check(ModuleSettings.presetName("pan").equals("truck"), "pan alias");
+        check(ModuleSettings.presetName("bogus").equals("orbit"), "unknown preset falls back");
     }
 }

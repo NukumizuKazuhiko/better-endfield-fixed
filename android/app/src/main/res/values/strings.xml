@@ -107,6 +107,34 @@
     <string name="camera_speed_label">移动速度</string>
     <string name="camera_fp_fov_label">第一人称视野（FOV）</string>
 
+    <!-- betterendfield.camera · 运镜与镜头 -->
+    <string name="camera_motion_hint_short">预设运镜、关键帧段长与 VMD 镜头参数</string>
+    <string name="camera_motion_subtitle">自由镜头的进阶参数。触发按钮在悬浮窗的「运镜 / 关键帧」区，这里只决定参数；这些值在游戏启动时读入，修改后需重启游戏。</string>
+    <string name="motion_group_preset">运镜预设</string>
+    <string name="motion_preset_label">预设</string>
+    <string name="motion_preset_orbit">环绕</string>
+    <string name="motion_preset_dolly_zoom">希区柯克变焦</string>
+    <string name="motion_preset_crane">升降</string>
+    <string name="motion_preset_truck">横移</string>
+    <string name="motion_preset_hint">环绕：绕锚点转圈。希区柯克变焦：推近的同时反向拉大视野。升降、横移：匀速直线运动。锚点取当前操控角色，取不到时退到镜头前方 5 米；时长到点后自动结束。</string>
+    <string name="motion_speed_label">运镜速度倍率</string>
+    <string name="motion_speed_unit">×</string>
+    <string name="motion_orbit_speed_label">环绕角速度</string>
+    <string name="motion_orbit_speed_unit">°/s</string>
+    <string name="motion_duration_label">运镜时长（0 为无限）</string>
+    <string name="motion_target_height_label">锚点高度（游戏单位）</string>
+    <string name="motion_group_keyframe">关键帧</string>
+    <string name="motion_keyframe_segment_label">关键帧段长（秒）</string>
+    <string name="motion_keyframe_loop">循环回放关键帧</string>
+    <string name="motion_keyframe_loop_hint">播完最后一段后从头继续。</string>
+    <string name="motion_keyframe_note">关键帧在游戏内由悬浮窗记录，最多 64 个；位置走 Catmull-Rom、朝向走球面插值、视野线性插值。段长决定相邻关键帧之间过渡多久。</string>
+    <string name="motion_group_vmd">VMD 镜头</string>
+    <string name="motion_vmd_scale_label">位移缩放</string>
+    <string name="motion_vmd_fov_bias_label">视野偏置</string>
+    <string name="motion_vmd_loop">循环播放 VMD</string>
+    <string name="motion_vmd_loop_hint">播完最后一帧后从头继续。</string>
+    <string name="motion_vmd_note">这些参数作用于导入的 .vmd 镜头文件（MMD 相机轨道）。当前版本还没有导入入口，写入游戏的路径是空的，按下悬浮窗的 VMD 按钮会在面板日志里提示未配置文件。</string>
+
     <!-- betterendfield.actions -->
     <string name="dash_card_eyebrow">SPRINT · betterendfield.actions</string>
     <string name="dash_card_title">冲刺持续</string>
@@ -148,6 +176,7 @@
     <string name="page_characters">角色</string>
     <string name="page_tools">工具</string>
     <string name="page_first_person">第一人称</string>
+    <string name="page_camera_motion">运镜与镜头</string>
     <string name="page_appearance">角色外观</string>
     <string name="page_log">运行日志</string>
     <string name="page_about">关于</string>

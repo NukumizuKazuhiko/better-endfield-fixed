@@ -120,6 +120,18 @@ private fun CameraCard(state: SettingsState) {
             BodyText(stringResource(R.string.camera_free_fov_note))
         }
 
+        // No group label of its own: the row's own title already names the
+        // sub-page, and a heading repeating it would just double the text.
+        SubPageRow(
+            title = stringResource(R.string.page_camera_motion),
+            hint = stringResource(R.string.camera_motion_hint_short),
+            // There is no switch of its own: the desktop module only reads the
+            // preset, keyframe and VMD hotkeys while the free camera is armed,
+            // so the free camera is what decides whether this block is live.
+            state = state.freeCamera,
+            onClick = { state.openPage(SettingsPage.CAMERA_MOTION) },
+        )
+
         GroupLabel(stringResource(R.string.camera_group_first_person))
         SubPageRow(
             title = stringResource(R.string.camera_first_person),

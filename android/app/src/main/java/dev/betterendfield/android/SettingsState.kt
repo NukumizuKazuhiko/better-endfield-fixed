@@ -13,7 +13,7 @@ import java.util.Locale
 /**
  * Page indices for the settings tree.
  *
- * Four tabs, and four sub-pages that are reached from a card inside a tab. Both
+ * Four tabs, and five sub-pages that are reached from a card inside a tab. Both
  * kinds are addressed by the same integer because the shell switches on one
  * value; [parentOf] is what keeps the tab strip highlighted while a sub-page is
  * open, so "which tab am I in" stays answerable on every screen.
@@ -44,12 +44,13 @@ object SettingsPage {
     const val APPEARANCE = 11
     const val LOG = 12
     const val ABOUT = 13
+    const val CAMERA_MOTION = 14
 
     fun isSubPage(page: Int): Boolean = page >= FIRST_PERSON
 
     /** The tab a page belongs to, so a sub-page keeps its parent highlighted. */
     fun parentOf(page: Int): Int = when (page) {
-        FIRST_PERSON -> EXPERIENCE
+        FIRST_PERSON, CAMERA_MOTION -> EXPERIENCE
         APPEARANCE -> CHARACTERS
         LOG, ABOUT -> TOOLS
         else -> page
@@ -57,6 +58,7 @@ object SettingsPage {
 
     fun titleOf(page: Int): Int = when (page) {
         FIRST_PERSON -> R.string.page_first_person
+        CAMERA_MOTION -> R.string.page_camera_motion
         APPEARANCE -> R.string.page_appearance
         LOG -> R.string.page_log
         ABOUT -> R.string.page_about
@@ -585,6 +587,37 @@ class SettingsState(private val context: Context) {
     var firstPersonExternalHeadScale by mutableStateOf(false)
         private set
 
+    /*
+     * The free camera's motion/keyframe/VMD block, stored as one record by
+     * ModuleSettings. mouseInvertY and mouseSensitivity travel with it because
+     * the configuration has always carried them; nothing on the phone steers
+     * them yet, so they keep their defaults until the on-screen look pad lands.
+     */
+    var mouseInvertY by mutableStateOf(false)
+        private set
+    var mouseSensitivity by mutableStateOf(0.1f)
+        private set
+    var motionPreset by mutableStateOf(0)
+        private set
+    var motionSpeed by mutableStateOf(1f)
+        private set
+    var orbitSpeed by mutableStateOf(20f)
+        private set
+    var motionDuration by mutableStateOf(0f)
+        private set
+    var motionTargetHeight by mutableStateOf(1.2f)
+        private set
+    var keyframeSegmentSeconds by mutableStateOf(3f)
+        private set
+    var keyframeLoop by mutableStateOf(false)
+        private set
+    var vmdScale by mutableStateOf(0.07f)
+        private set
+    var vmdFovBias by mutableStateOf(5f)
+        private set
+    var vmdLoop by mutableStateOf(false)
+        private set
+
     // betterendfield.actions
     var sustainedDash by mutableStateOf(false)
         private set
@@ -624,6 +657,21 @@ class SettingsState(private val context: Context) {
         firstPersonThirdPersonInCombat = advanced.thirdPersonInCombat()
         firstPersonTransitionSeconds = advanced.transitionSeconds().toFloat()
         firstPersonExternalHeadScale = advanced.externalHeadScale()
+        val motion = ModuleSettings.getCameraMotion(context)
+        mouseInvertY = motion.invertY()
+        mouseSensitivity = motion.sensitivity().toFloat()
+        motionPreset = ModuleSettings.MOTION_PRESETS
+            .indexOfFirst { name -> name.equals(motion.preset(), ignoreCase = true) }
+            .coerceAtLeast(0)
+        motionSpeed = motion.speed().toFloat()
+        orbitSpeed = motion.orbitSpeed().toFloat()
+        motionDuration = motion.duration().toFloat()
+        motionTargetHeight = motion.targetHeight().toFloat()
+        keyframeSegmentSeconds = motion.segmentSeconds().toFloat()
+        keyframeLoop = motion.keyframeLoop()
+        vmdScale = motion.vmdScale().toFloat()
+        vmdFovBias = motion.vmdFovBias().toFloat()
+        vmdLoop = motion.vmdLoop()
         sustainedDash = ModuleSettings.isSustainedDashEnabled(context)
         liinoCleanDash = ModuleSettings.isLiinoCleanDashEnabled(context)
         dashAglina = ModuleSettings.isDashCharacterEnabled(context, "aglina")
@@ -751,6 +799,66 @@ class SettingsState(private val context: Context) {
         saveCameraSettings()
     }
 
+    fun updateMouseInvertY(value: Boolean) {
+        mouseInvertY = value
+        saveCameraSettings()
+    }
+
+    fun updateMouseSensitivity(value: Float) {
+        mouseSensitivity = value
+        saveCameraSettings()
+    }
+
+    fun updateMotionPreset(index: Int) {
+        motionPreset = index
+        saveCameraSettings()
+    }
+
+    fun updateMotionSpeed(value: Float) {
+        motionSpeed = value
+        saveCameraSettings()
+    }
+
+    fun updateOrbitSpeed(value: Float) {
+        orbitSpeed = value
+        saveCameraSettings()
+    }
+
+    fun updateMotionDuration(value: Float) {
+        motionDuration = value
+        saveCameraSettings()
+    }
+
+    fun updateMotionTargetHeight(value: Float) {
+        motionTargetHeight = value
+        saveCameraSettings()
+    }
+
+    fun updateKeyframeSegmentSeconds(value: Float) {
+        keyframeSegmentSeconds = value
+        saveCameraSettings()
+    }
+
+    fun updateKeyframeLoop(value: Boolean) {
+        keyframeLoop = value
+        saveCameraSettings()
+    }
+
+    fun updateVmdScale(value: Float) {
+        vmdScale = value
+        saveCameraSettings()
+    }
+
+    fun updateVmdFovBias(value: Float) {
+        vmdFovBias = value
+        saveCameraSettings()
+    }
+
+    fun updateVmdLoop(value: Boolean) {
+        vmdLoop = value
+        saveCameraSettings()
+    }
+
     fun updateSustainedDash(value: Boolean) {
         sustainedDash = value
         saveDashSettings()
@@ -815,6 +923,25 @@ class SettingsState(private val context: Context) {
                 firstPersonTransitionSeconds.toDouble(),
                 firstPersonExternalHeadScale,
             ),
+            ModuleSettings.CameraMotion(
+                mouseInvertY,
+                mouseSensitivity.toDouble(),
+                // The preset travels as its desktop name; the record maps
+                // anything unknown back to orbit, so the index only has to stay
+                // inside the array the picker was built from.
+                ModuleSettings.MOTION_PRESETS[
+                    motionPreset.coerceIn(0, ModuleSettings.MOTION_PRESETS.size - 1),
+                ],
+                motionSpeed.toDouble(),
+                orbitSpeed.toDouble(),
+                motionDuration.toDouble(),
+                motionTargetHeight.toDouble(),
+                keyframeSegmentSeconds.toDouble(),
+                keyframeLoop,
+                vmdScale.toDouble(),
+                vmdFovBias.toDouble(),
+                vmdLoop,
+            ),
         )
         afterEnhancementChange()
     }
@@ -860,6 +987,13 @@ class SettingsState(private val context: Context) {
     val firstPersonThirdPersonInCombatAvailable get() = firstPerson
     val firstPersonTransitionSecondsAvailable get() = firstPerson
     val firstPersonExternalHeadScaleAvailable get() = firstPerson && firstPersonHideHead
+    /*
+     * The whole motion block hangs off the free camera. The desktop module only
+     * polls the preset, keyframe and VMD hotkeys while the free camera is armed,
+     * so a row that could be edited with the camera off would never be read -
+     * the same reason "camera speed" is dimmed whenever the camera is off.
+     */
+    val cameraMotionAvailable get() = freeCamera
     val dashCharactersAvailable get() = sustainedDash
     val liinoCleanDashAvailable get() = sustainedDash && dashLiino
 

@@ -121,8 +121,13 @@ internal fun MotionControls(callbacks: OverlaySurface.Callbacks) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             OverlayActionRow("播放 / 停止", { callbacks.pulse(Hotkeys.MOTION, "运镜 播放/停止") },
                 "视角回正", { callbacks.pulse(Hotkeys.VIEW_RESET, "视角回正") })
-            OverlayActionRow("广角 +", { callbacks.pulse(Hotkeys.FOV_WIDE, "广角 +") },
-                "长焦 +", { callbacks.pulse(Hotkeys.FOV_NARROW, "长焦 +") })
+            // The zoom keys are read while they are down on the desktop, so a
+            // 180 ms pulse only steps the lens about 3.6 degrees per tap. Holding
+            // is both what the key means and the only way to frame a wide shot.
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                HoldControl("广角 +", Hotkeys.FOV_WIDE, "广角 +", Modifier.weight(1f), callbacks)
+                HoldControl("长焦 +", Hotkeys.FOV_NARROW, "长焦 +", Modifier.weight(1f), callbacks)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 HoldControl("滚转 ↺", Hotkeys.ROLL_LEFT, "逆时针滚转", Modifier.weight(1f), callbacks)
                 HoldControl("滚转 ↻", Hotkeys.ROLL_RIGHT, "顺时针滚转", Modifier.weight(1f), callbacks)

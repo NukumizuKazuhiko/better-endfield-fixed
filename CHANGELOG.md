@@ -2,6 +2,18 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.5
+
+- 运镜（高级运镜预设 / 关键帧 / VMD 镜头）在 Android 上补齐配置面。此前 Android 的相机配置只写开关与热键，13 个运镜参数一个都没写：原生模块只能按默认值跑「环绕」，`dolly_zoom`（希区柯克变焦）/`crane`（升降）/`truck`（横移）三种预设没有任何入口，关键帧段长、VMD 位移缩放与视野偏置也无从修改。现在这些值由设置页写入，并新增「体验 → 运镜与镜头」子页集中编辑。
+- 实现方式是为 `ModuleSettings` 增加一个 `CameraMotion` 记录，与既有的 `FirstPersonAdvanced` 同构：构造时按原生模块的同一组上下限夹取（速度 ±20、环绕角速度 ±180°/s、时长 0–600 秒、锚点高度 ±5、关键帧段长 0.2–60 秒、VMD 缩放 0.001–10、VMD 视野偏置 ±60°），非有限值回退默认，预设名归一到 `ParseMotionPreset` 认得的四个名字，再统一序列化成 ini 行与偏好键。夹取范围与 `native/modules/camera/module.cpp` 的 `std::clamp` 一一对应，因此设置页接受的值不会在进游戏时被二次改动。预设名同时接受原生解析器认的两个短别名 `dolly` / `pan`——不认它们的话，任何从别处写进偏好的等价预设在设置页保存时都会被静默改写成「环绕」。
+- 移动端仍不提供转向输入，因此 `mouse_invert_y` 与 `mouse_sensitivity` 继续写默认值、暂不暴露到设置页。`g_mouse_dx/dy` 在 Android 恒为 0（鼠标钩子整段只在 Windows 下编译），自由相机因此能移动、升降、滚转、变焦，唯独不能转视角；先放出没有实际作用的滑杆只会被读成「坏了」。屏幕拖拽转向待后续阶段。
+- `vmd_camera_file` 现在显式写成空值而不是省掉该键。Android 还没有把 `.vmd` 送进游戏进程可读路径的通道，写空值会让原生侧走「未配置文件」这条既有分支并留下日志，而不是沿用桌面端可能残留的路径。VMD 的三项参数已进设置页，导入入口待后续阶段。
+- 悬浮窗「运镜 / 关键帧」区的广角/长焦由 180 毫秒脉冲改为按住。桌面端这两个键是按住生效，180 毫秒只步进约 3.6°，与键的语义不符，也取不了景。
+- 顺带修复仓库自 3.3.22 Compose 重写以来一直无法编译的 instrumented 测试源集：`CameraSettingsTest` 仍在调用那一次重写中删除的 `ValueSlider`。该源集不在 CI 的构建路径上，所以一直没有暴露。同时为运镜块补上往返、边界与预设别名断言。
+- 本机验证（不含实机）：release 构建通过含五类断言的 `verifyReleaseEntryPoints` 门禁；产物 dex 中按名检出全部 13 个 ini 键与 4 个预设名，并与 `module.cpp` 的解析器逐键交叉核对，无一处拼写差异；用真实的 `ModuleSettings.CameraMotion` 在 JVM 上直接生成 ini（同目录仅桩替换 `Hotkeys` 与 `FrameworkSettings` 两个与 ini 生成无关的协作类），默认值、越界夹取、非有限回退与预设归一化的输出均与原生默认一致。
+- 未上机：设备侧只完成签名与版本核对，instrumented 断言未执行——`HLK-AL00` 上装的是 3.3.21（旧的临时 debug 身份，证书 SHA-256 `62713BA05E66F3A7E05747F3E63F04C60F05B339D7DD4CFCA5834DAF46B9A096`），与原位覆盖不相容，需先卸载；本机 release 身份与已发布的 alpha.3 完全一致（`8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`），可原位覆盖 alpha.2 及之后的任何版本。运镜本体在 Windows 侧同样尚未实机验证，因此这是双平台首次上机验证；逐阶段验收判据见 [docs/CAMERA_MOTION_ANDROID_PLAN_20260930.md](docs/CAMERA_MOTION_ANDROID_PLAN_20260930.md)。
+- Android `versionName=3.3.22-alpha.5`、`versionCode=30322`（与 alpha.1 ~ alpha.4 同值：versionCode 只编码到 3.3.22 这一档，不编码预发布序号）；桌面端仍为 3.3.0。本预发布 APK 由本机构建、固定 release 身份签名，体积 8,667,068 字节，SHA-256 `2962EB3600EB0F92341304BEB7353BD05AADC73ACBC147D4849D3C37222BA7F7`；相比已发布的 alpha.3 包大 27,484 字节，其中含新子页与文案，也含本机包与 CI 包原生段必然存在的差异（内嵌源码路径不同，两者 `.so` 从不逐字节相同）。
+
 ## 3.3.22-alpha.4
 
 - 修复设置界面换页后不回到顶部：在任一页面向下滚动后切到另一页，新页面会停在上一个页面留下的同一滚动偏移处（也就是页面中下段），而不是从顶部开始。根因是整个设置界面只有**一个**滚动容器（`SettingsShell.kt` 的 `SettingsBody`），八个页面只是在该容器内部按 `state.page` 换内容；容器的滚动状态 `rememberScrollState()` 的调用点从不改变，因此它跨页面存活，把上一个页面停留的偏移量交给了新页面。现在滚动状态以页面为键（`rememberSaveable(state.page, saver = ScrollState.Saver)`），换页即得到一个偏移为 0 的新滚动状态；同一页面内的滚动不受影响，旋转屏幕后的位置恢复也照旧。

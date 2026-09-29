@@ -47,6 +47,13 @@ final class ModuleSettings {
     static final float FP_NEAR_CLIP_MINIMUM = 0.001f, FP_NEAR_CLIP_MAXIMUM = 1f;
     static final String CAMERA_CONFIGURATION = "camera_configuration";
 
+    /**
+     * The motion preset names {@code ParseMotionPreset} accepts, in the order the
+     * settings picker shows them. Index 0 has to stay {@code orbit}: it is the
+     * desktop default and the fallback for anything unparsable.
+     */
+    static final String[] MOTION_PRESETS = {"orbit", "dolly_zoom", "crane", "truck"};
+
     // betterendfield.actions — the desktop sustained special dash.
     private static final String DASH_ENABLED = "dash_enabled";
     private static final String DASH_LIINO_CLEAN = "dash_liino_clean";
@@ -226,6 +233,103 @@ final class ModuleSettings {
                 prefs.getBoolean("camera_first_person_external_head_scale", false));
     }
 
+    /**
+     * The free camera's motion, keyframe and VMD parameters.
+     *
+     * One normalized save/read contract, like {@link FirstPersonAdvanced}: every
+     * number is clamped to the exact range the native module clamps it to, so a
+     * value this screen accepts can never be silently changed again on the way
+     * into the game. {@code mouseInvertY} and {@code sensitivity} are part of the
+     * block because the configuration always carried them (they used to be the
+     * literals {@code false} and {@code 0.1}); the on-screen look pad is what will
+     * finally give them something to steer, at which point only the UI for them
+     * is still missing.
+     */
+    record CameraMotion(boolean invertY, double sensitivity, String preset, double speed,
+            double orbitSpeed, double duration, double targetHeight, double segmentSeconds,
+            boolean keyframeLoop, double vmdScale, double vmdFovBias, boolean vmdLoop) {
+        CameraMotion {
+            sensitivity = bounded(sensitivity, 0.1, 0.02, 0.5);
+            speed = bounded(speed, 1.0, -20, 20);
+            orbitSpeed = bounded(orbitSpeed, 20.0, -180, 180);
+            duration = bounded(duration, 0, 0, 600);
+            targetHeight = bounded(targetHeight, 1.2, -5, 5);
+            segmentSeconds = bounded(segmentSeconds, 3.0, 0.2, 60);
+            vmdScale = bounded(vmdScale, 0.07, 0.001, 10);
+            vmdFovBias = bounded(vmdFovBias, 5.0, -60, 60);
+            preset = presetName(preset);
+        }
+
+        String toIniLines() {
+            return "mouse_invert_y=" + invertY + "\n"
+                    + "mouse_sensitivity=" + number(sensitivity) + "\n"
+                    + "motion_preset=" + preset + "\n"
+                    + "motion_speed=" + number(speed) + "\n"
+                    + "orbit_speed=" + number(orbitSpeed) + "\n"
+                    + "motion_duration=" + number(duration) + "\n"
+                    + "motion_target_height=" + number(targetHeight) + "\n"
+                    + "keyframe_segment_seconds=" + number(segmentSeconds) + "\n"
+                    + "keyframe_loop=" + keyframeLoop + "\n"
+                    // The Android side has no way to hand a .vmd to the game
+                    // process yet, so the key is written empty rather than
+                    // omitted: the native reader always sees the same key set,
+                    // and an unset file reports itself instead of guessing.
+                    + "vmd_camera_file=\n"
+                    + "vmd_camera_scale=" + number(vmdScale) + "\n"
+                    + "vmd_camera_fov_bias=" + number(vmdFovBias) + "\n"
+                    + "vmd_camera_loop=" + vmdLoop + "\n";
+        }
+
+        void store(SharedPreferences.Editor edit) {
+            edit.putBoolean("camera_mouse_invert_y", invertY)
+                    .putString("camera_mouse_sensitivity", number(sensitivity))
+                    .putString("camera_motion_preset", preset)
+                    .putString("camera_motion_speed", number(speed))
+                    .putString("camera_orbit_speed", number(orbitSpeed))
+                    .putString("camera_motion_duration", number(duration))
+                    .putString("camera_motion_target_height", number(targetHeight))
+                    .putString("camera_keyframe_segment_seconds", number(segmentSeconds))
+                    .putBoolean("camera_keyframe_loop", keyframeLoop)
+                    .putString("camera_vmd_scale", number(vmdScale))
+                    .putString("camera_vmd_fov_bias", number(vmdFovBias))
+                    .putBoolean("camera_vmd_loop", vmdLoop);
+        }
+    }
+
+    /** Maps a stored or user-typed preset onto the four names the parser knows. */
+    static String presetName(String value) {
+        if (value != null) {
+            String text = value.trim().toLowerCase(Locale.ROOT);
+            for (String preset : MOTION_PRESETS) {
+                if (preset.equals(text)) return preset;
+            }
+            // ParseMotionPreset also accepts these two short forms. Recognising
+            // them here keeps the round trip lossless: without it a preset that
+            // reached the store from anywhere else would silently become orbit
+            // the next time any row on this screen was touched.
+            if ("dolly".equals(text)) return MOTION_PRESETS[1];
+            if ("pan".equals(text)) return MOTION_PRESETS[3];
+        }
+        return MOTION_PRESETS[0];
+    }
+
+    static CameraMotion getCameraMotion(Context context) {
+        SharedPreferences prefs = preferences(context);
+        return new CameraMotion(
+                prefs.getBoolean("camera_mouse_invert_y", false),
+                parse(prefs.getString("camera_mouse_sensitivity", "0.1"), 0.1),
+                prefs.getString("camera_motion_preset", MOTION_PRESETS[0]),
+                parse(prefs.getString("camera_motion_speed", "1"), 1.0),
+                parse(prefs.getString("camera_orbit_speed", "20"), 20.0),
+                parse(prefs.getString("camera_motion_duration", "0"), 0),
+                parse(prefs.getString("camera_motion_target_height", "1.2"), 1.2),
+                parse(prefs.getString("camera_keyframe_segment_seconds", "3"), 3.0),
+                prefs.getBoolean("camera_keyframe_loop", false),
+                parse(prefs.getString("camera_vmd_scale", "0.07"), 0.07),
+                parse(prefs.getString("camera_vmd_fov_bias", "5"), 5.0),
+                prefs.getBoolean("camera_vmd_loop", false));
+    }
+
     static void setCameraSettings(
             Context context,
             boolean disableDither,
@@ -241,7 +345,8 @@ final class ModuleSettings {
             double eyeHeight,
             double nearClip,
             boolean extendLookRange,
-            FirstPersonAdvanced advanced) {
+            FirstPersonAdvanced advanced,
+            CameraMotion motion) {
         eyeForward = bounded(eyeForward, 0.03, 0.0, 0.5);
         eyeHeight = bounded(eyeHeight, 0.05, -0.5, 0.5);
         nearClip = bounded(nearClip, 0.03, 0.001, 1.0);
@@ -275,11 +380,8 @@ final class ModuleSettings {
                         // the desktop default (true) would arm the low-level
                         // mouse hook the moment the free camera comes up.
                         + "free_camera_mouse_look=false\n"
-                        + "mouse_invert_y=false\n"
-                        + "mouse_sensitivity=0.1\n"
                         + "free_camera_smoothing=0.3\n"
-                        + "keyframe_loop=false\n"
-                        + "vmd_camera_loop=false\n"
+                        + motion.toIniLines()
                         // The panel presses the exact codes the desktop module
                         // polls; pin them so a native default change cannot
                         // silently detach the on-screen buttons.
@@ -311,6 +413,7 @@ final class ModuleSettings {
                 .putBoolean(CAMERA_FP_EXTEND_LOOK_RANGE, extendLookRange)
                 .putString(CAMERA_CONFIGURATION, configuration);
         advanced.store(edit);
+        motion.store(edit);
         edit.commit();
     }
 
@@ -387,7 +490,8 @@ final class ModuleSettings {
                 parse(getFirstPersonEyeForward(context), 0.03),
                 parse(getFirstPersonEyeHeight(context), 0.05),
                 parse(getFirstPersonNearClip(context), 0.03),
-                isFirstPersonExtendLookRange(context), getFirstPersonAdvanced(context));
+                isFirstPersonExtendLookRange(context), getFirstPersonAdvanced(context),
+                getCameraMotion(context));
         setSustainedDashSettings(
                 context,
                 isSustainedDashEnabled(context),
