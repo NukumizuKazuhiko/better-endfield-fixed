@@ -156,7 +156,7 @@ final class CameraSettingsTest {
                 && defaults.vmdFovBias() == 5.0 && !defaults.vmdLoop(), "motion VMD defaults");
 
         ModuleSettings.CameraMotion configured = new ModuleSettings.CameraMotion(
-                true, 0.42, "dolly_zoom", -3.5, 90, 12.5, -2.25, 7.5, true, 0.5, -12.5, true);
+                true, 0.42, "dolly_zoom", -3.5, 90, 12.5, -2.25, 7.5, true, true, 0.5, -12.5, true);
         ModuleSettings.setCameraSettings(context, false, true, false, false, true, true,
                 5, 60, 75, 0.03, 0.05, 0.03, false,
                 ModuleSettings.getFirstPersonAdvanced(context), configured);
@@ -170,20 +170,44 @@ final class CameraSettingsTest {
                 "vmd_camera_scale=0.5", "vmd_camera_fov_bias=-12.5", "vmd_camera_loop=true"}) {
             check(ini.contains(line + "\n"), line);
         }
-        // The file is not configurable on Android yet, but the key has to be
-        // present and empty so the native reader reports "not configured"
-        // instead of falling back to a stale desktop path.
-        check(ini.contains("vmd_camera_file=\n"), "empty VMD file key");
+        // The file travels as a placeholder, not as a path: the settings app
+        // cannot write out the game's files directory (another UID) and does not
+        // know which user or cloned profile the game starts under, so
+        // RuntimeBootstrap substitutes it. Getting this key wrong is invisible
+        // until the game refuses to open the file.
+        check(ini.contains("vmd_camera_file=" + ModuleSettings.VMD_FILE_SLOT + "\n"),
+                "VMD slot placeholder");
+        check(configured.vmdImported(), "VMD import flag round trip");
+
+        // Clearing the import has to reach the key as well; an empty value is
+        // what makes the native reader report "no VMD camera file is configured"
+        // instead of falling back to a stale path.
+        ModuleSettings.clearVmdImport(context);
+        saveStored(context, true);
+        check(ModuleConfigurations.read(FrameworkSettings.open(context)).camera()
+                .contains("vmd_camera_file=\n"), "cleared import writes an empty file key");
+        // ... and an import has to bring it back, without any page having to be
+        // reopened: this is the same path the import row drives.
+        ModuleSettings.setVmdImport(context, "camera.vmd", 1234L, 1700000000000L);
+        ModuleSettings.republishConfigurations(context);
+        check(ModuleSettings.isVmdImported(context), "import flag stored");
+        check("camera.vmd".equals(ModuleSettings.getVmdName(context)), "import name stored");
+        check(ModuleSettings.getVmdBytes(context) == 1234L, "import size stored");
+        check(ModuleSettings.getVmdTime(context) == 1700000000000L, "import time stored");
+        check(ModuleConfigurations.read(FrameworkSettings.open(context)).camera()
+                .contains("vmd_camera_file=" + ModuleSettings.VMD_FILE_SLOT + "\n"),
+                "re-published import restores the slot");
+        ModuleSettings.clearVmdImport(context);
 
         ModuleSettings.CameraMotion bounded = new ModuleSettings.CameraMotion(
-                false, 9, "nope", 100, -900, 9999, 99, 0.01, false, 99, -900, false);
+                false, 9, "nope", 100, -900, 9999, 99, 0.01, false, false, 99, -900, false);
         check(bounded.sensitivity() == 0.5 && "orbit".equals(bounded.preset())
                 && bounded.speed() == 20 && bounded.orbitSpeed() == -180
                 && bounded.duration() == 600 && bounded.targetHeight() == 5
                 && bounded.segmentSeconds() == 0.2 && bounded.vmdScale() == 10
                 && bounded.vmdFovBias() == -60, "motion bounds");
         bounded = new ModuleSettings.CameraMotion(false, Double.NaN, null, Double.NaN,
-                Double.NaN, Double.NaN, Double.NaN, Double.NaN, false, Double.NaN, Double.NaN, false);
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, false, false, Double.NaN, Double.NaN, false);
         check(bounded.sensitivity() == 0.1 && bounded.speed() == 1.0 && bounded.orbitSpeed() == 20.0
                 && bounded.duration() == 0 && bounded.targetHeight() == 1.2
                 && bounded.segmentSeconds() == 3.0 && bounded.vmdScale() == 0.07
@@ -198,5 +222,27 @@ final class CameraSettingsTest {
         check(ModuleSettings.presetName("dolly").equals("dolly_zoom"), "dolly alias");
         check(ModuleSettings.presetName("pan").equals("truck"), "pan alias");
         check(ModuleSettings.presetName("bogus").equals("orbit"), "unknown preset falls back");
+
+        // The import check mirrors LoadVmdCamera byte for byte: a 30-byte view,
+        // two header generations, nothing else. A rule that is too generous
+        // would publish a file the game then refuses, and the user would only
+        // see "the file is not a VMD motion" with no hint as to which step let
+        // it through.
+        check(ModuleSettings.isVmdMotion(vmdHeader("Vocaloid Motion Data 0002")), "VMD 0002 header");
+        check(ModuleSettings.isVmdMotion(vmdHeader("Vocaloid Motion Data file")), "legacy VMD header");
+        check(!ModuleSettings.isVmdMotion(vmdHeader("Vocaloid Motion Data 0001")), "older VMD refused");
+        check(!ModuleSettings.isVmdMotion(new byte[29]), "short header refused");
+        check(!ModuleSettings.isVmdMotion(null), "missing header refused");
+        check(ModuleSettings.vmdMaximumBytes() == 64L * 1024 * 1024, "ceiling matches the loader");
+        check(ModuleSettings.VMD_FILE_SLOT.startsWith("%files%/"), "slot is a placeholder");
+        check(ModuleSettings.VMD_REMOTE_NAME.equals("vmd.current"), "published slot name");
+    }
+
+    /** A 30-byte VMD header, exactly what the settings screen feeds the check. */
+    private static byte[] vmdHeader(String text) {
+        byte[] header = new byte[30];
+        byte[] prefix = text.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        System.arraycopy(prefix, 0, header, 0, prefix.length);
+        return header;
     }
 }

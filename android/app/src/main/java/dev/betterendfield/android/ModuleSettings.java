@@ -48,6 +48,29 @@ final class ModuleSettings {
     static final String CAMERA_CONFIGURATION = "camera_configuration";
 
     /**
+     * Where the imported VMD camera motion lives once the game process has
+     * materialized it. The settings app cannot build this path: it does not know
+     * which user or cloned profile the game runs under, and it cannot write into
+     * another app's data directory at all. So the configuration carries the
+     * placeholder and {@link RuntimeBootstrap} substitutes the game's own files
+     * directory immediately before handing the string to the native loader.
+     */
+    static final String VMD_FILE_SLOT = "%files%/betterendfield/camera/current.vmd";
+    /** The name the settings app publishes the imported .vmd under. */
+    static final String VMD_REMOTE_NAME = "vmd.current";
+    /** Whether a .vmd has been imported; both the panel and the config read it. */
+    static final String CAMERA_VMD_IMPORTED = "camera_vmd_imported";
+    /** The published payload's length, so the game side can skip an identical copy. */
+    static final String VMD_BYTES = "camera_vmd_bytes";
+    private static final String CAMERA_VMD_NAME = "camera_vmd_name";
+    private static final String CAMERA_VMD_TIME = "camera_vmd_time";
+
+    /** Mirrors the native loader's header contract in {@code LoadVmdCamera}. */
+    private static final String VMD_HEADER_0002 = "Vocaloid Motion Data 0002";
+    private static final String VMD_HEADER_LEGACY = "Vocaloid Motion Data file";
+    private static final int VMD_HEADER_BYTES = 30;
+
+    /**
      * The motion preset names {@code ParseMotionPreset} accepts, in the order the
      * settings picker shows them. Index 0 has to stay {@code orbit}: it is the
      * desktop default and the fallback for anything unparsable.
@@ -244,10 +267,18 @@ final class ModuleSettings {
      * literals {@code false} and {@code 0.1}); the on-screen look pad is what will
      * finally give them something to steer, at which point only the UI for them
      * is still missing.
+     *
+     * {@code vmdImported} decides whether {@code vmd_camera_file} carries the
+     * {@link #VMD_FILE_SLOT} placeholder. It is a switch rather than a path
+     * because the Android side has exactly one deliverable slot: the file the
+     * settings app published and the game process materialized. The publication
+     * metadata (name, size, time) is deliberately kept out of this record - none
+     * of it reaches the native loader, it only describes the slot on screen.
      */
     record CameraMotion(boolean invertY, double sensitivity, String preset, double speed,
             double orbitSpeed, double duration, double targetHeight, double segmentSeconds,
-            boolean keyframeLoop, double vmdScale, double vmdFovBias, boolean vmdLoop) {
+            boolean keyframeLoop, boolean vmdImported, double vmdScale, double vmdFovBias,
+            boolean vmdLoop) {
         CameraMotion {
             sensitivity = bounded(sensitivity, 0.1, 0.02, 0.5);
             speed = bounded(speed, 1.0, -20, 20);
@@ -270,11 +301,12 @@ final class ModuleSettings {
                     + "motion_target_height=" + number(targetHeight) + "\n"
                     + "keyframe_segment_seconds=" + number(segmentSeconds) + "\n"
                     + "keyframe_loop=" + keyframeLoop + "\n"
-                    // The Android side has no way to hand a .vmd to the game
-                    // process yet, so the key is written empty rather than
-                    // omitted: the native reader always sees the same key set,
-                    // and an unset file reports itself instead of guessing.
-                    + "vmd_camera_file=\n"
+                    // The slot is a placeholder rather than a path because only
+                    // the game process knows its own files directory. An empty
+                    // value still travels as a key: the native reader then sees
+                    // the same key set every launch and reports "no VMD camera
+                    // file is configured" instead of having to guess.
+                    + "vmd_camera_file=" + (vmdImported ? VMD_FILE_SLOT : "") + "\n"
                     + "vmd_camera_scale=" + number(vmdScale) + "\n"
                     + "vmd_camera_fov_bias=" + number(vmdFovBias) + "\n"
                     + "vmd_camera_loop=" + vmdLoop + "\n";
@@ -290,6 +322,7 @@ final class ModuleSettings {
                     .putString("camera_motion_target_height", number(targetHeight))
                     .putString("camera_keyframe_segment_seconds", number(segmentSeconds))
                     .putBoolean("camera_keyframe_loop", keyframeLoop)
+                    .putBoolean(CAMERA_VMD_IMPORTED, vmdImported)
                     .putString("camera_vmd_scale", number(vmdScale))
                     .putString("camera_vmd_fov_bias", number(vmdFovBias))
                     .putBoolean("camera_vmd_loop", vmdLoop);
@@ -325,9 +358,74 @@ final class ModuleSettings {
                 parse(prefs.getString("camera_motion_target_height", "1.2"), 1.2),
                 parse(prefs.getString("camera_keyframe_segment_seconds", "3"), 3.0),
                 prefs.getBoolean("camera_keyframe_loop", false),
+                prefs.getBoolean(CAMERA_VMD_IMPORTED, false),
                 parse(prefs.getString("camera_vmd_scale", "0.07"), 0.07),
                 parse(prefs.getString("camera_vmd_fov_bias", "5"), 5.0),
                 prefs.getBoolean("camera_vmd_loop", false));
+    }
+
+    // ------------------------------------------------------------- VMD slot
+
+    /**
+     * Records a just-published VMD import. The payload itself is not copied into
+     * preferences; only what the pages and the game process need to reason about
+     * it: that it exists, what it was called, how long it is and when it arrived.
+     */
+    static void setVmdImport(Context context, String name, long bytes, long timeMillis) {
+        preferences(context)
+                .edit()
+                .putBoolean(CAMERA_VMD_IMPORTED, true)
+                .putString(CAMERA_VMD_NAME, name == null ? "" : name)
+                .putLong(VMD_BYTES, bytes)
+                .putLong(CAMERA_VMD_TIME, timeMillis)
+                .commit();
+    }
+
+    static void clearVmdImport(Context context) {
+        preferences(context)
+                .edit()
+                .putBoolean(CAMERA_VMD_IMPORTED, false)
+                .remove(CAMERA_VMD_NAME)
+                .remove(VMD_BYTES)
+                .remove(CAMERA_VMD_TIME)
+                .commit();
+    }
+
+    static boolean isVmdImported(Context context) {
+        return preferences(context).getBoolean(CAMERA_VMD_IMPORTED, false);
+    }
+
+    static String getVmdName(Context context) {
+        return preferences(context).getString(CAMERA_VMD_NAME, "");
+    }
+
+    static long getVmdBytes(Context context) {
+        return preferences(context).getLong(VMD_BYTES, 0L);
+    }
+
+    static long getVmdTime(Context context) {
+        return preferences(context).getLong(CAMERA_VMD_TIME, 0L);
+    }
+
+    /**
+     * Accepts a file whose first 30 bytes are a VMD header, mirroring
+     * {@code LoadVmdCamera} exactly: the two generations it knows, nothing else.
+     *
+     * The check lives here rather than in the settings screen so the same rule
+     * can be driven from a plain JVM test. Getting it wrong is invisible until
+     * the game refuses the file, and a wrong file that is accepted here is
+     * reported by the native loader as "the file is not a VMD motion" - which
+     * tells the user nothing about which step rejected it.
+     */
+    static boolean isVmdMotion(byte[] header) {
+        if (header == null || header.length < VMD_HEADER_BYTES) return false;
+        String text = new String(header, 0, VMD_HEADER_BYTES, java.nio.charset.StandardCharsets.ISO_8859_1);
+        return text.startsWith(VMD_HEADER_0002) || text.startsWith(VMD_HEADER_LEGACY);
+    }
+
+    /** The native loader's ceiling, so an import is refused here instead of there. */
+    static long vmdMaximumBytes() {
+        return 64L * 1024 * 1024;
     }
 
     static void setCameraSettings(

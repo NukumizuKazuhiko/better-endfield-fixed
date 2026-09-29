@@ -80,7 +80,7 @@ internal fun OverlayPanel(
         }
         if (features.freeCamera()) {
             MovementPad(callbacks)
-            MotionControls(callbacks)
+            MotionControls(features, callbacks)
         }
         if (!features.anyControl()) {
             Text("还没有需要即时操作的功能。请在「体验」页启用控制项。",

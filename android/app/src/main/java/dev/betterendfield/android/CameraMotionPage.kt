@@ -1,5 +1,7 @@
 package dev.betterendfield.android
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,13 +18,22 @@ import androidx.compose.ui.res.stringResource
  * panel, so the page is also the inventory of what the panel can drive once the
  * free camera is armed.
  *
- * The rows are dimmed rather than hidden when the free camera is off: the
- * desktop module only polls the preset, keyframe and VMD hotkeys while the free
- * camera is armed, so with the camera off these values would be written but
+ * The VMD group also owns the import: the .vmd is a user file, and the settings
+ * app is where a file picker belongs - the in-game panel would have to reach the
+ * framework's activity-result relay, which has a degraded path, and the import
+ * could then only be tested with the game running. Here it is testable on a phone
+ * with no game at all.
+ *
+ * The parameter rows are dimmed rather than hidden when the free camera is off:
+ * the desktop module only polls the preset, keyframe and VMD hotkeys while the
+ * free camera is armed, so with the camera off these values would be written but
  * never read - and a row that silently does nothing reads as broken.
  */
 @Composable
 fun CameraMotionPage(state: SettingsState) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) state.importVmd(uri)
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
         SectionCard(
             eyebrow = stringResource(R.string.camera_card_eyebrow),
@@ -112,6 +123,28 @@ fun CameraMotionPage(state: SettingsState) {
 
             GroupLabel(stringResource(R.string.motion_group_vmd))
             Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                BodyText(state.vmdSummary)
+                // The import row stays live with the free camera off, unlike every
+                // slider around it: this is a file operation, and choosing the
+                // motion before the game starts is the normal order. The sliders
+                // control values the native module only reads while armed, so they
+                // are dimmed for a different reason.
+                PrimaryButton(
+                    text = stringResource(R.string.motion_vmd_import),
+                    onClick = { picker.launch(arrayOf("*/*")) },
+                    enabled = !state.vmdImporting,
+                )
+                if (state.vmdImported) {
+                    GhostButton(
+                        text = stringResource(R.string.motion_vmd_clear),
+                        onClick = state::clearVmd,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.vmdImporting,
+                    )
+                }
+                if (state.vmdImportStatus.isNotEmpty()) {
+                    BodyText(state.vmdImportStatus)
+                }
                 SliderRow(
                     label = stringResource(R.string.motion_vmd_scale_label),
                     value = state.vmdScale,

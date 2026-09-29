@@ -227,6 +227,16 @@ generation 或 Seek generation 变化都会先清空旧流再绑定新流。策�
 
 模块拦截 `Beyond.Gameplay.View.CameraMono._ProcessDitherByPitch`，保留原始相机处理后按开关调用同类的 `ForceClearDither`。这条路径直接复用游戏自身的清理逻辑，不修改材质、Shader 或渲染管线。
 
+### Android 侧的 VMD 镜头投递契约
+
+Android 上模块与应用分处两个进程、两个 UID，应用既读不到也写不了游戏的数据目录，因此 `.vmd` 镜头文件走三段契约：
+
+1. **应用侧校验与发布**：设置应用用 `OpenDocument` 取得用户文件，按原生装载器 `LoadVmdCamera` 的同一套规则校验——文件 `> 0` 且 `<= 64 MiB`，前 30 字节以 `Vocaloid Motion Data 0002` 或 `Vocaloid Motion Data file` 开头。通过后写入框架的远程文件空间，名称为 `vmd.current`；该空间由 LSPosed 服务转发，是唯一能跨进程传递文件的通道（BEM 包管理器用的是同一条）。
+2. **游戏进程物化**：`RuntimeBootstrap` 在加载原生库之前，把 `vmd.current` 拷到游戏自己的 `files/betterendfield/camera/current.vmd`，长度与设置侧登记的一致时跳过。写入走 `.tmp` → `Os.rename` 原子落位，且超过 64 MiB 即中断。
+3. **配置占位符**：配置里 `vmd_camera_file` 写的是 `%files%/betterendfield/camera/current.vmd`，`RuntimeBootstrap` 在 `setenv("BETTER_ENDFIELD_CAMERA_CONFIG")` 之前把 `%files%` 展开为 `Context.getFilesDir()` 的绝对路径。设置侧不能直接写这个路径：它不知道游戏会以哪个用户或分身身份启动，也无法在另一个 UID 的数据目录里创建文件。未导入时该键写空值，原生侧走既有的 `no VMD camera file is configured` 分支。
+
+原生侧不需要为此改动：`LoadVmdCamera` 把路径直接交给 `CreateFileW`，Android 替身层将其实现为 `open(path, O_RDONLY)`，因此路径必须是绝对路径（相对路径会按进程工作目录解析，不可依赖）。
+
 ## 失败规则
 
 动态方法、字段、Hook 目标或 Catalog 校验失败时，模块进入 `contract-mismatch` 或 `failed` 状态并记录原因。Host 不尝试其他地址、过期配置、过期资源映射或未知代理链。

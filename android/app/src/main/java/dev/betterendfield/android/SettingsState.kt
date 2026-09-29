@@ -2,13 +2,22 @@ package dev.betterendfield.android
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** The native loader compares a 30-byte VMD header; the import check mirrors it. */
+private const val VMD_HEADER_BYTES = 30
+private const val VMD_TIME_PATTERN = "yyyy-MM-dd HH:mm"
 
 /**
  * Page indices for the settings tree.
@@ -618,6 +627,24 @@ class SettingsState(private val context: Context) {
     var vmdLoop by mutableStateOf(false)
         private set
 
+    /*
+     * The imported VMD slot. The payload itself never lives here - it goes into
+     * the framework's remote file space, which is the only place the game process
+     * can read it from. These fields are what the page shows about it.
+     */
+    var vmdImported by mutableStateOf(false)
+        private set
+    var vmdName by mutableStateOf("")
+        private set
+    var vmdBytes by mutableStateOf(0L)
+        private set
+    var vmdImportedAt by mutableStateOf("")
+        private set
+    var vmdImportStatus by mutableStateOf("")
+        private set
+    var vmdImporting by mutableStateOf(false)
+        private set
+
     // betterendfield.actions
     var sustainedDash by mutableStateOf(false)
         private set
@@ -672,6 +699,10 @@ class SettingsState(private val context: Context) {
         vmdScale = motion.vmdScale().toFloat()
         vmdFovBias = motion.vmdFovBias().toFloat()
         vmdLoop = motion.vmdLoop()
+        vmdImported = ModuleSettings.isVmdImported(context)
+        vmdName = ModuleSettings.getVmdName(context)
+        vmdBytes = ModuleSettings.getVmdBytes(context)
+        vmdImportedAt = formatVmdTime(ModuleSettings.getVmdTime(context))
         sustainedDash = ModuleSettings.isSustainedDashEnabled(context)
         liinoCleanDash = ModuleSettings.isLiinoCleanDashEnabled(context)
         dashAglina = ModuleSettings.isDashCharacterEnabled(context, "aglina")
@@ -859,6 +890,133 @@ class SettingsState(private val context: Context) {
         saveCameraSettings()
     }
 
+    /**
+     * Imports a .vmd into the slot the game process reads.
+     *
+     * The file is validated here, before anything is published, so a wrong file is
+     * refused with a reason instead of reaching the game and coming back as an
+     * opaque native log line. Both rules are the native loader's own: its 64 MiB
+     * ceiling and the two header generations [ModuleSettings.isVmdMotion] accepts.
+     *
+     * The payload travels through the framework's remote file space because that
+     * is the only channel between this process and the game's - different UIDs,
+     * so neither can read the other's data directory - and the native side takes a
+     * path, which is why the game process copies it once on startup.
+     */
+    fun importVmd(uri: android.net.Uri) {
+        if (vmdImporting) return
+        vmdImporting = true
+        vmdImportStatus = context.getString(R.string.motion_vmd_import_working)
+        val name = vmdDisplayName(uri)
+        Thread({
+            val outcome = runCatching {
+                val temporary = File(context.cacheDir, "vmd-import.tmp")
+                try {
+                    var bytes = 0L
+                    var header = ByteArray(0)
+                    val stream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException(context.getString(R.string.motion_vmd_unreadable))
+                    stream.use { input ->
+                        FileOutputStream(temporary, false).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read <= 0) break
+                                if (header.isEmpty()) {
+                                    header = buffer.copyOfRange(0, minOf(read, VMD_HEADER_BYTES))
+                                }
+                                bytes += read
+                                if (bytes > ModuleSettings.vmdMaximumBytes()) {
+                                    throw IllegalStateException(
+                                        context.getString(R.string.motion_vmd_too_large),
+                                    )
+                                }
+                                output.write(buffer, 0, read)
+                            }
+                            output.fd.sync()
+                        }
+                    }
+                    if (!ModuleSettings.isVmdMotion(header)) {
+                        throw IllegalStateException(context.getString(R.string.motion_vmd_not_a_motion))
+                    }
+                    if (!FrameworkSettings.publishVmd(temporary)) {
+                        throw IllegalStateException(
+                            context.getString(R.string.motion_vmd_publish_failed),
+                        )
+                    }
+                    bytes
+                } finally {
+                    temporary.delete()
+                }
+            }
+            Handler(Looper.getMainLooper()).post {
+                vmdImporting = false
+                outcome.fold(
+                    onSuccess = { bytes ->
+                        ModuleSettings.setVmdImport(context, name, bytes, System.currentTimeMillis())
+                        vmdImported = true
+                        vmdName = name
+                        vmdBytes = bytes
+                        vmdImportedAt = formatVmdTime(System.currentTimeMillis())
+                        vmdImportStatus = context.getString(
+                            R.string.motion_vmd_imported, name, formatVmdBytes(bytes),
+                        )
+                        // Until an import existed the configuration wrote the slot
+                        // empty, so it has to be rewritten for the path to travel.
+                        saveCameraSettings()
+                    },
+                    onFailure = { error ->
+                        vmdImportStatus = context.getString(
+                            R.string.motion_vmd_import_failed,
+                            error.message ?: error.toString(),
+                        )
+                    },
+                )
+            }
+        }, "BetterEndfield-VmdImport").start()
+    }
+
+    /**
+     * Drops the slot. The configuration stops naming the file even when the
+     * framework refuses to delete it: an unreferenced file is inert, while a
+     * dangling reference would keep the module reading a motion the user removed.
+     */
+    fun clearVmd() {
+        val dropped = FrameworkSettings.removeVmd()
+        ModuleSettings.clearVmdImport(context)
+        vmdImported = false
+        vmdName = ""
+        vmdBytes = 0L
+        vmdImportedAt = ""
+        vmdImportStatus = context.getString(
+            if (dropped) R.string.motion_vmd_cleared else R.string.motion_vmd_cleared_unlinked,
+        )
+        saveCameraSettings()
+    }
+
+    private fun vmdDisplayName(uri: android.net.Uri): String {
+        try {
+            context.contentResolver
+                .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getString(0)
+                }
+        } catch (ignored: RuntimeException) {
+            // Fall through to the last path segment below.
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotEmpty() }
+            ?: context.getString(R.string.motion_vmd_unnamed)
+    }
+
+    private fun formatVmdTime(millis: Long): String =
+        if (millis <= 0L) "" else SimpleDateFormat(VMD_TIME_PATTERN, Locale.ROOT).format(Date(millis))
+
+    private fun formatVmdBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
+        bytes >= 1024L -> String.format(Locale.ROOT, "%.0f KB", bytes / 1024.0)
+        else -> "$bytes 字节"
+    }
+
     fun updateSustainedDash(value: Boolean) {
         sustainedDash = value
         saveDashSettings()
@@ -938,6 +1096,7 @@ class SettingsState(private val context: Context) {
                 motionTargetHeight.toDouble(),
                 keyframeSegmentSeconds.toDouble(),
                 keyframeLoop,
+                vmdImported,
                 vmdScale.toDouble(),
                 vmdFovBias.toDouble(),
                 vmdLoop,
@@ -994,6 +1153,20 @@ class SettingsState(private val context: Context) {
      * the same reason "camera speed" is dimmed whenever the camera is off.
      */
     val cameraMotionAvailable get() = freeCamera
+
+    /**
+     * What the import row says about the slot right now. The page needs the name
+     * and the size visible before the game is started: the file is copied into
+     * the game process only on the next launch, so this line is the only evidence
+     * the user gets that the right .vmd went in.
+     */
+    val vmdSummary get() = if (!vmdImported) {
+        context.getString(R.string.motion_vmd_not_imported)
+    } else {
+        context.getString(
+            R.string.motion_vmd_slot_summary, vmdName, formatVmdBytes(vmdBytes), vmdImportedAt,
+        )
+    }
     val dashCharactersAvailable get() = sustainedDash
     val liinoCleanDashAvailable get() = sustainedDash && dashLiino
 

@@ -6,12 +6,12 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.5 is an experimental prerelease: the in-game Compose handle
+Version 3.3.22-alpha.6 is an experimental prerelease: the in-game Compose handle
 appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
 still need device acceptance. The camera module's motion presets, keyframes and
-VMD parameters are now configurable from the app, but the motion stack itself has
-never been validated on a device on either platform, so its first acceptance run
-is also Windows' first.
+VMD parameters are configurable from the app and a `.vmd` can now be imported
+there, but the motion stack itself has never been validated on a device on either
+platform, so its first acceptance run is also Windows' first.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -170,9 +170,9 @@ else is on the settings screen.
 | Camera roll / FOV in-out / view reset | `Numpad7`, `Numpad9`, `Numpad1`, `Numpad3`, `Numpad5` | roll and FOV are press-and-hold, view reset is a tap |
 | Motion preset play/stop | `Numpad8` | button on the panel |
 | Keyframe record/play/clear | `Numpad0`, `Numpad2`, `Numpad4` | buttons on the panel |
-| VMD replay | `Numpad6` | pinned in the configuration, no panel button (no import path yet) |
+| VMD replay | `Numpad6` | button on the panel, shown only once a `.vmd` has been imported |
 | Runtime journal | none | read-only list on the panel, plus "save log to file" |
-| Movement speed, both FOVs, head/neck options, motion presets and keyframe/VMD parameters | ini values | sliders and switches on the page and its sub-pages |
+| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters and the `.vmd` import | ini values | sliders, switches and a document picker on the page and its sub-pages |
 | Sustained special dash | none | Enhancements page only |
 
 The panel only offers a control whose module was actually configured to load. A
@@ -412,8 +412,8 @@ Research catalogs and source PCK/CHK files stay under ignored
 - The in-game panel's controls are wired: hide-HUD, free camera, time freeze,
   first person, the free-camera movement pad and the roll / FOV / view-reset /
   motion-preset / keyframe group all press the virtual keys the ported desktop
-  modules poll; VMD replay is pinned in the configuration but has no panel
-  button. BEM hot switching is still not connected.
+  modules poll; VMD replay is one of them, and its button appears once a `.vmd`
+  has been imported. BEM hot switching is still not connected.
 - The three ported modules are build-verified for ARM64 and their settings and
   panel were exercised on a local emulator. The emulator has no LSPosed, so
   their in-game behaviour has not been run against the injected client; the
@@ -709,13 +709,28 @@ ranges are exactly the ones the native module clamps to, so a value the settings
 screen accepts is never rewritten on the way into the game; non-finite input
 falls back to the defaults above.
 
-`vmd_camera_file` is written empty on purpose. There is no import path yet that
-puts a `.vmd` somewhere the game process can read, and an empty value makes the
-native side take its existing "no VMD camera file is configured" branch instead
-of reusing a path left over from a desktop configuration. `mouse_invert_y` and
-`mouse_sensitivity` are written at their own defaults and deliberately have no
-UI, because the phone still has no steering input: `g_mouse_dx/dy` stays 0 while
-the mouse hook is compiled out, so the free camera can move, rise, roll and zoom
-but cannot turn. The panel's zoom buttons are press-and-hold rather than a 180 ms
-tap, matching what the desktop keys mean - a tap only steps the lens by about
-3.6 degrees.
+Since 3.3.22-alpha.6 the import row on that page also accepts a `.vmd`. The file is
+validated before anything is published - the loader's own 64 MiB ceiling and its
+two header generations, `Vocaloid Motion Data 0002` and `Vocaloid Motion Data
+file` - then written to the framework's remote file space as `vmd.current`, which
+is the same channel the BEM package manager uses and the only one that crosses
+between the two processes. Before the native library loads, the game process
+copies it to `betterendfield/camera/current.vmd` under its own files directory
+(skipped when a file of the stamped length is already there). `vmd_camera_file`
+therefore carries `%files%/betterendfield/camera/current.vmd`, and
+`RuntimeBootstrap` expands `%files%` to the game's files directory on the way into
+`BETTER_ENDFIELD_CAMERA_CONFIG`: the settings app cannot write that path out, as
+it neither knows which user or cloned profile the game runs under nor can write
+into another UID's data directory. Clearing the import writes the key empty again,
+and an empty value makes the native side take its existing "no VMD camera file is
+configured" branch instead of reusing a path left over from a desktop
+configuration. The panel's "VMD camera play/stop" button appears only once an
+import exists, for the same reason the zoom keys are press-and-hold: a control
+whose only outcome is a complaint is worse than one that is not there.
+
+`mouse_invert_y` and `mouse_sensitivity` are written at their own defaults and
+deliberately have no UI, because the phone still has no steering input:
+`g_mouse_dx/dy` stays 0 while the mouse hook is compiled out, so the free camera
+can move, rise, roll and zoom but cannot turn. The panel's zoom buttons are
+press-and-hold rather than a 180 ms tap, matching what the desktop keys mean - a
+tap only steps the lens by about 3.6 degrees.

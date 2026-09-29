@@ -172,7 +172,13 @@ public final class XposedEntry extends XposedModule {
                                 settings.getString(BemInstaller.INDEX,"[]"),
                                 name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report);
                         } catch(Exception error) {report("Installed BEM preparation failed: "+error);}
-                        RuntimeBootstrap.prepare(application,context,loader,configs,this::installFrames,this::report);
+                        // The imported .vmd rides the same remote file space the
+                        // packages do; its declared length comes from the same
+                        // settings snapshot the configurations were read from.
+                        RuntimeBootstrap.prepare(application, context, loader, configs,
+                                settings.getLong(ModuleSettings.VMD_BYTES, 0L),
+                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                                this::installFrames, this::report);
                     },"BetterEndfield-InstalledModels").start();
                 } catch (Throwable error) { report("bootstrap failed: " + error); }
                 return result;

@@ -31,7 +31,8 @@ final class RuntimeBootstrap {
     }
 
     static void prepare(Application application, Context context, ClassLoader loader,
-            ModuleConfigurations configs, FrameTrigger trigger, Consumer<String> log) {
+            ModuleConfigurations configs, long vmdBytes, BemInstalledResources.Source vmdSource,
+            FrameTrigger trigger, Consumer<String> log) {
         if (configs.none() && !debugResourceProbe() && customModelConfig().isEmpty()) {
             log.accept("no modules selected; native runtime skipped");
             return;
@@ -70,6 +71,12 @@ final class RuntimeBootstrap {
                 }
             }
             String actionPoseRoot = poseRoot;
+            // The camera module takes a path, so the imported .vmd has to be a
+            // real file inside the game's own data directory before the native
+            // loader is handed the configuration that names it.
+            if (configs.needsVmdCameraFile()) {
+                CameraVmdFile.materialize(context, vmdBytes, vmdSource, log);
+            }
             try {
                 trigger.install(loader,
                         () -> load(application, context, configs, actionPoseRoot, log));
@@ -99,7 +106,7 @@ final class RuntimeBootstrap {
             Os.setenv("BETTER_ENDFIELD_VOICE_RULES", configs.voice(), true);
             Os.setenv("BETTER_ENDFIELD_MODEL_CONFIG", configs.model(), true);
             Os.setenv("BETTER_ENDFIELD_UI_CONFIG", configs.ui(), true);
-            Os.setenv("BETTER_ENDFIELD_CAMERA_CONFIG", configs.camera(), true);
+            Os.setenv("BETTER_ENDFIELD_CAMERA_CONFIG", resolveFiles(configs.camera(), context), true);
             Os.setenv("BETTER_ENDFIELD_ACTIONS_CONFIG", configs.actions(), true);
             Os.setenv("BETTER_ENDFIELD_ACTIONS_ASSET_ROOT", actionPoseRoot, true);
             Os.setenv("BETTER_ENDFIELD_CUSTOM_MODEL_PROBE", debugResourceProbe() ? "1" : "0", true);
@@ -152,6 +159,21 @@ final class RuntimeBootstrap {
         method.setAccessible(true);
         Object error = method.invoke(null, args);
         if (error != null) throw new UnsatisfiedLinkError(error.toString());
+    }
+
+    /**
+     * Expands the path placeholders a configuration may carry into paths only
+     * this process can know.
+     *
+     * {@code %files%} is the game's own files directory. The settings app cannot
+     * write it out: the two processes are different UIDs, so it can neither read
+     * nor create anything there, and it also cannot tell which user or cloned
+     * profile the game will start under. This is the single point that holds both
+     * the configuration string and the directory it has to name.
+     */
+    private static String resolveFiles(String configuration, Context context) {
+        if (configuration.isEmpty() || configuration.indexOf('%') < 0) return configuration;
+        return configuration.replace("%files%", context.getFilesDir().getAbsolutePath());
     }
 
     private static boolean debugResourceProbe() {

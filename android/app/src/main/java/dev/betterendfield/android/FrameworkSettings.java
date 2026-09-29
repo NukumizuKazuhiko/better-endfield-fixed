@@ -91,6 +91,61 @@ final class FrameworkSettings {
         return context.getSharedPreferences("module_settings", Context.MODE_PRIVATE);
     }
 
+    /**
+     * Whether the framework service is reachable at all. The settings screen asks
+     * before offering an import: a .vmd that cannot be published has to be
+     * refused here, not handed to the game as a slot that stays empty.
+     */
+    static synchronized boolean remoteAvailable() {
+        return remoteService != null;
+    }
+
+    /**
+     * Publishes the imported .vmd into the framework's remote file space, under
+     * the name the game process opens.
+     *
+     * This space is the only channel that carries a file between the two
+     * processes: the module app's own files directory belongs to the module's UID
+     * and the game process cannot read it, while assets inside the APK are fixed
+     * at build time. The space is what the BEM package manager already uses.
+     */
+    static synchronized boolean publishVmd(java.io.File file) {
+        if (remoteService == null || file == null || !file.isFile()) return false;
+        try (ParcelFileDescriptor descriptor = remoteService.openRemoteFile(ModuleSettings.VMD_REMOTE_NAME);
+             java.io.FileInputStream in = new java.io.FileInputStream(file);
+             FileOutputStream out = new FileOutputStream(descriptor.getFileDescriptor())) {
+            out.getChannel().truncate(0);
+            byte[] buffer = new byte[65536];
+            long total = 0;
+            for (int read = in.read(buffer); read > 0; read = in.read(buffer)) {
+                out.write(buffer, 0, read);
+                total += read;
+            }
+            out.getFD().sync();
+            if (total <= 0) return false;
+            // The game side sizes its copy from the value stamped into the
+            // settings snapshot; an empty or failed publish must not leave that
+            // stamp claiming a payload that is not there.
+            return true;
+        } catch (Exception error) {
+            Log.e("BetterEndfield.Camera", "VMD publish failed", error);
+            return false;
+        }
+    }
+
+    /** Drops the published slot so a cleared import cannot be picked up again. */
+    static synchronized boolean removeVmd() {
+        if (remoteService == null) return false;
+        try {
+            if (remoteService.deleteRemoteFile(ModuleSettings.VMD_REMOTE_NAME)) return true;
+            return !java.util.Arrays.asList(remoteService.listRemoteFiles())
+                    .contains(ModuleSettings.VMD_REMOTE_NAME);
+        } catch (RuntimeException error) {
+            Log.e("BetterEndfield.Camera", "VMD slot removal failed", error);
+            return false;
+        }
+    }
+
     static synchronized boolean removeBem(String name) {
         if(remoteService==null || !name.matches("bem-[a-f0-9-]{36}\\.bem")) return false;
         try {

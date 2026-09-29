@@ -214,7 +214,7 @@ final class GameOverlay {
         catch (RuntimeException unavailable) { current = OverlayFeatures.off(); }
         if (preview) {
             current = new OverlayFeatures(true, current.hideHud(), current.freeCamera(),
-                    current.worldPause(), current.firstPerson());
+                    current.worldPause(), current.firstPerson(), current.vmdCamera());
         }
         if (current.equals(shown)) return;
         shown = current;

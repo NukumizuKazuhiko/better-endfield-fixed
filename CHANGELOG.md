@@ -2,6 +2,19 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.6
+
+- VMD 镜头投递链打通：设置应用的「体验 → 运镜与镜头」子页现在可以导入 `.vmd`（MMD 相机轨道）文件，游戏进程在加载原生库之前把它放到自己的数据目录，配置里的路径随之生效。此前 `vmd_camera_file` 只能写空值，`vmd_camera_scale` / `vmd_camera_fov_bias` / `vmd_camera_loop` 三项虽可编辑却没有作用对象。
+- 导入在设置应用内完成并**先校验后发布**，校验规则与原生装载器 `LoadVmdCamera` 完全一致：文件非空且不超过 64 MiB，前 30 字节以 `Vocaloid Motion Data 0002` 或 `Vocaloid Motion Data file` 开头。这样选错文件会当场说明原因，而不是进了游戏再拿到一句不知道是哪一步拒绝的日志。
+- 跨进程投递走 **LSPosed 框架的远程文件空间**（名称 `vmd.current`），与 BEM 包管理器同一条通道。这里更正了本阶段方案文档最初的一处错误假设：原计划写的是「设置应用存进自己的 filesDir，游戏进程再从中拷贝」。这在 Android 上不成立——设置应用与游戏是两个 UID，`/data/user/<uid>/<pkg>` 是 0700，游戏进程拿到的只是路径字符串，读不到文件；`getFilesDir()` 返回的路径本身没有任何跨应用能力。方案文档第 2 节已就地更正并保留记录。
+- 游戏侧物化与路径展开：`RuntimeBootstrap` 在加载原生库之前把 `vmd.current` 拷到 `files/betterendfield/camera/current.vmd`（长度与设置侧登记值相同则跳过，写入走 `.tmp` → `Os.rename`，超过 64 MiB 即中断），随后在 `setenv("BETTER_ENDFIELD_CAMERA_CONFIG")` 之前把配置里的 `%files%` 展开为游戏自己的 files 目录。路径只能由游戏进程拼：设置应用既不知道游戏会以哪个用户或分身身份启动，也无法在另一个 UID 的数据目录里创建文件；而原生侧 `CreateFileW` 在 Android 上就是 `open(path, O_RDONLY)`，相对路径按进程工作目录解析，因此必须是绝对路径。
+- 清除导入会把 `vmd_camera_file` 写回空值，原生侧因此走既有的「未配置文件」分支，而不会去打开一个必然不存在的路径。
+- 悬浮窗「运镜 / 关键帧」区新增「VMD 镜头 播放 / 停止」按钮，**只在已导入 `.vmd` 后出现**（`OverlayFeatures.vmdCamera = 自由视角已启用 && 已导入`）。这是 alpha.5 有意推迟的那一项：此前的版本里这个按钮唯一的效果是打印「未配置文件」。按下该键会在自由视角未开启时自动进入自由视角（原生已有行为）。
+- 顺带说明一处未改动的地方：`mouse_invert_y` 与 `mouse_sensitivity` 仍写默认值且无 UI。手机仍无转向输入，`g_mouse_dx/dy` 恒为 0，这两项在下一阶段（触摸转向）之前写什么都无效果。
+- 本机验证（不含实机）：release 构建通过含五类断言的 `verifyReleaseEntryPoints` 门禁；`assembleDebugAndroidTest` 通过；产物 dex 中按名检出全部新增字面量（`%files%/betterendfield/camera/current.vmd`、`vmd.current`、`camera_vmd_imported`、`camera_vmd_bytes`、两种 VMD 文件头、目标路径）；用真实的 `ModuleSettings` 在 JVM 上直接生成 ini，默认（空值）与已导入（占位符）两种状态以及越界夹取、非有限回退的输出均与原生默认一致，`isVmdMotion` 对 `0002` / legacy `file` / `0001` / 缺 `0002` 的 `Vocaloid Motion Data` / 随机内容 / 29 字节 / `null` 七组输入的判定结果与 `LoadVmdCamera` 一致。
+- 未上机：远程文件空间的实际投递、`%files%` 展开后 `open()` 是否成功、以及 VMD 朝向/缩放/FOV 在 Endfield 场景的标定（0.07 / +5° 取自 MMD 场景，预期需微调）都还只有静态证据。instrumented 断言（新增占位符、清空、元数据与文件头）**编译通过但未执行**。
+- Android `versionName=3.3.22-alpha.6`、`versionCode=30322`（与 alpha.1 ~ alpha.5 同值：versionCode 只编码到 3.3.22 这一档，不编码预发布序号）；桌面端仍为 3.3.0。本预发布 APK 由本机构建、固定 release 身份签名，体积 8,683,700 字节，SHA-256 `49A783BDA944B30EC05B80A65EBF6069AF25CA1225EA12172CA3CB823E0012E5`；相比 alpha.5 大 6,632 字节，其中含新类与新文案，也含本机包与 CI 包原生段必然存在的差异（内嵌源码路径不同，两者 `.so` 从不逐字节相同）。签名身份与已发布的 alpha.3 一致（证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`），可原位覆盖 alpha.2 及之后的任何版本。
+
 ## 3.3.22-alpha.5
 
 - 运镜（高级运镜预设 / 关键帧 / VMD 镜头）在 Android 上补齐配置面。此前 Android 的相机配置只写开关与热键，13 个运镜参数一个都没写：原生模块只能按默认值跑「环绕」，`dolly_zoom`（希区柯克变焦）/`crane`（升降）/`truck`（横移）三种预设没有任何入口，关键帧段长、VMD 位移缩放与视野偏置也无从修改。现在这些值由设置页写入，并新增「体验 → 运镜与镜头」子页集中编辑。

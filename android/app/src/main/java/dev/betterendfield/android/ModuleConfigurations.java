@@ -42,6 +42,16 @@ record ModuleConfigurations(
         return !actions.isEmpty();
     }
 
+    /**
+     * Whether the camera configuration points at the imported VMD slot, i.e.
+     * whether the game process has a payload to materialize. Asking the
+     * configuration rather than the import flag keeps the two in step: a file
+     * that no configuration references is never copied.
+     */
+    boolean needsVmdCameraFile() {
+        return camera.contains(ModuleSettings.VMD_FILE_SLOT);
+    }
+
     String summary() {
         return "voice=" + !voice.isEmpty() + " model=" + !model.isEmpty()
                 + " ui=" + !ui.isEmpty() + " camera=" + !camera.isEmpty()

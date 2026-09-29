@@ -133,7 +133,21 @@
     <string name="motion_vmd_fov_bias_label">视野偏置</string>
     <string name="motion_vmd_loop">循环播放 VMD</string>
     <string name="motion_vmd_loop_hint">播完最后一帧后从头继续。</string>
-    <string name="motion_vmd_note">这些参数作用于导入的 .vmd 镜头文件（MMD 相机轨道）。当前版本还没有导入入口，写入游戏的路径是空的，按下悬浮窗的 VMD 按钮会在面板日志里提示未配置文件。</string>
+    <string name="motion_vmd_note">作用于导入的 .vmd 镜头文件（MMD 相机轨道）。导入后路径在游戏启动时写入配置，修改导入只能重启游戏生效；标定值（位移缩放 0.07、视野偏置 +5°）来自 MMD 场景，本作里可能需要按实际画面微调。按下悬浮窗的 VMD 按钮会自动进入自由视角。</string>
+    <string name="motion_vmd_import">导入 VMD 镜头文件</string>
+    <string name="motion_vmd_clear">清除导入</string>
+    <string name="motion_vmd_not_imported">还没有导入 .vmd 镜头文件，按下 VMD 按钮只会在面板日志里提示未配置文件。</string>
+    <string name="motion_vmd_slot_summary">已导入：%1$s · %2$s · %3$s</string>
+    <string name="motion_vmd_import_working">正在读取所选文件…</string>
+    <string name="motion_vmd_imported">已导入 %1$s（%2$s）。重启游戏后生效。</string>
+    <string name="motion_vmd_import_failed">导入失败：%1$s</string>
+    <string name="motion_vmd_unreadable">无法读取所选文件</string>
+    <string name="motion_vmd_too_large">文件超过 64 MiB，原生装载器不接收</string>
+    <string name="motion_vmd_not_a_motion">不是 VMD 动作文件（前 30 字节文件头不匹配）</string>
+    <string name="motion_vmd_publish_failed">无法写入框架服务，请确认 LSPosed 已激活并已启用本模块</string>
+    <string name="motion_vmd_cleared">已清除导入，下次启动游戏时不再指向该文件。</string>
+    <string name="motion_vmd_cleared_unlinked">已停止引用该文件；框架服务未能删除它，但配置已不再指向它。</string>
+    <string name="motion_vmd_unnamed">所选文件</string>
 
     <!-- betterendfield.actions -->
     <string name="dash_card_eyebrow">SPRINT · betterendfield.actions</string>

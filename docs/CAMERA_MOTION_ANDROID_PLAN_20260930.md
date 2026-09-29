@@ -99,13 +99,15 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 ### P2 VMD 投递链（零原生改动）
 
-**改动文件**：设置 app（`SettingsPages`/新导入入口）、`RuntimeBootstrap.java`、strings。
+**改动文件**：设置 app（`CameraMotionPage`/`SettingsState`/`FrameworkSettings`）、`CameraVmdFile.java`（新）、`RuntimeBootstrap.java`、`ModuleConfigurations.java`、`XposedEntry.java`、`OverlayFeatures.java`/`OverlayControls.kt`/`OverlayPanel.kt`、strings。
 
-1. **导入入口放在设置 app**（不是悬浮窗）：运镜子页加「导入 VMD 文件」行。`ActivityResultContracts.OpenDocument()` 先例已在 `BemInstallScreen.kt:50`。选完流式校验：大小 ≤64MiB（与原生 `kMaxVmdFileBytes` 一致）、前 30 字节为 `Vocaloid Motion Data 0002` 或 `Vocaloid Motion Data file`；通过则存 **module 自己的 filesDir** `betterendfield/vmd/current.vmd`（`.partial` → 校验 → `os.replace` 原子落位，沿用 bem-converter 的 `publish_package` 风格），文件名/大小/导入时间进 SharedPreferences 展示。
+> **原方案的一处错误（2026-09-30 实施时更正）**：本节最初写的是「存 module 自己的 filesDir → RuntimeBootstrap 从 module filesDir 拷到 game filesDir」。这在 Android 上不成立：设置应用与游戏是两个 UID，`/data/user/<uid>/<pkg>` 是 0700，游戏进程读不到模块应用的数据目录，`Context.getFilesDir()` 拿到的路径只是字符串，打不开。真正可用的通道是**框架（LSPosed 服务）的远程文件空间**——`getRemotePreferences` 相邻的 `openRemoteFile` / `listRemoteFiles` / `deleteRemoteFile`，BEM 包管理器已在用（`FrameworkSettings.publishBem`）。P2 按该通道实施，见第 7 节。
+
+1. **导入入口放在设置 app**（不是悬浮窗）：运镜子页加导入行。`ActivityResultContracts.OpenDocument()` 先例已在 `BemInstallScreen.kt:50`。选完先落缓存临时文件并流式校验：大小 >0 且 ≤64 MiB（与原生 `kMaxVmdFileBytes` 一致）、前 30 字节为 `Vocaloid Motion Data 0002` 或 `Vocaloid Motion Data file`；通过后经 `FrameworkSettings.publishVmd` 写进远程文件空间，名称 `vmd.current`。文件名/大小/导入时间进 SharedPreferences 供页面展示。
    - 选设置 app 而非悬浮窗的理由：完整 Activity Result 能力（`activityResultRelay` 依赖 hook 中继、有降级分支）、可独立回归（HLK-AL00 无游戏也能测导入）、不在游戏运行时打扰游戏。
-2. **投递 = RuntimeBootstrap 物化**（`ActionPoseAssets.materialize` 同模式，游戏进程内、module→game 两个 Context 已就绪）：把 `module filesDir/betterendfield/vmd/current.vmd` 拷到 `game filesDir/betterendfield/camera/current.vmd`（目标已存在且大小一致则跳过，记日志）。
-3. **路径进配置用占位符**：`ModuleSettings` 在用户启用 VMD 时写 `vmd_camera_file=%files%/betterendfield/camera/current.vmd`；`RuntimeBootstrap` 在 `setenv(BETTER_ENDFIELD_CAMERA_CONFIG)` 前把 `%files%` 替换为 `context.getFilesDir()` 绝对路径。占位符方案优于设置 app 硬拼 `/data/user/<uid>/<pkg>/...`（多用户/工作资料机不脆），且 RuntimeBootstrap 是唯一同时知道游戏 filesDir 与配置串的点。
-4. 未导入时启用 VMD 的行为：占位符照写，原生打开失败给出既有日志 `the VMD file could not be opened`（可读、可诊断，无需 Java 侧重复实现完整解析器）。
+2. **投递 = RuntimeBootstrap 物化**（`BemInstalledResources.prepare` 同模式，游戏进程内、module→game 两个 Context 已就绪）：把远程空间里的 `vmd.current` 拷到 `game filesDir/betterendfield/camera/current.vmd`（目标已存在且长度等于登记值则跳过，记日志；写入走 `.tmp` → `Os.rename`）。
+3. **路径进配置用占位符**：`ModuleSettings` 在已导入时写 `vmd_camera_file=%files%/betterendfield/camera/current.vmd`；`RuntimeBootstrap` 在 `setenv(BETTER_ENDFIELD_CAMERA_CONFIG)` 前把 `%files%` 替换为 `context.getFilesDir()` 绝对路径。占位符方案优于设置 app 硬拼 `/data/user/<uid>/<pkg>/...`（多用户/工作资料机不脆），且 RuntimeBootstrap 是唯一同时知道游戏 filesDir 与配置串的点。路径必须是绝对路径：替身层把 `CreateFileW` 实现为 `open(path, O_RDONLY)`，相对路径会按进程工作目录解析。
+4. 未导入时：该键写空值（不是占位符），原生走既有 `no VMD camera file is configured` 分支——比让原生去打开一个必然不存在的文件更可读，也无需 Java 侧重复实现完整解析器。
 
 **验收判据**：
 - 面板按「VMD 镜头」→ `VMD camera playback started: N keyframes, X s.`（首次按下时若自由视角未开，会自动 `EnterFreeCamera`——原生已处理）；
@@ -154,7 +156,7 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 ## 5. 交付节奏与文档同步
 
-- **版本**：P1 → `3.3.22-alpha.5`；P2 → `alpha.6`；P3 → `alpha.7`（P1+P2 量小可合并为 alpha.5）。
+- **版本**：P1 → `3.3.22-alpha.5`（已交付）；P2 → `alpha.6`（已交付）；P3 → `alpha.7`。
 - **闭环**：push → CI（debug）→ 本地 `assembleRelease` 交付 release 包（release 签名，原位覆盖）→ PJX110 实机 → 用户贴面板日志 → 诊断。
 - **文档四件套**：每阶段 `CHANGELOG.md` / `README.md` / `README.en.md` / `android/README.md`；P2 占位符机制与 P3 relay 行协议属机制类，另加 `docs/GAME_INTERFACES.md`。
 - **验收基线设备**：HLK-AL00（冷启动回归 + 设置 app 可测导入）；PJX110（游戏内全链路）。
@@ -186,4 +188,36 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 **未上机的原因**：在线设备只有 `HLK-AL00`，其上装的是 3.3.21，签名为旧的临时 debug 身份（`62713BA0…`），与本版不相容；原位安装被系统拒绝，需要先卸载。未擅自卸载用户设备上的应用。运镜本体在 Windows 侧也从未实机验证，因此这次是双平台首次上机验证。
 
-**下一步（P2）**：VMD 投递链（设置 app SAF 导入 + 校验 → module filesDir → `RuntimeBootstrap` 物化进游戏 filesDir → `%files%` 占位符替换），以及随之解禁的面板 VMD 按钮与 `OverlayFeatures.vmdCamera`。
+**下一步（P2）**：见第 7 节，已交付 `3.3.22-alpha.6`。
+
+---
+
+## 7. P2 实施结果（2026-09-30，已交付 3.3.22-alpha.6）
+
+**已落地**（零原生改动）：
+
+| 层 | 改动 |
+|---|---|
+| 契约 | `ModuleSettings` 增 `VMD_FILE_SLOT`（`%files%/betterendfield/camera/current.vmd`）、`VMD_REMOTE_NAME`（`vmd.current`）、`CAMERA_VMD_IMPORTED` / `VMD_BYTES` 等元数据键；`CameraMotion` 增 `vmdImported` 字段并据此写 `vmd_camera_file` |
+| 校验 | `ModuleSettings.isVmdMotion(byte[30])` 与 `vmdMaximumBytes()`，逐字节对齐 `LoadVmdCamera`（30 字节视图、两代文件头、64 MiB 上限） |
+| 发布 | `FrameworkSettings.publishVmd / removeVmd / remoteAvailable`，写入 LSPosed 远程文件空间 |
+| 设置页 | `SettingsState.importVmd(uri)` / `clearVmd()` + 运镜子页导入行（`OpenDocument` + 清缓存临时文件 + 后台线程 + 主线程回写状态） |
+| 游戏侧 | 新 `CameraVmdFile.materialize`（远程文件 → 游戏 filesDir，长度比对跳过、`.tmp` → `Os.rename`）；`RuntimeBootstrap` 增 `vmdBytes`/`Source` 参数、启动前物化、`setenv` 前展开 `%files%`；`ModuleConfigurations.needsVmdCameraFile()`；`XposedEntry` 接线 |
+| 面板 | `OverlayFeatures.vmdCamera = freeCamera && 已导入`；`MotionControls` 增 VMD 行并接收 features；`OverlayPanel`/`GameOverlay` 传参 |
+
+**与原计划的一处实质性偏离**：投递通道由「module filesDir 中转」改为「框架远程文件空间」。原假设不成立（两个 UID，游戏读不到模块应用的数据目录），已在第 2 节 P2 就地更正并留下记录。同时把「未导入时写占位符、由原生报打开失败」改为「未导入时写空值」：后者走的是原生既有的「未配置文件」分支，比让原生去打开一个必然不存在的路径更可读。
+
+**验证证据**（本机，未上机）：
+
+| 项 | 结果 |
+|---|---|
+| release 构建 + `verifyReleaseEntryPoints` | 通过 |
+| `assembleDebugAndroidTest` | 通过 |
+| 产物 dex 检出 8 个新字面量（占位符、`vmd.current`、两个偏好键、两种文件头、目标路径等） | 全部命中 |
+| 真实 `ModuleSettings` 在 JVM 生成 ini | 默认（空值）/ 已导入（占位符）/ 越界夹取 / 非有限回退四组输出一致 |
+| 真实 `isVmdMotion` 在 JVM 判定 | `0002` ✓、legacy `file` ✓、`0001` ✗、`Vocaloid Motion Data` ✗、`garbage` ✗、29 字节 ✗、`null` ✗ |
+| instrumented 断言 | 编译通过，**未执行**（新增占位符、清空、元数据与文件头断言） |
+
+**未验证项（须实机）**：远程文件空间的实际投递与 `%files%` 展开后的 `open()` 成功与否；VMD 朝向/缩放/FOV 在 Endfield 场景的标定（0.07 / +5°，来自 MMD 场景，预期需微调）；面板 VMD 按钮的显隐与按下效果。
+
+**下一步（P3）**：触摸转向——替身层 `AddVirtualMouseDelta` + relay 新行协议 + `module.cpp` 非 Win 分支 + 面板 `LookPad`；同批把 `mouse_sensitivity` / `mouse_invert_y` 的 UI 补上（灵敏度滑杆 0.02–0.5，`LookPad` 的增量换算要读它）。

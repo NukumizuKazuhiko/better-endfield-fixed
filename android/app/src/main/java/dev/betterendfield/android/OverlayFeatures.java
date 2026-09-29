@@ -15,7 +15,8 @@ public record OverlayFeatures(
         boolean hideHud,
         boolean freeCamera,
         boolean worldPause,
-        boolean firstPerson) {
+        boolean firstPerson,
+        boolean vmdCamera) {
 
     static OverlayFeatures read(SharedPreferences settings) {
         boolean freeCamera = settings.getBoolean(ModuleSettings.CAMERA_FREE, false);
@@ -26,11 +27,16 @@ public record OverlayFeatures(
                 // World pause is a free-camera sub-mode: the desktop module only
                 // reads its hotkey while the free camera is armed.
                 freeCamera && settings.getBoolean(ModuleSettings.CAMERA_PAUSE, false),
-                settings.getBoolean(ModuleSettings.CAMERA_FIRST_PERSON, false));
+                settings.getBoolean(ModuleSettings.CAMERA_FIRST_PERSON, false),
+                // Two real gates on this one. The module only latches the VMD
+                // hotkey while the free camera is enabled, and there is nothing to
+                // play until a .vmd has actually been published - which is why
+                // this button arrives only now, with the import path.
+                freeCamera && settings.getBoolean(ModuleSettings.CAMERA_VMD_IMPORTED, false));
     }
 
     static OverlayFeatures off() {
-        return new OverlayFeatures(false, false, false, false, false);
+        return new OverlayFeatures(false, false, false, false, false, false);
     }
 
     boolean anyControl() {

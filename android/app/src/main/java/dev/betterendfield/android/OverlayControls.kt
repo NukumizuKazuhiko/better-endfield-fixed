@@ -116,7 +116,7 @@ internal fun MovementPad(callbacks: OverlaySurface.Callbacks) {
 }
 
 @Composable
-internal fun MotionControls(callbacks: OverlaySurface.Callbacks) {
+internal fun MotionControls(features: OverlayFeatures, callbacks: OverlaySurface.Callbacks) {
     OverlaySection("运镜 / 关键帧") {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             OverlayActionRow("播放 / 停止", { callbacks.pulse(Hotkeys.MOTION, "运镜 播放/停止") },
@@ -135,6 +135,15 @@ internal fun MotionControls(callbacks: OverlaySurface.Callbacks) {
             OverlayAction("记录关键帧") { callbacks.pulse(Hotkeys.KEYFRAME_ADD, "记录关键帧") }
             OverlayActionRow("回放关键帧", { callbacks.pulse(Hotkeys.KEYFRAME_PLAY, "回放关键帧") },
                 "清除", { callbacks.pulse(Hotkeys.KEYFRAME_CLEAR, "清除关键帧") })
+            // Offered only once a .vmd has been imported: without one the native
+            // side logs "no VMD camera file is configured", so the button would
+            // be a control whose only outcome is a complaint. The key also enters
+            // the free camera by itself when it is not running yet.
+            if (features.vmdCamera()) {
+                OverlayAction("VMD 镜头 播放 / 停止") {
+                    callbacks.pulse(Hotkeys.VMD_PLAY, "VMD 镜头 播放/停止")
+                }
+            }
         }
     }
 }
