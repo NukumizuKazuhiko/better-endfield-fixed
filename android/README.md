@@ -546,6 +546,67 @@ The debug build writes a short native diagnostic log to
 The native library is linked with 16 KiB ELF LOAD-segment alignment and the APK
 is also zip-aligned for Android 16 page-size compatibility.
 
+## Signing
+
+The Android build carries two signing identities, held at deliberately
+different secrecy.
+
+|  | debug | release |
+|---|---|---|
+| Keystore | `keystore/bem-debug.keystore` — tracked | `keystore/bem-release.keystore` — gitignored |
+| Credentials | `keystore/debug.properties` — tracked | `keystore/release.properties` — gitignored |
+| Alias | `bemdebug` | `bemrelease` |
+| Certificate SHA-256 | `4E:DD:10:B9:8A:C4:A2:39:A7:8B:64:93:15:09:A4:3F:A0:F3:28:FA:77:EF:B8:D4:3D:37:E5:73:58:FA:82:6F` | `8C:D6:FD:C1:50:38:53:0E:10:16:68:AB:4B:3C:CD:00:30:AE:88:AE:37:15:3E:6D:66:AA:45:93:0C:7B:8E:FD` |
+
+Both are PKCS12 with an RSA 2048 key under SHA256withRSA, valid until
+2054-02-14. PKCS12 cannot hold a key password separate from the store password,
+so one value per keystore covers both — that is a property of the format, not a
+choice.
+
+**debug.** Tracked together with its password, because neither protects
+anything: a debug certificate is not a trust boundary, and having both in the
+repository is what lets a fresh clone and every CI runner produce a debug APK
+under one stable identity. That is the point of it — a debug APK built today
+installs over the one built yesterday. Wiring is done by overriding AGP's
+built-in `debug` signing config rather than adding a second one, so
+`debugAndroidTest` and any future test-only build type inherit it without
+further wiring.
+
+**release.** The mirror image. This repository is public, and anyone holding
+`bem-release.keystore` can sign an APK that Android accepts as an in-place
+upgrade of the installed app, so the keystore stays out of it. CI never sees a
+keystore secret per build; `android-release.yml` materialises both the keystore
+and `keystore/release.properties` from three repository secrets before it
+starts, from `base64 -w0 keystore/bem-release.keystore`:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_RELEASE_KEYSTORE_BASE64` | base64 of `keystore/bem-release.keystore`, unwrapped |
+| `ANDROID_RELEASE_KEYSTORE_PASSWORD` | `storePassword` from `keystore/release.properties` |
+| `ANDROID_RELEASE_KEY_ALIAS` | `bemrelease` |
+
+A missing one aborts the job with the secret named, rather than producing an
+unsigned APK. After the build, the workflow compares the APK's signer against
+`RELEASE_CERT_SHA256` — the pinned digest above — so "the pipeline signed with
+the release identity" is checked rather than asserted.
+
+**Locally.** `:app:signingReport` prints both certificates and their stores.
+`assembleDebug` needs nothing configured: `keystore/debug.properties` and its
+keystore are tracked. `assembleRelease` needs the release keystore and
+`keystore/release.properties` present; without them it stops at
+`:app:checkReleaseSigning`, which `preReleaseBuild` depends on and which names
+the missing fields and both ways of supplying them. The check exists so the
+failure is a sentence rather than a keystore exception from inside packaging.
+
+**Upgrade behaviour.** `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` were each
+signed by a different throwaway key — the CI runners regenerated AGP's debug
+keystore every run. The first release cut after this change is signed by
+`bemrelease`, which differs from all three, so installing over any of them still
+requires an uninstall and a backup of app data. From that release onwards
+upgrades install in place. Rotating the release keystore later reintroduces the
+same one-time uninstall, and the pinned digest in the workflow has to move with
+it.
+
 ## LSPosed scope troubleshooting
 
 Third-party BEM packages are managed from the `角色外观` sub-page under the
@@ -593,12 +654,13 @@ icall does not exist there.
 The Android client's managed readback contracts still require device verification;
 the Windows client's missing methods do not establish Android availability.
 
-GitHub Actions currently signs release APKs with an ephemeral debug key. The
-published 3.3.20, 3.3.21 and 3.3.22 APKs each have a different signing
-certificate, so a standard Android installation cannot upgrade in place across
-those versions. Back up app data before uninstalling the old APK. The user's
-in-game report was made with a local debug build; the published APK passed CI
-build and signature verification but has not been retested in-game.
+Release APKs are signed by the dedicated release identity described under
+[Signing](#signing). `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` predate it and
+were each signed by a throwaway CI key, so a standard Android installation still
+cannot upgrade in place across those versions; back up app data before
+uninstalling the old APK. The user's in-game report was made with a local debug
+build; the published APK passed CI build and signature verification but has not
+been retested in-game.
 
 Optional keys, with their defaults: `first_person_eye_forward=0.03`,
 `first_person_eye_height=0.05`, `first_person_near_clip=0.03`,

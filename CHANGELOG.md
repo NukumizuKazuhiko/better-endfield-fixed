@@ -2,6 +2,14 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.2
+
+- 发行签名改为固定身份，替代此前「release 复用 debug 密钥」的做法。此前 release 变体直接引用 AGP 内置的 `debug` 签名配置，而仓库里没有提交任何密钥库，所以每次在 CI 上构建都由该 runner **现场生成**一份新的 `~/.android/debug.keystore`——这正是「每个版本的签名证书都不一样、用户只能卸载重装」的根因。现在 debug 与 release 各有一个固定身份：debug 密钥库随仓库提交（debug 证书不构成信任边界，而固定它才能让 debug 包互相原位覆盖）；release 密钥库不进仓库，由 CI 在构建前从仓库 Secret 还原，并在打包后按固定证书指纹断言签发身份，不匹配即报错退出，确保发行包不会悄悄签成别的身份后发出去。
+- 发行流水线补上预发布标记。`gh release create` 此前不带 `--prerelease`，会把 `-alpha` 版本登记为正式版并抢占 Latest，使稳定版 `v3.3.21` 从「最新版」入口消失。现在按版本号后缀（`-alpha` / `-beta` / `-rc`）自动标记为预发布。
+- 本版为发行基建改动，不含功能改动：代码内容与 `3.3.22-alpha.1` 相同。
+- Android `versionName=3.3.22-alpha.2`、`versionCode=30322`（与 alpha.1 同值：versionCode 只编码到 3.3.22 这一档，不编码预发布序号）；桌面端仍为 3.3.0。本预发布 APK 由 CI 构建并使用固定 release 身份签名，证书 SHA-256 为 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。
+- 安装限制：固定身份自本版起生效，但 alpha.2 与此前的 `v3.3.22-alpha.1`、`v3.3.21`、`v3.3.20` 签名证书互不相同，**首次升级仍须先卸载旧版**；从 alpha.2 起，其后的版本可原位覆盖升级。卸载前请自行备份应用数据。
+
 ## 3.3.22-alpha.1
 
 - Android 悬浮 Handle 和面板在实验分支改用 Jetpack Compose；保留 Activity 生命周期、热键文件中继、日志导出与原生运行时合同。此版为预发布，不代表游戏实际关卡的交互验收完成。

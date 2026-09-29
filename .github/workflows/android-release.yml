@@ -1,16 +1,27 @@
 name: android-release
 
-# Manual release pipeline. The `release` build type inherits the debug signing
-# config (see android/app/build.gradle.kts), so no keystore secret is needed.
+# Manual release pipeline. The release build type is signed with a dedicated
+# identity that stays out of the repository (android/keystore/bem-release.keystore,
+# gitignored): the distribution repository is public, and anyone holding that
+# keystore could sign an APK Android accepts as an in-place upgrade of the
+# installed app. This job therefore materialises the keystore and its
+# credentials from repository secrets before building -- see android/README.md,
+# section "Signing", for the three secrets and how to produce them. The debug
+# identity needs none of this: it is committed, because a debug signature
+# protects nothing.
+#
 # Tag creation is left to `gh release create` on purpose: a `push: tags`
 # trigger here would fire a second run off the tag this workflow just made.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.20)'
+        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.22-alpha.2)'
         required: true
-        default: '3.3.21'
+        # Tracks versionName on the branch this runs against. A stale default is
+        # harmless -- the run stops on the mismatch check rather than tagging a
+        # version the source does not declare -- but a wrong one wastes a build.
+        default: '3.3.22-alpha.2'
       draft:
         description: 'Create the release as a draft instead of publishing it'
         type: boolean
@@ -20,12 +31,54 @@ on:
 permissions:
   contents: write
 
+env:
+  # SHA-256 of the certificate in keystore/bem-release.keystore. This value is
+  # not a secret -- `keytool -list -v` and `apksigner verify --print-certs` both
+  # print it -- but pinning it here is what turns "the pipeline signed with the
+  # release identity" from a claim into a check. It must be updated whenever the
+  # release keystore is rotated, and on that occasion every installed copy has
+  # to be uninstalled before it can be replaced, because a rotation is exactly
+  # the situation in which Android refuses an in-place upgrade.
+  RELEASE_CERT_SHA256: '8C:D6:FD:C1:50:38:53:0E:10:16:68:AB:4B:3C:CD:00:30:AE:88:AE:37:15:3E:6D:66:AA:45:93:0C:7B:8E:FD'
+
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+
+      - name: Materialise the release signing identity
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+
+          # Fail with a sentence rather than an empty keystore. A repository
+          # without these secrets can still run the debug workflow, but a
+          # release must not quietly end up signed by something else -- the
+          # whole point of this identity is that it never changes.
+          missing=()
+          [ -n "$KEYSTORE_BASE64" ] || missing+=(ANDROID_RELEASE_KEYSTORE_BASE64)
+          [ -n "$KEYSTORE_PASSWORD" ] || missing+=(ANDROID_RELEASE_KEYSTORE_PASSWORD)
+          [ -n "$KEY_ALIAS" ] || missing+=(ANDROID_RELEASE_KEY_ALIAS)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing repository secret(s): ${missing[*]} (android/README.md, section \"Signing\")"
+            exit 1
+          fi
+
+          mkdir -p android/keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/keystore/bem-release.keystore
+          # The build reads these three values from the same file a local
+          # checkout uses. The file is gitignored, and the runner is discarded
+          # once the job ends, so the credentials never reach the artifact.
+          printf 'storeFile=keystore/bem-release.keystore\nstorePassword=%s\nkeyAlias=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" > android/keystore/release.properties
+
+          test -s android/keystore/bem-release.keystore
+          echo "release keystore materialised ($(wc -c < android/keystore/bem-release.keystore) bytes)"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -56,6 +109,26 @@ jobs:
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Assert the APK carries the release identity
+        run: |
+          set -euo pipefail
+
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          # apksigner prints the digest as lowercase hex without separators,
+          # while the pinned constant is the colon-separated uppercase form
+          # keytool prints. Normalise both so the comparison is about the
+          # certificate, not about two tools' formatting choices.
+          normalise() { tr -d ':' | tr '[:lower:]' '[:upper:]'; }
+          actual=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | normalise)
+          expected=$(printf '%s' "$RELEASE_CERT_SHA256" | normalise)
+
+          echo "release APK signer certificate SHA-256: $actual"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::the release APK is not signed with the release identity (expected $RELEASE_CERT_SHA256). Check that ANDROID_RELEASE_KEYSTORE_BASE64 holds android/keystore/bem-release.keystore."
+            exit 1
+          fi
 
       - name: Stage the APK and the release notes
         env:
@@ -118,6 +191,19 @@ jobs:
           fi
 
           args=(--repo "$GITHUB_REPOSITORY" --title "$tag" --target "$GITHUB_SHA" --notes-file dist/RELEASE_NOTES.md)
+
+          # A version carrying a pre-release suffix must not be published as a
+          # normal release: `gh release create` makes the newest normal release
+          # "Latest", so an alpha would be handed to everyone who asks for the
+          # latest build, ahead of the last stable one. v3.3.22-alpha.1 was
+          # published as a pre-release for the same reason, by hand.
+          case "$REQUESTED_VERSION" in
+            *-alpha*|*-beta*|*-rc*)
+              args+=(--prerelease)
+              echo "creating $tag as a pre-release"
+              ;;
+          esac
+
           if [ "$IS_DRAFT" = "true" ]; then
             args+=(--draft)
             echo "creating $tag as a draft"
