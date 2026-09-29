@@ -2,6 +2,12 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.4
+
+- 修复设置界面换页后不回到顶部：在任一页面向下滚动后切到另一页，新页面会停在上一个页面留下的同一滚动偏移处（也就是页面中下段），而不是从顶部开始。根因是整个设置界面只有**一个**滚动容器（`SettingsShell.kt` 的 `SettingsBody`），八个页面只是在该容器内部按 `state.page` 换内容；容器的滚动状态 `rememberScrollState()` 的调用点从不改变，因此它跨页面存活，把上一个页面停留的偏移量交给了新页面。现在滚动状态以页面为键（`rememberSaveable(state.page, saver = ScrollState.Saver)`），换页即得到一个偏移为 0 的新滚动状态；同一页面内的滚动不受影响，旋转屏幕后的位置恢复也照旧。
+- 同一缺陷在 BEM 包管理器与游戏内悬浮窗面板中不存在：前者是独立 Activity 的单页内容，后者不切换页面，各自的滚动容器都不会跨页面复用，因此未改动这两个文件。
+- Android `versionName=3.3.22-alpha.4`、`versionCode=30322`（与 alpha.1 ~ alpha.3 同值：versionCode 只编码到 3.3.22 这一档，不编码预发布序号）；桌面端仍为 3.3.0。本预发布 APK 使用固定 release 身份签名，证书 SHA-256 为 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`，可从 3.3.22-alpha.2 起原位覆盖安装。
+
 ## 3.3.22-alpha.3
 
 - 修复时间冻结（世界暂停）无法恢复：冻结后同一热键（面板「时间冻结」按钮）再也解不开，只能重启游戏。根因是热键请求只在游戏主线程的泵上排空，而把 `Time.timeScale` 置 0 会让游戏自身的相机更新停摆——`CameraMono._ProcessDitherByPitch` 与 `CameraManager.TailLateTick` 两个泵随之停止，`Time.get_unscaledDeltaTime` 心跳又只在游戏仍读该属性时才有脉冲，于是解冻请求一直排在队里、世界永远停在冻结态（退出自由视角的恢复走同一条泵，因此同样救不回来）。现在模块把同一个泵挂在引擎每帧调用的 `UnityEngine.Rendering.RenderPipelineManager.DoRenderLoop_Internal` 上：该回调由引擎在把帧交给渲染管线时触发，不受游戏时间缩放影响，解冻因此不依赖游戏是否还在跑自己的相机逻辑。该合同按可选处理，解析或挂钩失败时退回原有两个泵，不会让整个相机模块变成不可用。

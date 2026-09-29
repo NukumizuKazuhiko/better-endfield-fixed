@@ -1,6 +1,7 @@
 package dev.betterendfield.android
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -15,12 +16,12 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,6 +109,15 @@ fun SettingsShell(
     }
 }
 
+/**
+ * The scrolling body that every page shares.
+ *
+ * The scroll offset is keyed by [SettingsState.page]. That is what makes a page
+ * open at its top: one container serves all eight pages, so a state that
+ * outlived a page change would drop the reader into the middle of the next page
+ * at whatever offset the previous one happened to be left at. Keying by page
+ * still survives a rotation, because the page is restored before this composes.
+ */
 @Composable
 private fun SettingsBody(
     state: SettingsState,
@@ -120,7 +130,12 @@ private fun SettingsBody(
             Modifier
                 .widthIn(max = Be.Size.contentMaxWidth)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(
+                    // Keyed by the page: the shell owns a single scroll container
+                    // for every page, so an unkeyed state would hand a freshly
+                    // opened page whatever offset the previous one was left at.
+                    rememberSaveable(state.page, saver = ScrollState.Saver) { ScrollState(0) },
+                )
                 .padding(
                     start = Be.Space.gutter,
                     end = Be.Space.gutter,
