@@ -105,9 +105,18 @@ public final class XposedEntry extends XposedModule {
 
     @Override public void onModuleLoaded(ModuleLoadedParam param) {
         processName = param.getProcessName();
+        Log.i("BetterEndfield.Runtime", "onModuleLoaded process=" + processName);
+    }
+
+    @Override public void onPackageLoaded(PackageLoadedParam param) {
+        onPackageAvailable("onPackageLoaded", param.getPackageName());
     }
 
     @Override public void onPackageReady(PackageReadyParam param) {
+        onPackageAvailable("onPackageReady", param.getPackageName());
+    }
+
+    private void onPackageAvailable(String stage, String packageName) {
         instance = this;
         // The journal must never take the entry down with it: a remote
         // preference or service hiccup here used to abort the whole hook.
@@ -115,18 +124,17 @@ public final class XposedEntry extends XposedModule {
             RuntimeLog.bind(getRemotePreferences("runtime_log"));
             RuntimeLog.record("journal build " + BuildConfig.VERSION_NAME
                     + " (" + BuildConfig.VERSION_CODE + ")");
-            RuntimeLog.record("onPackageReady pkg=" + param.getPackageName()
+            RuntimeLog.record(stage + " pkg=" + packageName
                     + " process=" + processName);
         } catch (Throwable journalFailure) {
             log(Log.WARN, "BetterEndfield.Runtime",
                     "journal bind failed: " + journalFailure);
         }
-        if (!RuntimeBootstrap.isTarget(param.getPackageName(), processName)) {
+        if (!RuntimeBootstrap.isTarget(packageName, processName)) {
             RuntimeLog.record("skip: not a target process (package != process, "
                     + "or the module/system package itself)");
             return;
         }
-        if (!attached.compareAndSet(false, true)) return;
         try {
             SharedPreferences settings = getRemotePreferences("module_settings");
             RuntimeLog.record("settings schemaVersion="
@@ -138,10 +146,14 @@ public final class XposedEntry extends XposedModule {
             ModuleConfigurations configs = ModuleConfigurations.read(settings);
             RuntimeLog.record("configs read: " + (configs.none()
                     ? "NONE selected" : configs.summary()));
+            if (!attached.compareAndSet(false, true)) return;
             hook(Application.class.getDeclaredMethod("attach", Context.class)).intercept(chain -> {
                 Object result = chain.proceed();
                 try {
-                    GameOverlay.install((Application) chain.getThisObject(), param.getClassLoader(),
+                    Application application = (Application) chain.getThisObject();
+                    Context context = (Context) chain.getArg(0);
+                    ClassLoader loader = context.getClassLoader();
+                    GameOverlay.install(application, loader,
                             () -> {
                                 // The service-backed preferences proxy can be
                                 // stale after the settings Activity commits a
@@ -154,20 +166,18 @@ public final class XposedEntry extends XposedModule {
                                     return OverlayFeatures.read(settings);
                                 }
                             });
-                    Application application=(Application) chain.getThisObject();
-                    Context context=(Context) chain.getArg(0);
                     new Thread(() -> {
                         try {
                             BemInstalledResources.configuration=BemInstalledResources.prepare(context,
                                 settings.getString(BemInstaller.INDEX,"[]"),
                                 name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report);
                         } catch(Exception error) {report("Installed BEM preparation failed: "+error);}
-                        RuntimeBootstrap.prepare(application,context,param.getClassLoader(),configs,this::installFrames,this::report);
+                        RuntimeBootstrap.prepare(application,context,loader,configs,this::installFrames,this::report);
                     },"BetterEndfield-InstalledModels").start();
                 } catch (Throwable error) { report("bootstrap failed: " + error); }
                 return result;
             });
-            report("attached to " + param.getPackageName());
+            report("attached to " + packageName + " via " + stage);
             RuntimeLog.record("attached; Application.attach hook installed, "
                     + "waiting for game startup");
             installActivityResultRelay();

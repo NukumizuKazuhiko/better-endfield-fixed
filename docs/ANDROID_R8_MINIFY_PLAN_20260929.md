@@ -1,5 +1,7 @@
 # Android R8 压缩方案与 keep 规则清单
 
+> 后续实验：本文件第 6.5 节记录的 Compose 悬浮窗回退仍是历史实机证据。当前 `codex/window` 分支按用户要求再次试验 Compose 展示层，验收状态见 [`ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md`](ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md)。
+
 日期：2026-09-29
 状态：**已实施并通过实机验证**（随 Android **3.3.22** 发行）。规则落在 `android/app/proguard-rules.pro`，门禁任务 `verifyReleaseEntryPoints` 在每次 `packageRelease` 后自动校验。第 1–3 节保留决策当时的分析过程（含闪退事件的时间线），第 4 节起为落地后的实际形态。
 

@@ -87,11 +87,9 @@ object Be {
          * frame, so it stays more opaque than the settings app and leans harder
          * on fill contrast under a bright HUD.
          *
-         * The in-game panel itself is a plain View (GameOverlay.java), because
-         * it runs inside the hooked game process where touching any Compose
-         * class aborts the process. Its int constants mirror these four values;
-         * Kotlin cannot hand a Compose Color to it, so the duplication is real
-         * and both sides have to change together.
+         * The experimental in-game Compose panel reads these tokens directly.
+         * The previous Java/View panel mirrored them as integer constants;
+         * game-process acceptance of the new composition remains pending.
          */
         val overlayPanel = Color(0xF20A0A0A)
         val overlayRow = Color(0xFF1D1D1D)

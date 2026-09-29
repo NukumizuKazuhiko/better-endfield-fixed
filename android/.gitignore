@@ -5,3 +5,14 @@ local.properties
 research/device-*/
 *-ui.png
 model-test.png
+
+# The release signing identity stays out of the repository. The distribution
+# repository is public, and anyone holding this keystore can sign an APK that
+# Android accepts as an in-place upgrade of the installed app. Its companion
+# keystore/debug.properties and keystore/bem-debug.keystore, by contrast, are
+# tracked on purpose -- a debug identity protects nothing, and pinning it is
+# what makes consecutive CI debug APKs installable over one another. See
+# README.md, section "Signing".
+keystore/release.properties
+keystore/bem-release.keystore
+

@@ -6,6 +6,9 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
+Version 3.3.22-alpha.1 is an experimental prerelease: the in-game Compose handle
+appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
+still need device acceptance.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -296,7 +299,8 @@ source of truth rather than two copies to keep in step.
 | `ToolPages.kt` | the tools tab: in-game panel, diagnostics, journal sub-page, about sub-page |
 | `MainActivity.kt` | the settings Activity (Kotlin, edge-to-edge) |
 | `BemInstallState.kt`, `BemInstallScreen.kt`, `BemInstallActivity.kt` | the BEM package manager |
-| `GameOverlay.java` | the in-game panel — deliberately plain Java/View, not Compose (runs in the hooked game process) |
+| `GameOverlay.java` | Activity lifecycle, attachment, hotkey relay and journal export controller |
+| `OverlaySurface.kt`, `FloatingHandle.kt`, `OverlayPanel.kt`, `OverlayControls.kt` | experimental in-game Compose handle and panel; device acceptance is pending |
 
 The camera card is the one place the page tree does not map one-to-one onto the
 preference store. "Default FOV" and the free camera's FOV are the same stored
@@ -428,11 +432,12 @@ Research catalogs and source PCK/CHK files stay under ignored
 - Android NDK 27.2.12479018
 - CMake 3.22.1
 
-The settings app and the BEM package manager are Kotlin + Jetpack Compose. It is
-bundled into the module dex, not kept to a settings-only surface, because the
-module process hosts the settings Activity. The in-game panel is deliberately
-**not** Compose: it runs inside the hooked game process, which cannot load a
-single Compose class - see the panel section below. AGP 9 compiles Kotlin itself,
+The settings app and the BEM package manager already use Kotlin + Jetpack Compose.
+This experimental branch also composes the in-game handle and panel inside the
+hooked game process. The earlier 3.3.21 attempt crashed on game entry; this
+version uses an Activity-scoped Java controller, explicit Compose view owners and
+an eager first-composition check, but game-process acceptance remains pending.
+AGP 9 compiles Kotlin itself,
 so `org.jetbrains.kotlin.android` must **not** be applied - doing so is a build
 error, not a warning. Only the Compose compiler plugin
 (`org.jetbrains.kotlin.plugin.compose`) is applied, and the Kotlin Gradle plugin
@@ -464,8 +469,9 @@ The game process calls `status()` on its normal path, so it ran that initialiser
 and crashed with no Java stack at all. Keeping the class name cannot prevent this:
 the class survives, its side effects are moved elsewhere. Turning the optimiser
 off costs about 1.5 MB (about 7.0 MB to 8.60 MB) and is the only reliable fix.
-This is why the in-game panel being plain View is necessary but not sufficient -
-the optimiser can put a dependency back into the game process on its own.
+The optimiser remains off for this experiment so it cannot merge unrelated
+game-process classes into shared Compose holders. This does not establish that
+the new Compose panel can run inside the game process.
 
 Names that are read from outside the Java type system are pinned in
 `android/app/proguard-rules.pro`:
@@ -480,7 +486,7 @@ Names that are read from outside the Java type system are pinned in
 
 `:app:verifyReleaseEntryPoints` re-checks all of that against the packaged APK -
 entry class, JNI symbols, the `conversionProgress` descriptor, the four manifest
-components, and, as a fifth check, that the ten classes on the game path still
+components, and, as a fifth check, that the listed classes on the game path still
 exist as their own classes rather than folded holders. It is finalized onto
 `packageRelease`, so `:app:assembleRelease` fails instead of producing an APK
 whose entry points were renamed or whose game-process classes were merged. That
@@ -508,14 +514,11 @@ The settings page uses bottom navigation on phones and a navigation rail at
 entry is separate from login-model settings. The enhancement page owns the
 overlay switch and preview; the BEM page only manages packages. The framework
 entry attaches a collapsed BE icon directly to the scoped Unity application's
-Activity. The host is a plain `FrameLayout`; the panel body is built from
-framework Views, deliberately - **not** a Compose composition. The panel runs
-inside the hooked game process, which cannot load a single Compose class, and
-3.3.21 crashed on game entry because the panel was Compose there. The host stays
-a framework View too, because it has to survive the game's content view being
-rebuilt underneath it mid-frame, and a View tree stays valid with no lifecycle
-owner - recomposition was the only thing that needed one. Tapping the icon expands
-the panel, dragging repositions it, and the panel
+Activity. The host remains a plain `FrameLayout`; two bounded `ComposeView`
+children draw the handle and panel. Blank host space has no touch listener, so
+the game retains it. The host and Compose children share explicit lifecycle, saved-state
+and view-model owners, with resume/pause/destroy driven by the existing Activity
+callbacks. Tapping the icon expands the panel, dragging repositions it, and the panel
 survives pause/resume/destroy: game SDKs can re-call `setContentView`, which
 either strips our host from the content view or leaves it attached but buried
 under the freshly added game view, so the panel re-attaches the host to the
@@ -524,8 +527,11 @@ re-checking once shortly after `onActivityResumed`. It does not require
 SYSTEM_ALERT_WINDOW permission or a foreground service. The panel footer
 renders this process's runtime journal in place, with a "save log to file"
 button that writes through the system file picker. After first enabling
-the option, restart the scoped game. Panel display in an injected game still
-requires device verification; an ordinary emulator can verify the preview.
+the option, restart the scoped game. The Handle has been observed over the
+game's startup screen on PJX110 after a direct cold launch; panel interaction
+and gameplay remain to be verified.
+The experimental scope and remaining gates are recorded in
+[`docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md`](../docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md).
 
 After installing or updating the APK, disable and re-enable the module once in
 LSPosed. This makes LSPosed register the module's protected shared-preference
@@ -539,6 +545,67 @@ The debug build writes a short native diagnostic log to
 `/data/user/0/<game package>/cache/betterendfield-diagnostics.log`.
 The native library is linked with 16 KiB ELF LOAD-segment alignment and the APK
 is also zip-aligned for Android 16 page-size compatibility.
+
+## Signing
+
+The Android build carries two signing identities, held at deliberately
+different secrecy.
+
+|  | debug | release |
+|---|---|---|
+| Keystore | `keystore/bem-debug.keystore` — tracked | `keystore/bem-release.keystore` — gitignored |
+| Credentials | `keystore/debug.properties` — tracked | `keystore/release.properties` — gitignored |
+| Alias | `bemdebug` | `bemrelease` |
+| Certificate SHA-256 | `4E:DD:10:B9:8A:C4:A2:39:A7:8B:64:93:15:09:A4:3F:A0:F3:28:FA:77:EF:B8:D4:3D:37:E5:73:58:FA:82:6F` | `8C:D6:FD:C1:50:38:53:0E:10:16:68:AB:4B:3C:CD:00:30:AE:88:AE:37:15:3E:6D:66:AA:45:93:0C:7B:8E:FD` |
+
+Both are PKCS12 with an RSA 2048 key under SHA256withRSA, valid until
+2054-02-14. PKCS12 cannot hold a key password separate from the store password,
+so one value per keystore covers both — that is a property of the format, not a
+choice.
+
+**debug.** Tracked together with its password, because neither protects
+anything: a debug certificate is not a trust boundary, and having both in the
+repository is what lets a fresh clone and every CI runner produce a debug APK
+under one stable identity. That is the point of it — a debug APK built today
+installs over the one built yesterday. Wiring is done by overriding AGP's
+built-in `debug` signing config rather than adding a second one, so
+`debugAndroidTest` and any future test-only build type inherit it without
+further wiring.
+
+**release.** The mirror image. This repository is public, and anyone holding
+`bem-release.keystore` can sign an APK that Android accepts as an in-place
+upgrade of the installed app, so the keystore stays out of it. CI never sees a
+keystore secret per build; `android-release.yml` materialises both the keystore
+and `keystore/release.properties` from three repository secrets before it
+starts, from `base64 -w0 keystore/bem-release.keystore`:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_RELEASE_KEYSTORE_BASE64` | base64 of `keystore/bem-release.keystore`, unwrapped |
+| `ANDROID_RELEASE_KEYSTORE_PASSWORD` | `storePassword` from `keystore/release.properties` |
+| `ANDROID_RELEASE_KEY_ALIAS` | `bemrelease` |
+
+A missing one aborts the job with the secret named, rather than producing an
+unsigned APK. After the build, the workflow compares the APK's signer against
+`RELEASE_CERT_SHA256` — the pinned digest above — so "the pipeline signed with
+the release identity" is checked rather than asserted.
+
+**Locally.** `:app:signingReport` prints both certificates and their stores.
+`assembleDebug` needs nothing configured: `keystore/debug.properties` and its
+keystore are tracked. `assembleRelease` needs the release keystore and
+`keystore/release.properties` present; without them it stops at
+`:app:checkReleaseSigning`, which `preReleaseBuild` depends on and which names
+the missing fields and both ways of supplying them. The check exists so the
+failure is a sentence rather than a keystore exception from inside packaging.
+
+**Upgrade behaviour.** `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` were each
+signed by a different throwaway key — the CI runners regenerated AGP's debug
+keystore every run. The first release cut after this change is signed by
+`bemrelease`, which differs from all three, so installing over any of them still
+requires an uninstall and a backup of app data. From that release onwards
+upgrades install in place. Rotating the release keystore later reintroduces the
+same one-time uninstall, and the pinned digest in the workflow has to move with
+it.
 
 ## LSPosed scope troubleshooting
 
@@ -587,12 +654,13 @@ icall does not exist there.
 The Android client's managed readback contracts still require device verification;
 the Windows client's missing methods do not establish Android availability.
 
-GitHub Actions currently signs release APKs with an ephemeral debug key. The
-published 3.3.20, 3.3.21 and 3.3.22 APKs each have a different signing
-certificate, so a standard Android installation cannot upgrade in place across
-those versions. Back up app data before uninstalling the old APK. The user's
-in-game report was made with a local debug build; the published APK passed CI
-build and signature verification but has not been retested in-game.
+Release APKs are signed by the dedicated release identity described under
+[Signing](#signing). `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` predate it and
+were each signed by a throwaway CI key, so a standard Android installation still
+cannot upgrade in place across those versions; back up app data before
+uninstalling the old APK. The user's in-game report was made with a local debug
+build; the published APK passed CI build and signature verification but has not
+been retested in-game.
 
 Optional keys, with their defaults: `first_person_eye_forward=0.03`,
 `first_person_eye_height=0.05`, `first_person_near_clip=0.03`,

@@ -35,7 +35,7 @@
 # native method without a rule here fails the build rather than disappearing.
 -keep class dev.betterendfield.android.BemInstaller { *; }
 
-# --- the hooked game process must stay Compose-free --------------------------
+# --- prevent R8 from merging unrelated game-process and Compose classes ------
 # R8's optimiser merges classes: anything never instantiated is folded into a
 # shared static holder, and lambda classes are pooled the same way. That is a
 # normal, desirable optimisation for an ordinary app and a hazard here, because
@@ -55,12 +55,12 @@
 #
 # The remote-command poller in the game process calls status() on a timer, and an
 # active use of any of those holders runs a <clinit> that builds Compose objects
-# inside Unity. The panel is a plain View rather than Compose for precisely this
-# reason; letting the optimiser reintroduce the dependency through a merge
-# defeats that.
+# inside Unity. The experimental panel now loads Compose intentionally, but
+# unrelated command and hook classes still must not gain Compose initialisers.
 #
 # With -dontoptimize the same walk reaches 91 classes: the module's own code, the
-# Android/JDK platform and the libxposed client API. No androidx, no kotlin.
+# Android/JDK platform and the libxposed client API. The experiment changes this
+# closure for the overlay path only; the historical measurement remains useful.
 # Shrinking and obfuscation still run, which is where the size win actually comes
 # from (28.0 MB unminified -> 8.6 MB); dropping the optimiser costs ~1.5 MB on
 # top of that and buys a game-process class graph identical to the source's.

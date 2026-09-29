@@ -1,12 +1,46 @@
 // Explicit imports: inside a build script `java` resolves to Gradle's java
 // extension, so `java.util.zip.ZipFile` has to be imported by name.
 import java.io.File
+import java.util.Properties
 import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Signing identities. The two are deliberately kept at different secrecy.
+//
+//   debug   -- keystore/bem-debug.keystore, committed together with its
+//              (therefore public) password. Pinning it is what lets two
+//              consecutive CI debug APKs install over one another; a debug
+//              identity protects nothing, so there is no secret to keep.
+//   release -- keystore/bem-release.keystore, never committed. The
+//              distribution repository is public, and whoever holds this file
+//              can sign an APK that Android accepts as an in-place upgrade of
+//              the installed app. Locally the credentials come from the
+//              gitignored keystore/release.properties; in CI the workflow
+//              writes that file from repository secrets.
+//
+// Both descriptions are read here, at configuration time, but neither may
+// fail the build here: a missing release identity must not break
+// `assembleDebug`. The checkDebugSigning / checkReleaseSigning tasks below turn
+// a missing identity into an instruction at the moment it is actually needed.
+val signingDescriptions: Map<String, File> = mapOf(
+    "debug" to rootProject.file("keystore/debug.properties"),
+    "release" to rootProject.file("keystore/release.properties")
+)
+val signingProperties: Map<String, Properties> = signingDescriptions.mapValues { (_, file) ->
+    Properties().apply { if (file.isFile) file.reader(Charsets.UTF_8).use { load(it) } }
+}
+// Absent and blank are the same thing to a signing config, so normalise both
+// to null and let the checks decide whether that is fatal.
+fun signingProperty(buildType: String, key: String): String? =
+    signingProperties.getValue(buildType).getProperty(key)?.takeIf { it.isNotBlank() }
+
+// Paths are written relative to the android/ root so the file stays portable.
+fun signingStoreFile(buildType: String): File? =
+    signingProperty(buildType, "storeFile")?.let { rootProject.file(it) }
 
 android {
     namespace = "dev.betterendfield.android"
@@ -15,10 +49,8 @@ android {
 
     buildFeatures {
         buildConfig = true
-        // The settings app and the BEM package manager are Compose surfaces.
-        // The in-game panel deliberately is NOT: it runs inside the hooked game
-        // process, where loading a single Compose class is fatal - see the
-        // GameOverlay header comment and proguard-rules.pro.
+        // The settings app and BEM manager use Compose. This experimental branch
+        // also composes the Activity-scoped game panel; device acceptance is pending.
         compose = true
     }
 
@@ -29,7 +61,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 30322
-        versionName = "3.3.22"
+        versionName = "3.3.22-alpha.2"
         testInstrumentationRunner = "dev.betterendfield.android.BemInstallerTest"
 
         ndk {
@@ -44,9 +76,34 @@ android {
         }
     }
 
+    signingConfigs {
+        // Overriding AGP's built-in `debug` config instead of adding a second
+        // one: every variant -- and any future test-only build type -- that
+        // names the debug config picks this keystore up without further wiring.
+        getByName("debug") {
+            storeType = "PKCS12"
+            storeFile = signingStoreFile("debug")
+            storePassword = signingProperty("debug", "storePassword")
+            keyAlias = signingProperty("debug", "keyAlias")
+            // PKCS12 cannot hold a key password distinct from the store
+            // password, and keytool silently ignores -keypass for it.
+            keyPassword = storePassword
+        }
+        // Named after the project rather than "release" to keep it visually
+        // distinct from the AGP defaults it deliberately does not reuse.
+        create("bemRelease") {
+            storeType = "PKCS12"
+            storeFile = signingStoreFile("release")
+            storePassword = signingProperty("release", "storePassword")
+            keyAlias = signingProperty("release", "keyAlias")
+            keyPassword = storePassword
+        }
+    }
+
     buildTypes {
         debug {
             isJniDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             // Compose's synthetic classes and kotlin.Metadata cost ~21 MB of
@@ -60,7 +117,10 @@ android {
             // libbetterendfield_installer.so -- are pinned in proguard-rules.pro
             // and asserted by verifyReleaseEntryPoints.
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("debug")
+            // The release identity, not AGP's debug one: release APKs are what
+            // users install as updates, so they have to keep one stable
+            // signature across builds. See the signing note at the top.
+            signingConfig = signingConfigs.getByName("bemRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -97,6 +157,50 @@ android {
         getByName("main").assets.srcDir(
             layout.buildDirectory.dir("generated/androidResourceAssets").get().asFile)
     }
+}
+
+// A signing identity that is described but unusable has to fail where it is
+// used, and say what to do about it. Left to AGP it surfaces as "Keystore file
+// not set for signing config bemRelease" from inside the packaging step, which
+// never mentions this project's conventions. One task per build type, wired
+// into pre*Build below, keeps that failure cheap and legible.
+fun signingCheckTask(name: String, buildType: String) = tasks.register(name) {
+    val descriptionFile = signingDescriptions.getValue(buildType)
+    group = "verification"
+    description = "Asserts the $buildType signing identity is complete and present."
+    doLast {
+        val storeFile = signingStoreFile(buildType)
+        val missing = buildList {
+            if (signingProperty(buildType, "storeFile") == null) add("storeFile")
+            if (storeFile != null && !storeFile.isFile) add("the keystore file $storeFile")
+            if (signingProperty(buildType, "storePassword") == null) add("storePassword")
+            if (signingProperty(buildType, "keyAlias") == null) add("keyAlias")
+        }
+        check(missing.isEmpty()) {
+            val remedy = if (buildType == "release") {
+                "No copy of it is tracked: create $descriptionFile together with the " +
+                    "keystore it names, or let CI write both from the " +
+                    "ANDROID_RELEASE_KEYSTORE_* secrets -- see android/README.md, " +
+                    "section \"Signing\"."
+            } else {
+                "$descriptionFile and the keystore it names are tracked files: " +
+                    "restore them, or regenerate both as documented in " +
+                    "android/README.md, section \"Signing\"."
+            }
+            "the $buildType signing identity is unusable, missing " +
+                "${missing.joinToString(", ")}. $remedy"
+        }
+    }
+}
+
+val checkDebugSigning = signingCheckTask("checkDebugSigning", "debug")
+val checkReleaseSigning = signingCheckTask("checkReleaseSigning", "release")
+
+tasks.matching { it.name == "preDebugBuild" }.configureEach {
+    dependsOn(checkDebugSigning)
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(checkReleaseSigning)
 }
 
 val prepareAndroidResourceAssets by tasks.registering(Copy::class) {
@@ -288,13 +392,14 @@ val verifyReleaseEntryPoints by tasks.registering {
 
         // The classes the hooked game process actually executes. They must stay
         // their own classes rather than being folded into a shared holder with
-        // the library - see the "hooked game process must stay Compose-free"
-        // block in proguard-rules.pro for the merged-<clinit> evidence.
+        // the library - see the merged-<clinit> evidence in proguard-rules.pro.
         val gameProcessClasses = listOf(
             "dev.betterendfield.android.XposedEntry",         // libxposed entry
             "dev.betterendfield.android.RuntimeBootstrap",    // module attach
             "dev.betterendfield.android.RuntimeLog",          // journal
             "dev.betterendfield.android.GameOverlay",         // the in-game panel
+            "dev.betterendfield.android.OverlaySurface",      // Compose view owner
+            "dev.betterendfield.android.OverlayViewOwners",   // owner tag bridge
             "dev.betterendfield.android.OverlayFeatures",
             "dev.betterendfield.android.NativeCommandBridge", // file relay
             "dev.betterendfield.android.ModuleConfigurations",
@@ -461,10 +566,7 @@ dependencies {
 
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
-    // Compose is bundled into the module dex, not just the settings app: the
-    // module process hosts the settings UI, which is composed. The in-game panel
-    // is deliberately NOT Compose - it runs in the hooked game process, where a
-    // single Compose class is fatal - see proguard-rules.pro.
+    // The existing Compose dependencies also serve the experimental game panel.
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
