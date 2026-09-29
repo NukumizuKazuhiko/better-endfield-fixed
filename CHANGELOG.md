@@ -2,6 +2,14 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.3
+
+- 修复时间冻结（世界暂停）无法恢复：冻结后同一热键（面板「时间冻结」按钮）再也解不开，只能重启游戏。根因是热键请求只在游戏主线程的泵上排空，而把 `Time.timeScale` 置 0 会让游戏自身的相机更新停摆——`CameraMono._ProcessDitherByPitch` 与 `CameraManager.TailLateTick` 两个泵随之停止，`Time.get_unscaledDeltaTime` 心跳又只在游戏仍读该属性时才有脉冲，于是解冻请求一直排在队里、世界永远停在冻结态（退出自由视角的恢复走同一条泵，因此同样救不回来）。现在模块把同一个泵挂在引擎每帧调用的 `UnityEngine.Rendering.RenderPipelineManager.DoRenderLoop_Internal` 上：该回调由引擎在把帧交给渲染管线时触发，不受游戏时间缩放影响，解冻因此不依赖游戏是否还在跑自己的相机逻辑。该合同按可选处理，解析或挂钩失败时退回原有两个泵，不会让整个相机模块变成不可用。
+- 为「按了没反应」补可读判据。输入线程若发现暂停请求超过 1.5 秒仍无人排空，会在日志里记下「no camera pump is running」；每次请求被排空时会记下是由哪一个泵排空的（`render loop` / `unscaled time heartbeat`），设备日志因此能直接判定是「请求没发出去」还是「没有泵在跑」。
+- 相机合同汇总行新增 `render_loop=ready|unavailable`，挂钩成功与失败各自留一行日志。
+- 本机验证：用 NDK 同配置（`native/shared/android_compat` 的 `<Windows.h>` 替身、`_WIN32` 未定义）对改动后的 `native/modules/camera/module.cpp` 做 clang 语法与类型检查，`-Wall` 无告警；并用同一套检查反向验证过它会报错，确认检查本身有效。游戏内解冻行为仍须实机确认。
+- Android `versionName=3.3.22-alpha.3`、`versionCode=30322`（与 alpha.1 / alpha.2 同值）；桌面端仍为 3.3.0。本预发布 APK 由 CI 构建并使用固定 release 身份签名，证书 SHA-256 为 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`，可从 alpha.2 原位覆盖安装。
+
 ## 3.3.22-alpha.2
 
 - 发行签名改为固定身份，替代此前「release 复用 debug 密钥」的做法。此前 release 变体直接引用 AGP 内置的 `debug` 签名配置，而仓库里没有提交任何密钥库，所以每次在 CI 上构建都由该 runner **现场生成**一份新的 `~/.android/debug.keystore`——这正是「每个版本的签名证书都不一样、用户只能卸载重装」的根因。现在 debug 与 release 各有一个固定身份：debug 密钥库随仓库提交（debug 证书不构成信任边界，而固定它才能让 debug 包互相原位覆盖）；release 密钥库不进仓库，由 CI 在构建前从仓库 Secret 还原，并在打包后按固定证书指纹断言签发身份，不匹配即报错退出，确保发行包不会悄悄签成别的身份后发出去。

@@ -219,7 +219,7 @@ generation 或 Seek generation 变化都会先清空旧流再绑定新流。策�
 
 ### 自由视角
 
-开启 `free_camera_enabled` 后，通过 `toggle_hotkey` 指定的热键（默认主键盘数字 9）在游戏内进入或退出自由视角；通过 `pause_enabled` 和 `pause_hotkey`（默认主键盘数字 8）独立控制世界时间冻结。两个热键均由独立输入轮询捕获，但 Unity 对象操作仍排队到游戏主线程。模块通过 `UnityEngine.Camera.get_main` 获取当前主相机，保存其位置和 FOV，随后在每帧原相机逻辑执行后只覆盖位置。冻结请求和退出请求通过 `Time.get_unscaledDeltaTime` 的主线程心跳处理，避免游戏时间缩放为 0 后相机逻辑停止导致无法退出。退出自由视角时会恢复本模块捕获的时间缩放。方向键前后左右移动、PageUp/PageDown 升降；镜头旋转继续使用游戏原生鼠标控制。主相机实例变化时自动退出。
+开启 `free_camera_enabled` 后，通过 `toggle_hotkey` 指定的热键（默认主键盘数字 9）在游戏内进入或退出自由视角；通过 `pause_enabled` 和 `pause_hotkey`（默认主键盘数字 8）独立控制世界时间冻结。两个热键均由独立输入轮询捕获，但 Unity 对象操作仍排队到游戏主线程。模块通过 `UnityEngine.Camera.get_main` 获取当前主相机，保存其位置和 FOV，随后在每帧原相机逻辑执行后只覆盖位置。冻结请求和退出请求排到游戏主线程执行，而游戏主线程上有三个泵：`CameraMono._ProcessDitherByPitch`、`Time.get_unscaledDeltaTime` 心跳，以及引擎每帧调用的 `UnityEngine.Rendering.RenderPipelineManager.DoRenderLoop_Internal`。世界时间缩放为 0 会停掉游戏自身的相机更新，前两个泵可能随之停摆；渲染循环由引擎驱动，不受游戏时间影响，因此解冻请求最终一定由它排空。退出自由视角时会恢复本模块捕获的时间缩放。方向键前后左右移动、PageUp/PageDown 升降；镜头旋转继续使用游戏原生鼠标控制。主相机实例变化时自动退出。
 
 `pause_enabled` 默认关闭，可按需在自由视角期间启用独立的 `pause_hotkey` 冻结或恢复角色与世界；移动速度和 FOV 有范围校验，并支持配置热更新。
 

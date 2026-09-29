@@ -261,6 +261,16 @@ camera and first person rewrite the camera pose there, so those two features
 need a 1.5-series client; the module reports the contract as unavailable rather
 than pretending on an older one.
 
+The world pause needs one tick the game will not always provide. Hotkey requests
+are drained on the game main thread, and freezing the world stops the game's own
+camera update, so the request that would thaw it stayed latched (3.3.22-alpha.3
+adds the tick that cannot be silenced: `RenderPipelineManager.DoRenderLoop_Internal`,
+which the engine calls for every rendered frame it hands to the Scriptable Render
+Pipeline). It is an optional contract - a build without an SRP keeps the previous
+ticks - and both the input thread and the pump now log what happened: a request
+that goes undrained for 1.5 s is reported, and each drained request names its
+pump.
+
 ## Android settings UI
 
 The settings screen is a tree of four tabs — 首页 (overview), 体验 (interface,

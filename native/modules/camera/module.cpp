@@ -204,6 +204,15 @@ TailLateTickFn g_original_tail_late_tick = nullptr;
 using TimeUnscaledDeltaFn = float(__fastcall*)(void* method);
 TimeUnscaledDeltaFn g_original_time_unscaled_delta = nullptr;
 
+// UnityEngine.Rendering.RenderPipelineManager::DoRenderLoop_Internal is a static
+// method the engine itself calls once per rendered frame, handing it the native
+// render loop pointer. It keeps being called no matter what the game's own
+// gameplay and camera code is doing, which is what makes it the pump that
+// survives a frozen world; see PumpFromEngineTick.
+using RenderLoopFn = void(__fastcall*)(void* pipeline, void* loop_pointer,
+    void* render_requests, void* method);
+RenderLoopFn g_original_render_loop = nullptr;
+
 // CinemachineBrain::PushStateToUnityCamera(Cinemachine.CameraState& state) is the
 // last stage of the Cinemachine pipeline. Rewriting the state there is the only
 // place where the pose cannot be overwritten later in the frame.
@@ -217,10 +226,16 @@ bool g_free_camera_contract_ready = false;
 bool g_dither_contract_ready = false;
 bool g_time_heartbeat_contract_ready = false;
 bool g_first_person_contract_ready = false;
+bool g_render_loop_hook_ready = false;
 
 bool g_free_camera_active = false;
 std::atomic_bool g_toggle_request{false};
 std::atomic_bool g_pause_request{false};
+// When the pause hotkey latched, and whether the stall it would mean has already
+// been reported. Only the input thread writes them; see the watchdog in
+// InputThreadMain.
+std::atomic_uint64_t g_pause_request_ms{0};
+std::atomic_bool g_pause_stall_logged{false};
 std::atomic_bool g_force_exit_request{false};
 std::atomic_bool g_motion_request{false};
 std::atomic_bool g_keyframe_add_request{false};
@@ -456,6 +471,14 @@ MethodContract g_contracts[]{
     {"unity.time.unscaled_delta.get",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Time",
             "get_unscaledDeltaTime", nullptr, "System.Single", 0}},
+    // The per-frame engine tick (see PumpFromEngineTick). Its third parameter is
+    // List<Camera.RenderRequest>, whose IL2CPP type name is not worth pinning:
+    // leaving the parameter list empty matches on name and arity alone, which is
+    // unambiguous for this method.
+    {"unity.render_loop",
+        {"UnityEngine.CoreModule.dll", "UnityEngine.Rendering",
+            "RenderPipelineManager", "DoRenderLoop_Internal", nullptr,
+            "System.Void", 3}},
 };
 
 FieldContract g_fields[]{
@@ -681,6 +704,10 @@ struct HotkeyRequest {
     bool was_down = false;
 };
 
+// How long a latched pause request may wait for a main thread pump before the
+// input thread calls it a stall. Long enough that a hitch is not reported.
+constexpr std::uint64_t kPauseDrainStallMs = 1500;
+
 void InputThreadMain() {
     HotkeyRequest playback_keys[]{
         {&g_motion_key, &g_motion_request},
@@ -717,6 +744,8 @@ void InputThreadMain() {
             g_toggle_request.store(true, std::memory_order_release);
         }
         if (pause_down && !pause_was_down) {
+            g_pause_request_ms.store(GetTickCount64(), std::memory_order_release);
+            g_pause_stall_logged.store(false, std::memory_order_release);
             g_pause_request.store(true, std::memory_order_release);
         }
         if (first_person_down && !first_person_was_down) {
@@ -732,6 +761,20 @@ void InputThreadMain() {
                 binding.request->store(true, std::memory_order_release);
             }
             binding.was_down = down;
+        }
+
+        // A pause request is only ever drained by a pump running on the game's
+        // main thread. If every pump stopped - which is exactly what freezing the
+        // world used to do - the request stays latched and the same hotkey can no
+        // longer thaw it. Report that condition instead of leaving the panel
+        // showing a key it sent and nothing else.
+        const std::uint64_t pause_since = g_pause_request_ms.load(std::memory_order_acquire);
+        if (pause_since != 0 &&
+            g_pause_request.load(std::memory_order_acquire) &&
+            GetTickCount64() - pause_since > kPauseDrainStallMs &&
+            !g_pause_stall_logged.exchange(true, std::memory_order_acq_rel)) {
+            Log("World pause request undrained for 1.5 s: no camera pump is running, "
+                "so the world stays frozen until one does.");
         }
 
 #if defined(_WIN32)
@@ -1584,24 +1627,61 @@ void PumpFirstPerson() {
     }
 }
 
-// Time.unscaledDeltaTime keeps being read while Time.timeScale is 0, so it is
-// the heartbeat for the hotkeys and for the free camera while the world is
-// frozen. The guard stops managed calls made from here from re-entering.
-thread_local bool t_in_heartbeat = false;
+// Pumping the queued control requests and the free camera pose means calling
+// managed methods, so it cannot happen on the module's own input thread: it has
+// to ride a callback the engine or the game makes on the main thread. The game's
+// camera code is not one of those while Time.timeScale is 0 - that is the state
+// the world pause puts it in, and it is why the world could be frozen and then
+// never thawed. Every main thread tick therefore feeds the same pump, and the
+// re-entrancy guard stops managed calls made from inside it from re-entering.
+thread_local bool t_in_engine_tick = false;
 
+void PumpFromEngineTick(const char* source) {
+    if (t_in_engine_tick) {
+        return;
+    }
+    const bool pending = g_pause_request.load(std::memory_order_acquire) ||
+        g_toggle_request.load(std::memory_order_acquire);
+    t_in_engine_tick = true;
+    PumpFreeCameraControl();
+    if (g_free_camera_active) {
+        ApplyFreeCameraHeartbeat();
+    }
+    t_in_engine_tick = false;
+    // Which tick drained a request is the one fact a device journal needs when a
+    // hotkey looks dead. Requests are user driven, so this costs a line per tap.
+    if (pending && !g_pause_request.load(std::memory_order_acquire) &&
+        !g_toggle_request.load(std::memory_order_acquire)) {
+        Log(std::string("Camera control request drained from the ") + source + ".");
+    }
+}
+
+// Time.unscaledDeltaTime keeps being read while Time.timeScale is 0, so it is
+// one of the heartbeat ticks for the hotkeys and for the free camera while the
+// world is frozen. Not every build reads it on every frame, which is why the
+// render loop below is pumped too.
 float __fastcall DetourTimeUnscaledDelta(void* method) {
     const float result = g_original_time_unscaled_delta
         ? g_original_time_unscaled_delta(method)
         : 0.0f;
-    if (g_time_heartbeat_contract_ready && !t_in_heartbeat) {
-        t_in_heartbeat = true;
-        PumpFreeCameraControl();
-        if (g_free_camera_active) {
-            ApplyFreeCameraHeartbeat();
-        }
-        t_in_heartbeat = false;
+    if (g_time_heartbeat_contract_ready) {
+        PumpFromEngineTick("unscaled time heartbeat");
     }
     return result;
+}
+
+// The engine calls DoRenderLoop_Internal for every rendered frame it hands to the
+// Scriptable Render Pipeline, and the game keeps rendering while its world is
+// frozen. That makes this the tick the paused world cannot silence, and the one
+// that always gets the thaw hotkey through.
+void __fastcall DetourRenderLoop(void* pipeline, void* loop_pointer,
+        void* render_requests, void* method) {
+    if (g_original_render_loop) {
+        g_original_render_loop(pipeline, loop_pointer, render_requests, method);
+    }
+    if (g_render_loop_hook_ready) {
+        PumpFromEngineTick("render loop");
+    }
 }
 
 void __fastcall DetourPushState(void* instance, void* state, void* method) {
@@ -1963,7 +2043,8 @@ bool ResolveContracts() {
         ", first_person=" + (g_first_person_contract_ready ? "ready" : "unavailable") +
         ", anti_dither=" + (g_dither_contract_ready ? "ready" : "unavailable") +
         ", time_heartbeat=" +
-        (g_time_heartbeat_contract_ready ? "ready" : "unavailable"));
+        (g_time_heartbeat_contract_ready ? "ready" : "unavailable") +
+        ", render_loop=" + (ready("unity.render_loop") ? "ready" : "unavailable"));
     const FieldContract* first_person_flag = Field("snapshot.is_first_person");
     const bool photo_mode_exit_ready = ready("snapshot.set_first_person") &&
         ready("snapshot.show_char") && ready("unity.object.find_object_of_type") &&
@@ -2032,6 +2113,23 @@ bool InstallHook() {
             reinterpret_cast<void*>(&DetourTimeUnscaledDelta),
             reinterpret_cast<void**>(&g_original_time_unscaled_delta)) != BE_Result_Ok) {
             Log("Failed to install unscaled time heartbeat hook; camera hook fallback remains active.");
+        }
+    }
+
+    // The pump that has to survive a frozen world. Optional on purpose: a game
+    // build without a Scriptable Render Pipeline still gets the camera tick and
+    // the unscaled time heartbeat, so a missing contract must not disable the
+    // module.
+    MethodContract* render_loop = Contract("unity.render_loop");
+    if (render_loop && render_loop->resolved) {
+        if (g_host->create_hook(g_host->context, kModuleId, render_loop->pointer,
+            reinterpret_cast<void*>(&DetourRenderLoop),
+            reinterpret_cast<void**>(&g_original_render_loop)) == BE_Result_Ok) {
+            g_render_loop_hook_ready = true;
+            Log("Successfully installed RenderPipelineManager::DoRenderLoop_Internal pump hook.");
+        } else {
+            Log("Warning: failed to install the render loop pump hook; the world pause "
+                "resume depends on the camera tick and the unscaled time heartbeat.");
         }
     }
     return true;
@@ -2190,10 +2288,12 @@ void BE_CALL Shutdown() {
         g_host->release_module_hooks(g_host->context, kModuleId);
     }
     g_push_state_hook_ready = false;
+    g_render_loop_hook_ready = false;
     g_original_push_state = nullptr;
     g_original_tail_late_tick = nullptr;
     g_original_camera_tick = nullptr;
     g_original_time_unscaled_delta = nullptr;
+    g_original_render_loop = nullptr;
     g_free_camera_active = false;
     g_first_person_active.store(false, std::memory_order_release);
     g_state.store(ModuleState::Stopped, std::memory_order_release);
