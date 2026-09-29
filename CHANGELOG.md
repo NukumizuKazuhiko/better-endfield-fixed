@@ -2,6 +2,12 @@
 
 本仓库派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，独立维护，不是该项目的官方版本。3.3.20 是本仓库维护的第一条，记录相对上游的独立修改；3.3.0 及更早的条目来自上游。上游改动仍可能在需要时被有选择地并入。来源说明与许可见 [README.md](README.md) 的「上游与项目来源」。
 
+## 3.3.22-alpha.1
+
+- Android 悬浮 Handle 和面板在实验分支改用 Jetpack Compose；保留 Activity 生命周期、热键文件中继、日志导出与原生运行时合同。此版为预发布，不代表游戏实际关卡的交互验收完成。
+- 修复直接冷启动时悬浮窗不显示：主游戏包可从 `onPackageLoaded` 注册入口；Compose 的 ViewTree owner 设在宿主上；首次 composition 等宿主和子视图真正附着到窗口后执行。PJX110 上通过强停并直接从启动器冷启动，日志、View 树与截图证实启动画面出现 BE Handle。展开、拖动、触摸透传及实际关卡仍待验证。
+- Android `versionName=3.3.22-alpha.1`、`versionCode=30322`；桌面端仍为 3.3.0。本预发布 APK 使用本机构建的调试签名，证书 SHA-256 为 `62713BA05E66F3A7E05747F3E63F04C60F05B339D7DD4CFCA5834DAF46B9A096`；与已发布 `v3.3.21` APK 的证书不同，不能直接覆盖安装。卸载旧版前须自行备份应用数据。
+
 ## 3.3.22
 
 - 修复 hook 后游戏闪退（无日志）的第一处根因。3.3.21 把游戏内控制面板从 Java/View 改写为 Kotlin/Jetpack Compose，而面板代码运行在被 hook 的游戏进程里，该进程无法加载任何 Compose 类，一进游戏即崩。面板现已恢复为纯 Java/View 实现（沿用 3.3.20 的实现），配色与文案同步到新版工业黄黑白 token；配套应用与 BEM 包管理器仍为 Compose，两者运行在不同进程，互不影响。

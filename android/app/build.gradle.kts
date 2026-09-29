@@ -27,7 +27,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 30322
-        versionName = "3.3.22"
+        versionName = "3.3.22-alpha.1"
         testInstrumentationRunner = "dev.betterendfield.android.BemInstallerTest"
 
         ndk {

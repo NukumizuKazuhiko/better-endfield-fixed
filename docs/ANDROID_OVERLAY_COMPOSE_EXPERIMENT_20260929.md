@@ -23,8 +23,8 @@ PJX110 首次复现日志只有 WebView 的 `onPackageReady`，没有游戏主�
 - Git diff check：通过。
 - Java 编译仍提示 `GameOverlay.java` 使用已弃用的 Android API：保留原有 WindowInsets 读取与 `startActivityForResult` 日志保存链路，未在这次 UI 实验中改写已验证的结果中继；后续若调整应单独验收。
 - release APK Manifest 复核：`applicationId=dev.betterendfield.android`、minSdk 29、targetSdk 35、compileSdk 37；未见 `SYSTEM_ALERT_WINDOW` 或新增 Service。
-- PJX110 已安装本轮 release APK，安装后对游戏执行 `am force-stop` 并从 launcher 直接冷启动；`assembleRelease` 通过。最终 APK SHA-256：`6E4A8D760B3099922B1FC1B59E28367E1226C8948641D882223DE53B576467BC`。
-- 实机 `dumpsys activity top` 显示游戏 `U8UnityContext` 内容树中，UnityPlayer 上方有悬浮 host。`D:\codexdata\bem-cold-launch.png` 截图显示 BE Handle 在直接冷启动后的游戏启动画面左侧可见；无需切出游戏再返回。
+- PJX110 已安装 `3.3.22-alpha.1` 预发布候选 APK，安装后对游戏执行 `am force-stop` 并从 launcher 直接冷启动；干净 `assembleRelease` 通过。候选 APK SHA-256：`D2068BD8E5E8AB005EFC16F45545129BAC07CBB4B1E1BED3C2A1AB2E869CEE1C`，包内 `versionName=3.3.22-alpha.1`、`versionCode=30322`。本机签名证书 SHA-256 `62713BA05E66F3A7E05747F3E63F04C60F05B339D7DD4CFCA5834DAF46B9A096` 与公开 `v3.3.21` 证书不同。
+- 实机日志显示 `21:51:39.140` 首次 Activity resume 时附着宿主，`21:51:39.685` 创建 Compose；`dumpsys activity top` 显示游戏 `U8UnityContext` 内容树中，UnityPlayer 上方有悬浮 host。`D:\codexdata\bem-alpha-cold-launch.png` 截图显示 BE Handle 在直接冷启动后的游戏启动画面左侧可见；无需切出游戏再返回。
 
 ## 实机停止条件
 

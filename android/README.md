@@ -6,6 +6,9 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
+Version 3.3.22-alpha.1 is an experimental prerelease: the in-game Compose handle
+appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
+still need device acceptance.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
