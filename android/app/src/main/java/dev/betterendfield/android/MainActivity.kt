@@ -78,10 +78,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Shows the real panel inside this app. The preview runs the same View
-     * implementation the game gets, so it cannot drift from the shipped
-     * layout; it only skips sending key events, which is what the "预览模式"
-     * footer reports.
+     * Shows the same experimental Compose panel inside this app. Preview skips
+     * sending key events; it cannot verify composition in the hooked game process.
      */
     private fun showOverlayPreview() {
         overlayPreview?.remove()

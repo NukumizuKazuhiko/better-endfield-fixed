@@ -10,7 +10,7 @@ import android.content.SharedPreferences;
  * would press a key that nothing reads, and a button that silently does nothing
  * is worse than a button that is not there.
  */
-record OverlayFeatures(
+public record OverlayFeatures(
         boolean panel,
         boolean hideHud,
         boolean freeCamera,

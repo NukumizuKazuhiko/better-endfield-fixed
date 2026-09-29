@@ -296,7 +296,8 @@ source of truth rather than two copies to keep in step.
 | `ToolPages.kt` | the tools tab: in-game panel, diagnostics, journal sub-page, about sub-page |
 | `MainActivity.kt` | the settings Activity (Kotlin, edge-to-edge) |
 | `BemInstallState.kt`, `BemInstallScreen.kt`, `BemInstallActivity.kt` | the BEM package manager |
-| `GameOverlay.java` | the in-game panel — deliberately plain Java/View, not Compose (runs in the hooked game process) |
+| `GameOverlay.java` | Activity lifecycle, attachment, hotkey relay and journal export controller |
+| `OverlaySurface.kt`, `FloatingHandle.kt`, `OverlayPanel.kt`, `OverlayControls.kt` | experimental in-game Compose handle and panel; device acceptance is pending |
 
 The camera card is the one place the page tree does not map one-to-one onto the
 preference store. "Default FOV" and the free camera's FOV are the same stored
@@ -428,11 +429,12 @@ Research catalogs and source PCK/CHK files stay under ignored
 - Android NDK 27.2.12479018
 - CMake 3.22.1
 
-The settings app and the BEM package manager are Kotlin + Jetpack Compose. It is
-bundled into the module dex, not kept to a settings-only surface, because the
-module process hosts the settings Activity. The in-game panel is deliberately
-**not** Compose: it runs inside the hooked game process, which cannot load a
-single Compose class - see the panel section below. AGP 9 compiles Kotlin itself,
+The settings app and the BEM package manager already use Kotlin + Jetpack Compose.
+This experimental branch also composes the in-game handle and panel inside the
+hooked game process. The earlier 3.3.21 attempt crashed on game entry; this
+version uses an Activity-scoped Java controller, explicit Compose view owners and
+an eager first-composition check, but game-process acceptance remains pending.
+AGP 9 compiles Kotlin itself,
 so `org.jetbrains.kotlin.android` must **not** be applied - doing so is a build
 error, not a warning. Only the Compose compiler plugin
 (`org.jetbrains.kotlin.plugin.compose`) is applied, and the Kotlin Gradle plugin
@@ -464,8 +466,9 @@ The game process calls `status()` on its normal path, so it ran that initialiser
 and crashed with no Java stack at all. Keeping the class name cannot prevent this:
 the class survives, its side effects are moved elsewhere. Turning the optimiser
 off costs about 1.5 MB (about 7.0 MB to 8.60 MB) and is the only reliable fix.
-This is why the in-game panel being plain View is necessary but not sufficient -
-the optimiser can put a dependency back into the game process on its own.
+The optimiser remains off for this experiment so it cannot merge unrelated
+game-process classes into shared Compose holders. This does not establish that
+the new Compose panel can run inside the game process.
 
 Names that are read from outside the Java type system are pinned in
 `android/app/proguard-rules.pro`:
@@ -480,7 +483,7 @@ Names that are read from outside the Java type system are pinned in
 
 `:app:verifyReleaseEntryPoints` re-checks all of that against the packaged APK -
 entry class, JNI symbols, the `conversionProgress` descriptor, the four manifest
-components, and, as a fifth check, that the ten classes on the game path still
+components, and, as a fifth check, that the listed classes on the game path still
 exist as their own classes rather than folded holders. It is finalized onto
 `packageRelease`, so `:app:assembleRelease` fails instead of producing an APK
 whose entry points were renamed or whose game-process classes were merged. That
@@ -508,14 +511,11 @@ The settings page uses bottom navigation on phones and a navigation rail at
 entry is separate from login-model settings. The enhancement page owns the
 overlay switch and preview; the BEM page only manages packages. The framework
 entry attaches a collapsed BE icon directly to the scoped Unity application's
-Activity. The host is a plain `FrameLayout`; the panel body is built from
-framework Views, deliberately - **not** a Compose composition. The panel runs
-inside the hooked game process, which cannot load a single Compose class, and
-3.3.21 crashed on game entry because the panel was Compose there. The host stays
-a framework View too, because it has to survive the game's content view being
-rebuilt underneath it mid-frame, and a View tree stays valid with no lifecycle
-owner - recomposition was the only thing that needed one. Tapping the icon expands
-the panel, dragging repositions it, and the panel
+Activity. The host remains a plain `FrameLayout`; two bounded `ComposeView`
+children draw the handle and panel. Blank host space has no touch listener, so
+the game retains it. The host and Compose children share explicit lifecycle, saved-state
+and view-model owners, with resume/pause/destroy driven by the existing Activity
+callbacks. Tapping the icon expands the panel, dragging repositions it, and the panel
 survives pause/resume/destroy: game SDKs can re-call `setContentView`, which
 either strips our host from the content view or leaves it attached but buried
 under the freshly added game view, so the panel re-attaches the host to the
@@ -524,8 +524,11 @@ re-checking once shortly after `onActivityResumed`. It does not require
 SYSTEM_ALERT_WINDOW permission or a foreground service. The panel footer
 renders this process's runtime journal in place, with a "save log to file"
 button that writes through the system file picker. After first enabling
-the option, restart the scoped game. Panel display in an injected game still
-requires device verification; an ordinary emulator can verify the preview.
+the option, restart the scoped game. The Handle has been observed over the
+game's startup screen on PJX110 after a direct cold launch; panel interaction
+and gameplay remain to be verified.
+The experimental scope and remaining gates are recorded in
+[`docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md`](../docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md).
 
 After installing or updating the APK, disable and re-enable the module once in
 LSPosed. This makes LSPosed register the module's protected shared-preference

@@ -15,10 +15,8 @@ android {
 
     buildFeatures {
         buildConfig = true
-        // The settings app and the BEM package manager are Compose surfaces.
-        // The in-game panel deliberately is NOT: it runs inside the hooked game
-        // process, where loading a single Compose class is fatal - see the
-        // GameOverlay header comment and proguard-rules.pro.
+        // The settings app and BEM manager use Compose. This experimental branch
+        // also composes the Activity-scoped game panel; device acceptance is pending.
         compose = true
     }
 
@@ -288,13 +286,14 @@ val verifyReleaseEntryPoints by tasks.registering {
 
         // The classes the hooked game process actually executes. They must stay
         // their own classes rather than being folded into a shared holder with
-        // the library - see the "hooked game process must stay Compose-free"
-        // block in proguard-rules.pro for the merged-<clinit> evidence.
+        // the library - see the merged-<clinit> evidence in proguard-rules.pro.
         val gameProcessClasses = listOf(
             "dev.betterendfield.android.XposedEntry",         // libxposed entry
             "dev.betterendfield.android.RuntimeBootstrap",    // module attach
             "dev.betterendfield.android.RuntimeLog",          // journal
             "dev.betterendfield.android.GameOverlay",         // the in-game panel
+            "dev.betterendfield.android.OverlaySurface",      // Compose view owner
+            "dev.betterendfield.android.OverlayViewOwners",   // owner tag bridge
             "dev.betterendfield.android.OverlayFeatures",
             "dev.betterendfield.android.NativeCommandBridge", // file relay
             "dev.betterendfield.android.ModuleConfigurations",
@@ -461,10 +460,7 @@ dependencies {
 
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
-    // Compose is bundled into the module dex, not just the settings app: the
-    // module process hosts the settings UI, which is composed. The in-game panel
-    // is deliberately NOT Compose - it runs in the hooked game process, where a
-    // single Compose class is fatal - see proguard-rules.pro.
+    // The existing Compose dependencies also serve the experimental game panel.
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
