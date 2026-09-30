@@ -16,6 +16,13 @@ on:
       - 'native/**'
   workflow_dispatch:
 
+# Nothing here writes to the repository: the job compiles and uploads an
+# artifact, both of which the default read permissions already allow. Dropping
+# the default `contents: write` matters on the `pull_request` trigger, where the
+# token is issued for fork PRs as well.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

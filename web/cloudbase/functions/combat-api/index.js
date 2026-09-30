@@ -62,7 +62,21 @@ function requestBody(event) {
   try { return JSON.parse(text); } catch { throw new Error("请求体不是有效 JSON"); }
 }
 
-const pathOf = (event) => String(event.path || event.rawPath || "/").replace(/\/+$/, "") || "/";
+// Strips trailing slashes by hand instead of with /\/+$/. `(a+)+$`-style
+// backtracking is what CodeQL flags here (js/polynomial-redos): the runtime
+// input is the request URL, and a path made of many slashes makes the engine
+// try every partition of them before it can conclude the match fails. The
+// pointer walk below is the same string in one pass; behaviour is identical,
+// including turning "" and "///" into "/".
+function trimTrailingSlashes(text) {
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  // An empty input, or one that was nothing but slashes, becomes "/" -- the
+  // same fallback the trailing `|| "/"` used to provide.
+  return end === 0 ? "/" : text.slice(0, end);
+}
+
+const pathOf = (event) => trimTrailingSlashes(String(event.path || event.rawPath || "/"));
 const methodOf = (event) => String(event.httpMethod || event.method || "GET").toUpperCase();
 const queryOf = (event) => event.queryStringParameters || event.queryString || {};
 const sha256 = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
