@@ -24,7 +24,20 @@ class OverlaySurface(
         fun toggle()
         fun collapse()
         fun drag(dx: Float, dy: Float)
+        /**
+         * A look-pad drag, in screen pixels: x to the right, y downwards - the
+         * same axes the desktop mouse hook reports, so the shared native mouse
+         * term needs no translation. Sent as often as the gesture reports; the
+         * controller decides how often the relay is actually written.
+         */
+        fun look(dx: Float, dy: Float)
         fun pulse(key: Int, description: String)
+        /**
+         * Collapses the panel, waits, then sends [key]. For the keys that start
+         * a shot: the panel has to be out of frame before the camera starts
+         * moving, so these must not fire under the finger the way [pulse] does.
+         */
+        fun delayedPulse(key: Int, description: String)
         fun hold(key: Int, pressed: Boolean, description: String)
         fun openSettings()
         fun saveLog()

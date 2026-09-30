@@ -110,6 +110,12 @@
     <!-- betterendfield.camera · 运镜与镜头 -->
     <string name="camera_motion_hint_short">预设运镜、关键帧段长与 VMD 镜头参数</string>
     <string name="camera_motion_subtitle">自由镜头的进阶参数。触发按钮在悬浮窗的「运镜 / 关键帧」区，这里只决定参数；这些值在游戏启动时读入，修改后需重启游戏。</string>
+    <string name="motion_group_look">转向（拖动）</string>
+    <string name="motion_look_sensitivity_label">转向灵敏度</string>
+    <string name="motion_look_sensitivity_unit">°/像素</string>
+    <string name="motion_look_hint">游戏内面板的「拖动转向」按它换算：数值越大，同样的拖动转得越多。默认 0.1 时滑过整个拖动区约转四分之一圈（随屏幕密度略有出入）。</string>
+    <string name="motion_look_invert">Y 轴反转</string>
+    <string name="motion_look_invert_hint">上滑改为俯视、下滑改为仰视。</string>
     <string name="motion_group_preset">运镜预设</string>
     <string name="motion_preset_label">预设</string>
     <string name="motion_preset_orbit">环绕</string>

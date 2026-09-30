@@ -79,6 +79,10 @@ internal fun OverlayPanel(
             }
         }
         if (features.freeCamera()) {
+            // Aiming comes first: framing a shot is look, then move, then set
+            // the lens, and the pad that does the most work should not be the
+            // one the thumb has to scroll to find.
+            LookPad(callbacks)
             MovementPad(callbacks)
             MotionControls(features, callbacks)
         }

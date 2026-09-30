@@ -12,12 +12,16 @@
 |---|---|---|
 | 原生运镜运行时 | **已就绪** | `camera/module.cpp` 1.6.0（含 `free_camera_runtime.inc`）被 `android/app/src/main/cpp/CMakeLists.txt` 直接编入 `betterendfield_desktop_features` 静态库，桌面源零改动 |
 | 平台替身 | **已就绪** | `native/shared/android_compat`：QPC→steady_clock 纳秒；`GetAsyncKeyState`→虚拟键锁存；`GetForegroundWindow`→恒真；`CreateFileW/ReadFile/GetFileSizeEx/CloseHandle`→POSIX 只读（VMD 装载天然可用） |
-| 键位与悬浮窗 | **大部分就绪** | 10 个热键（0x60-0x69）已钉进 ini；悬浮窗已有移动十字键 + 运镜/关键帧按钮；缺 VMD 播放键、FOV ± 应改按住 |
-| 配置面 | **缺口 A** | `ModuleSettings.setCameraSettings` 不写 13 个运镜/VMD 键 ⇒ 只有默认 orbit 参数可用，dolly/crane/truck 无法选择 |
-| VMD 文件投递 | **缺口 B** | 无「用户 .vmd → 游戏进程可读路径」通道；`vmd_camera_file` 无值可写 |
-| 触摸转向 | **缺口 C** | `g_mouse_dx/dy` 在 Android 恒 0 ⇒ 自由相机能移动/滚转/变焦但**不能转向**，运镜构图不可用 |
+| 键位与悬浮窗 | **已就绪** | 10 个热键（0x60-0x69）已钉进 ini；悬浮窗已有移动十字键 + 运镜/关键帧按钮 + VMD 播放键；FOV ± 已改按住 |
+| 配置面 | ~~缺口 A~~ **已补齐（alpha.5）** | `ModuleSettings.CameraMotion` 写全 13 个运镜/VMD 键，并按原生 `std::clamp` 的同一组上下限夹取 |
+| VMD 文件投递 | ~~缺口 B~~ **已补齐（alpha.6，已实机通过）** | 设置应用 SAF 导入并校验 → 框架远程文件空间 `vmd.current` → 游戏进程物化到 `files/betterendfield/camera/current.vmd` → 配置里的 `%files%` 展开为绝对路径 |
+| 播放按键时机 | ~~取景问题~~ **已补齐（alpha.7）** | 三个播放键按下后先收起面板、延迟 1 秒再发键；这一秒里 handle 一起隐藏 |
+| 隐藏期的出口与归位 | ~~缺口~~ **已补齐（alpha.7）** | 音量键=打断（丢待发键 / 停正在跑的运镜）；handle 自动归位两条路：原生 stopped 行、或按键发出后 3 秒无 started 行（兜住「原生没东西可播」的静默返回） |
+| 触摸转向 | ~~缺口 C~~ **已补齐（alpha.8）** | 面板 `LookPad` 拖拽 → 中继 `m dx dy` → 替身层 `AddVirtualMouseDelta` 累计 → 相机模块每 tick 折进 `g_mouse_dx/dy`；共享桌面源一行未改，灵敏度/反转页内可调 |
 
 **分阶段方案**：P1 配置面+面板补齐（零原生改动）→ P2 VMD 投递链（零原生改动）→ P3 触摸转向（原生三处小改）→ P4（可选）运行时热调参。
+
+**进度**：P1 / P2 / 播放倒计时 + 隐藏期音量键出口 + 播完自动回 handle / P3 触摸转向均已交付（`3.3.22-alpha.5` / `alpha.6` / `alpha.7` / `alpha.8`，alpha.7 与 alpha.8 尚未验收）；P2 的 VMD 链路已由用户实机验收通过（导入 → 远程投递 → 物化 → 播放全通）。**三个缺口全部补完**，P4（运行时热调参）可选未立项。
 
 ---
 
@@ -60,15 +64,17 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 | 键位 | `android_win32.cpp` `SetVirtualKey/VirtualKeyDown`（Press 按住 / Pulse 180ms / Release），`GetAsyncKeyState`→锁存 | ✅ |
 | 焦点 | `GetForegroundWindow`→恒真（`GameWindowHasFocus` 恒 true，方向键不失效） | ✅ |
 | 文件 | `CreateFileW`(GENERIC_READ+OPEN_EXISTING)→`open(O_RDONLY)`；`MultiByteToWideChar`→UTF-8 严格校验 | ✅ VMD 装载可用 |
-| 鼠标钩子 | `free_camera_runtime.inc:240` `#if defined(_WIN32)` 整段跳过 | ✅ 编译安全（副作用：增量恒 0，见缺口 C） |
+| 鼠标钩子 | `free_camera_runtime.inc:240` `#if defined(_WIN32)` 整段跳过 | ✅ 编译安全（**缺口 C 已由 P3 补齐**：面板拖动经由替身层累计器折进同一组增量，见 §9） |
 | 热键钉死 | `ModuleSettings.java:286-295` 写 10 热键名 + `free_camera_mouse_look=false` | ✅ |
-| 悬浮窗 | `OverlayPanel.kt:81-84`：`MovementPad`（6 向按住）+ `MotionControls`（播放/停止、回正、广角/长焦、滚转按住、关键帧记录/回放/清除） | ✅ 大部分（缺 VMD 按钮） |
-| 键位中继 | `input_relay.cpp` 行协议 `"<vk> <action>\n"` / `"c <payload>\n"` / `"r\n"`，10ms 轮询，游戏 filesDir | ✅ |
+| 悬浮窗 | `OverlayPanel.kt:81-84`：`MovementPad`（6 向按住）+ `MotionControls`（播放/停止、回正、广角/长焦、滚转按住、关键帧记录/回放/清除） | ✅（后续补齐 VMD 按钮 alpha.6、`LookPad` 与三个播放键延迟 alpha.7/alpha.8） |
+| 键位中继 | `input_relay.cpp` 行协议 `"<vk> <action>\n"` / `"c <payload>\n"` / `"r\n"`（alpha.8 增 `"m <dx> <dy>\n"`），10ms 轮询，游戏 filesDir | ✅ |
 | SAF 先例 | `GameOverlay.saveJournalToFile`：`ACTION_CREATE_DOCUMENT` + `XposedEntry.activityResultRelayReady()` + listener + 分享降级 | ✅ 可复用于读方向 |
 | 面板显隐 | `OverlayFeatures.read`（游戏进程读远程 SharedPreferences） | ✅ 加字段即扩 |
 | 配置投递 | `RuntimeBootstrap`（游戏进程）`Os.setenv("BETTER_ENDFIELD_CAMERA_CONFIG", configs.camera())` → `DesktopModule::Start` 一次读入 → `configuration_changed` | ✅ 通道在（boot-only，见决策 1） |
 
 ### 1.3 缺口明细
+
+> 本节记录的是**改造前**的现场（2026-09-30 方案立项时）。四个缺口此后全部补齐：A → P1 / `alpha.5`（§6），B → P2 / `alpha.6`（§7），C → P3 / `alpha.8`（§9），D → P1。下面的文字保留原样，作为「当时缺什么」的记录。
 
 - **A 配置面**：`ModuleSettings.setCameraSettings`（`ModuleSettings.java:253-296`）只写开关/速度/FOV/热键/`free_camera_mouse_look=false`/`free_camera_smoothing=0.3`/两个 loop 硬编码 false。13 个运镜/VMD 键全部缺席 ⇒ 原生只能用默认值跑 orbit；`dolly_zoom/crane/truck` 无入口；体验页（`ExperiencePage.kt` CameraCard）无任何运镜 UI。
 - **B VMD 投递**：无导入 UI、无「文件进入游戏 filesDir」链路、`vmd_camera_file` 无值；悬浮窗无 `VMD_PLAY`（0x66）按钮。
@@ -144,19 +150,22 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 ## 4. 风险与未验项
 
-| 风险 | 说明 | 缓解 |
+> 状态更新（2026-09-30，P3 交付后）：下表是立项时的清单，逐行标注了此后的事实。
+
+| 风险 | 说明 | 状态 |
 |---|---|---|
-| 运镜 1.6.0 **从未实机验证**（Win 侧也未验） | Android 首验即双平台首验；`CAMERA_EIEM_PORT_PLAN` 三条「实机需确认」全部悬空 | 分阶段发布、日志判据逐条列（本文各 P 节）；失败可逐项定位 |
-| 冻结中 `PushState` 是否仍被调用 | 未验（Win/Android 共同遗留）。不调用则靠心跳写 transform | 设计已兜底（`BrainIsPushing` 0.05s 判旧 + fallback）；P3 验收项覆盖 |
-| VMD 标定值 | `vmd_camera_scale=0.07` / FOV bias +5° 沿 EIEM（MMD 场景标定），Endfield 场景可能偏 | 参数已进 UI；实机调参闭环 |
-| 悬浮窗本身未全验 | 展开后交互、触摸透传等仍未实机验证（见 MEMORY 第 8 节） | P1 面板改动小（两处），随运镜验收一并覆盖 |
-| R8 / 门禁 | 新增 Kotlin 类无新按名解析面；`NativeCommandBridge` 变更涉及 relay 写入 | 本地 `assembleRelease` 跑 `verifyReleaseEntryPoints` 即可，无新 keep 规则预期 |
+| 运镜 1.6.0 **从未实机验证**（Win 侧也未验） | Android 首验即双平台首验；`CAMERA_EIEM_PORT_PLAN` 三条「实机需确认」全部悬空 | **已关闭**：`alpha.6` 的 VMD 投递链由用户实机端到端验收通过（Win 侧仍是未验状态，本仓库不负责桌面端） |
+| 冻结中 `PushState` 是否仍被调用 | 未验（Win/Android 共同遗留）。不调用则靠心跳写 transform | **仍未验**；设计已兜底（`BrainIsPushing` 0.05s 判旧 + fallback），已写进 P3 验收判据 |
+| VMD 标定值 | `vmd_camera_scale=0.07` / FOV bias +5° 沿 EIEM（MMD 场景标定），Endfield 场景可能偏 | **仍待实机调参**；参数已在 UI 里可调 |
+| 悬浮窗本身未全验 | 展开后交互、触摸透传等仍未实机验证（见 MEMORY 第 8 节） | **部分关闭**：handle 显隐链路已在 alpha.7 相关需求中被实际使用；面板展开交互仍无系统性验收记录 |
+| alpha.7 / alpha.8 的交互时序（延迟播放、音量键、拖动转向手感） | 只有静态与产物级证据，没有实机证据 | **待验**：判据见 §8 / §9，日志行已设计成可核对 |
+| R8 / 门禁 | 新增 Kotlin 类无新按名解析面；`NativeCommandBridge` 变更涉及 relay 写入 | **已处置**：本地 `assembleRelease` 跑 `verifyReleaseEntryPoints` 五类断言通过，无新增 keep 规则 |
 
 ---
 
 ## 5. 交付节奏与文档同步
 
-- **版本**：P1 → `3.3.22-alpha.5`（已交付）；P2 → `alpha.6`（已交付）；P3 → `alpha.7`。
+- **版本**：P1 → `3.3.22-alpha.5`（已交付）；P2 → `alpha.6`（已交付）；播放倒计时 → `alpha.7`（已交付）；P3 → `alpha.8`（已交付）。
 - **闭环**：push → CI（debug）→ 本地 `assembleRelease` 交付 release 包（release 签名，原位覆盖）→ PJX110 实机 → 用户贴面板日志 → 诊断。
 - **文档四件套**：每阶段 `CHANGELOG.md` / `README.md` / `README.en.md` / `android/README.md`；P2 占位符机制与 P3 relay 行协议属机制类，另加 `docs/GAME_INTERFACES.md`。
 - **验收基线设备**：HLK-AL00（冷启动回归 + 设置 app 可测导入）；PJX110（游戏内全链路）。
@@ -218,6 +227,81 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 | 真实 `isVmdMotion` 在 JVM 判定 | `0002` ✓、legacy `file` ✓、`0001` ✗、`Vocaloid Motion Data` ✗、`garbage` ✗、29 字节 ✗、`null` ✗ |
 | instrumented 断言 | 编译通过，**未执行**（新增占位符、清空、元数据与文件头断言） |
 
-**未验证项（须实机）**：远程文件空间的实际投递与 `%files%` 展开后的 `open()` 成功与否；VMD 朝向/缩放/FOV 在 Endfield 场景的标定（0.07 / +5°，来自 MMD 场景，预期需微调）；面板 VMD 按钮的显隐与按下效果。
+**实机验收（2026-09-30，用户执行，通过）**：远程文件空间的实际投递、`%files%` 展开后原生 `open()` 的成功、面板 VMD 按钮的显隐与按下，整条链走通了——此前列出的三项未验证项全部落地，包括当时最可疑的 `open()` 那一环。仍未单独评估的是标定的画面观感：`0.07` / `+5°` 取自 MMD 场景，用户未对动作幅度或朝向提出异议，但也没有明确确认它符合预期。
 
 **下一步（P3）**：触摸转向——替身层 `AddVirtualMouseDelta` + relay 新行协议 + `module.cpp` 非 Win 分支 + 面板 `LookPad`；同批把 `mouse_sensitivity` / `mouse_invert_y` 的 UI 补上（灵敏度滑杆 0.02–0.5，`LookPad` 的增量换算要读它）。
+
+---
+
+## 8. 播放倒计时 + 隐藏期的音量键出口 + 播完自动回 handle（2026-09-30，已交付 3.3.22-alpha.7）
+
+**需求**（用户提出，三次追加）：① 点击「预设运镜播放」「回放关键帧」「VMD 镜头播放」这三个按键时，先关闭悬浮窗，等待 1 秒再播放；② **handle 也要隐藏**，但按音量键可以中断播放并唤回 handle；③ **运镜播完 handle 自动回来**。
+
+**这个需求的来由**：这三个键的意义全在相机接下来怎么动，而面板占掉约三分之一画面、点击又发生在手指尚未离开屏幕之时——按键在点击瞬间发出，运镜就会带着控件一起开拍。handle 是浮在画面上的 50 dp 方块，同理要一起收掉。其余控件（移动 / 升降 / 滚转 / 变焦 / 记录关键帧 / 清除 / 视角回正）仍是按下即生效：那些是需要看着画面实时微调的调整项，延迟只会让它们难用。**只有这三个键被延迟是有意为之，不是漏改。**
+
+**实现**（零原生改动）：
+
+| 文件 | 改动 |
+|---|---|
+| `OverlaySurface.kt` | `Callbacks` 增 `delayedPulse(key, description)` |
+| `OverlayControls.kt` | `MotionControls` 中三个播放键由 `pulse` 改为 `delayedPulse` |
+| `GameOverlay.java` | `deferPlayback` / `runDeferredPlayback` / `cancelDeferredPlayback`、`standDown` / `endStandDown`、`onTakeoffCheck`、`onVolumeKey`、`observeJournalLine` / `applyPlaybackState`；常量 `DEFERRED_PLAYBACK_DELAY_MS = 1000`、`STOP_EDGE_GAP_MS = 120`、`TAKEOFF_GRACE_MS = 3000`；状态 `deferredKey/deferredDescription`、`firedDescription`、`runningKey/runningDescription`、`stoodDown` |
+| `RuntimeLog.java` | 增 `Observer` 接口 + `observe/stopObserving`，`record()` 在锁外回调（悬浮窗据此读原生播放事件） |
+| `XposedEntry.java` | 钩 `Activity.dispatchKeyEvent`（基类）+ 宿主 Activity 自己声明的那次覆写，把音量键转发给悬浮窗，**不吞按键** |
+
+**关键设计决策（记录理由）**：
+
+1. **等待挂在控制器的主线程 Handler 上，不挂在面板的 Compose 作用域上。** 面板收起正是「这份组合是否还活着」不再值得依赖的时刻：把等待交给随面板一起被取消的作用域，按键会被无声吞掉，日志里也不会留下任何痕迹。控制器（`GameOverlay`）的生命周期与 Activity 一致，且它本来就有 `mainHandler`（重挂载看门狗在用）。
+2. **取消语义**：一秒内再次点击三个播放键中的任意一个会**替换**待发的键（`removeCallbacks` + 重设），而不是排队两次；重新展开面板（`togglePanel` 展开分支）、按音量键、游戏切到后台（`onActivityPaused`）、悬浮窗被拆掉（`remove()`）都会取消。
+3. **预览模式直接发键**：预览跑在模块自己的进程里，`collapse()` 在预览下等于 `remove()`（拆掉整个悬浮窗），延迟没有意义；预览也不注册音量键与日志观察者。
+4. **延迟从点击那一刻算起**：面板淡出约 100 ms，因此手指离开屏幕后还剩约 0.9 秒。
+5. **音量为隐藏期唯一出口**：panel + handle 都不可见时，屏幕上没有可点的东西了。三个播放热键在原生侧本来就是**开关**（`PumpFreeCameraRequests` 里 `g_playback == kind` 即 `StopPlayback("hotkey")`），所以「停止」用的就是当初发出去的那个键；而预设运镜（`motion_duration=0` 表示不限时）、关键帧循环与 VMD 循环都可能永远不结束，没有这个出口只能重启游戏。
+6. **「正在播放」照原生日志判定，不猜**：原生记 `Free camera motion started` / `Free camera keyframe playback started` / `VMD camera playback started`，停止（含播完、被切换、被自己的热键停）统一记 `Free camera playback stopped: <原因>`，退出自由相机记 `Free camera disabled`；这些行进的是既有的 native ring → `native.log` → Java 日志环（`RuntimeLog.observe`）。**必须先看到 started 才认为运镜在跑**：按键发出但原生没能开拍（VMD 打不开、不在自由相机里）时音量键不会去「停」一次从未开始的播放，已经播完的运镜也不会被同一个按键重新启动——失败方向是「音量键只唤回 handle」，不是「重播一次用户以为已经结束的运镜」。
+7. **停止前必须先释放再等 120 ms**：虚拟键锁存把一次 pulse 保持 180 ms，而模块的输入线程只在**上升沿**上武装热键（`down && !was_down`），紧接着补一次按键会被看成同一次长按，什么都不会切。所以先 `releaseKeys()` 再把停止键延后 `STOP_EDGE_GAP_MS` 发出。
+8. **不吞音量键**：手机音量照常变化，转发纯加法，永远不会从游戏手里抢走一个键。代价是「同一次按键被两个钩子各看一次」（宿主 Activity 覆写 `dispatchKeyEvent` 又调了 super）——因此消费端写成幂等：第一遍处理完就清掉状态，第二遍无事可做。
+9. **运镜结束后 handle 自动回来**（用户第三次追加的需求，取代原先「不自动回来」的设计）：触发就是原生的 stopped 行（`Free camera playback stopped: <原因>` 或 `Free camera disabled`），它覆盖播完、被切换、被自己的热键停掉、退出自由相机全部路径。**只认已登记为「在跑」的那次运镜**（`runningKey != 0`，而 `runningKey` 只在读到 started 行时才登记），所以别人的 stopped 行不会提前把 handle 拽回来。handle 回来、面板保持收起——展开面板仍是用户自己的一次点击（决策 10 不变）。
+9b. **兜底：按键发出后 3 秒内原生没有 started 行 → 当作「它没东西可播」，唤回 handle。** 这不是锦上添花：`g_free_camera_active` 为假时按预设/关键帧键，`PumpFreeCameraRequests` 直接 `return`，一行都不记（`free_camera_runtime.inc` 的 `if (!g_free_camera_active) return;`）；关键帧不足两帧、VMD 装载失败、dolly zoom 距离太近也都只记一行提示就返回。这些情况下若只等 stopped，悬浮窗永远停在隐藏态，而用户没有任何理由去猜「音量键在这种状态下还有用」。3 秒是 native ring → `native.log` → 轮询（`Thread.sleep(250)`）这条通路延迟的十二倍，够宽；代价是万一 VMD 装载真的超过 3 秒，handle 会先回来一次（可见、可再收起，不损坏任何状态）。
+9c. **`runningKey` 在 `standDown()` 时清零**：它描述的是「本次隐藏对应的那次运镜」，而不是上一个会话残留的状态。native.log 跨进程重启不会截断，早期行可能被重放，清零让重放的 started 行无法污染新一次隐藏。
+10. **音量键只唤回 handle，不展开面板**：用户按下它是为了中止或退出隐藏态，面板要不要摊开由他自己点一下决定。
+11. **钩 `dispatchKeyEvent` 要顺着继承链找声明类**：宿主 Activity 往往自己不声明、而由基类覆写（Unity 的基类就是覆写且未必调 super 的那类），只问叶子类会误判成「没有覆写」，只钩框架方法又会漏掉不调 super 的覆写。
+
+**验证**（本机）：release 构建 + `verifyReleaseEntryPoints` 通过；`assembleDebugAndroidTest --rerun-tasks` 通过；原生段未动（纯 Java/Kotlin 改动，`.so` 不变）；dex 里 14 条新字面量全部检出（三条 started 判据、两条 stopped 判据、`no take reported within`、`the runtime had nothing to play`、`no take started`、`take finished: `、`the take ended`、`overlay handle restored`、`the game came back to the foreground`）。**延迟、超时与音量键都是时序行为，没有产物级证据**，能否接受只能实机看；实机可核对的日志行：`playback armed` → `playback fired` → `take running` → 二选一收尾 `take finished: <描述>` + `overlay handle restored: the take ended`，或 `no take reported within 3000 ms` + `overlay handle restored: no take started`，或音量键路径的 `take stopped by volume key`。
+
+**已知取舍**：录制中按下音量键会让手机音量一起变化（有意为之，见决策 8）；**不限时运镜**（`motion_duration=0`）与**循环的关键帧 / VMD** 永远等不到 stopped 行，因此不会自动回 handle——这是「播完才回来」的字面含义，不是缺陷，出口仍是音量键或切后台再回来；万一 VMD 装载超过 3 秒，handle 会先于播放回来一次（决策 9b）；handle 回来时面板仍是收起的，想操作要再点一下 handle。
+
+---
+
+## 9. P3 实施结果（2026-09-30，已交付 3.3.22-alpha.8）
+
+**需求**：继续推进方案 → 补缺口 C：手机上自由相机不能转向，运镜构图事实上没法用。
+
+**改动**（本阶段第一次动原生；**共享的桌面源 `free_camera_runtime.inc` 一行未改**）：
+
+| 文件 | 改动 |
+|---|---|
+| `android_virtual_keys.h` | 声明 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta`，并把「为什么不是虚拟键、为什么不是命令泵」写进注释 |
+| `android_win32.cpp` | 两个 `std::atomic<int>` 累计器 + `exchange` 取走 |
+| `input_relay.cpp` | `HandleLine` 增 `"m <dx> <dy>"`（±1000 夹取），文件头协议表同步 |
+| `modules/camera/module.cpp` | `FoldPanelLookInput()`（`#if !defined(_WIN32)`）在 `PumpFromEngineTick` 顶部把累计器折进 `g_mouse_dx/g_mouse_dy` |
+| `NativeCommandBridge.java` | `look(dx, dy)` → `"m dx dy\n"` |
+| `GameOverlay.java` | `accumulateLook` / `flushLook` / `dropPendingLook`，常量 `LOOK_FLUSH_INTERVAL_MS = 16` |
+| `OverlaySurface.kt` / `OverlayControls.kt` / `OverlayPanel.kt` | `Callbacks.look`；`LookPad`（`detectDragGestures`，62 dp 拖动区）置于自由相机区块最上方 |
+| `SettingsState.kt` / `CameraMotionPage.kt` / `strings.xml` | 转向设置组：灵敏度滑杆 0.02–0.5 °/像素（48 档、两位小数）+ Y 轴反转开关；复用 P1 已写好却无入口的 `updateMouseSensitivity` / `updateMouseInvertY` 与 `CameraMotion` 记录的夹取 |
+
+**关键设计决策（记录理由）**：
+
+1. **增量走「累计器 + 每 tick 折叠」，不走命令泵、也不新造虚拟键。** 命令泵是单槽代次队列，连续输入会自己覆盖自己（一次拖拽只剩最后一个采样）；虚拟键是状态量，而视角是增量。替身层两个原子累加器与 `SetVirtualKey` 同级同风格，`DrainVirtualMouseDelta` 取走即清零，语义与 Windows 钩子里的 `fetch_add` 完全一致。
+2. **坐标与单位沿用钩子的那一套**（屏幕像素、x 向右、y 向下），而不是另立一套触屏坐标再换算。好处是 `StepFreeCamera` 里 `control.yaw += dx * sensitivity` 那两行一行都不用改，`mouse_invert_y` 在两端同义，且「右滑右转」（桌面习惯）+「上滑抬头」（触屏习惯）同时成立。
+3. **在 `PumpFromEngineTick` 顶部无条件折叠**，不只在 `g_free_camera_active` 时：否则相机没开时拖的几下会攒着，开相机瞬间一次性甩镜头。`EnterFreeCamera` 本来就调 `ClearMouseInput()`，再兜一道——因此**不需要**去改 `ClearMouseInput()` 所在的共享 `.inc`，桌面源保持零改动（这条比原方案更保守：原方案打算在 `ClearMouseInput()` 里顺带清替身累计器）。
+4. **面板侧合并写**（`LOOK_FLUSH_INTERVAL_MS = 16`）：拖拽按显示刷新率上报（约 120 次/秒），原生每 10 ms 读一次；一行一事件意味着每秒上百次 `open/write/close`。求和后最多每 16 ms 写一行，总量不变、延迟低于一帧。**取整后只减掉整数部分，小数留下继续累**（`pending -= dx`，不是 `= 0`）：写成清零的话，比「每 16 毫秒半像素」更慢的拖拽会被反复四舍五入抹平，按多久都不动——实机上表现为「慢慢拖没反应」，而构建与门禁全绿。（本条是自查时改掉的：初版代码写的是清零，注释却写着「会累起来」，两者相反。）
+5. **在飞的增量在面板收起 / 切后台 / 悬浮窗拆除时丢弃**：控件已经不在了还在转镜头，用户无从解释。
+6. **灵敏度 UI 的范围比原生夹取窄**（0.02–0.5 对 0.01–2.0）：`CameraMotion` 记录本来就夹在这一段（P1 定的），滑杆与之对齐；0.5 时滑过整个拖动区已超过一整圈，再往上没有可用手感。
+
+**验收判据**：拖动转向区 → 相机连续转向；时间冻结中仍可转向（心跳 fallback 生效的证据：`Cinemachine is not pushing; writing the camera transform` 且画面确实转了）；播放运镜（预设/关键帧/VMD）期间拖动无效；调过灵敏度或 Y 轴反转后需重启游戏生效（配置是启动时读入的）。
+
+**验证**（本机）：release 构建 + `verifyReleaseEntryPoints` 五类断言通过；`assembleDebugAndroidTest` 通过；**本版有原生改动，因此核对到产物**：`libbetterendfield_android.so` 本次重编，APK 内该库含 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta` 符号（`FoldPanelLookInput` 是内部函数，被 strip 属预期，未 strip 的中间产物里在），dex 含 `look deltas rejected (relay not configured)` 与面板文案，资源表含新设置文案。**转向手感是交互行为，没有产物级证据**，只能实机看。
+
+另外把**跨进程行协议的文本契约**逐字核对了一遍（这是唯一没有编译期约束的接缝）：Java 写 `"m " + dx + " " + dy + "\n"`；原生按 `'\n'` 切行并去掉换行后，要求 `line[0]=='m' && line.size()>=3 && line[1]==' '`，两次 `strtol` 之间要求**恰好一个空格**（`*end != ' '` 即丢弃），负号由 `strtol` 处理 ⇒ `"m 3 -4"` 这类行两边一致，格式串打错会表现为「拖了没反应」而不是崩。畸形行（`"m x y"`、`"m 3"`、超范围）一律静默丢弃，与既有的 `"<vk> <action>"` 分支同风格。
+
+**已知取舍**：转向只在自由相机实际开着时生效（增量被消费的地方就是 `StepFreeCamera`），面板上拖动区与移动区同门控，因此「设置里开了自由相机但没按自由视角」时拖动无反应——与移动键一致；灵敏度是「度/像素」，同一段拖动在不同分辨率的机器上转过的角度不同（设置页文案已注明）；播放运镜期间不接管转向，这是可复现性的前提，不是漏改。
+

@@ -30,6 +30,66 @@ final class GameOverlay {
             new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable reattachCheck = this::ensureOnTop;
     private final Runnable composeCheck = this::composeWhenAttached;
+    private final Runnable deferredPlayback = this::runDeferredPlayback;
+    private final Runnable takeoffCheck = this::onTakeoffCheck;
+    private final Runnable lookFlush = this::flushLook;
+    /**
+     * How long a playback key waits after the panel is collapsed. The panel
+     * covers a third of the screen and needs about 100 ms to fade out, and the
+     * finger is still leaving the glass when the tap lands, so a key sent on
+     * the tap itself starts the shot with the controls in frame. The wait also
+     * covers the handle, which fades out with the panel: it is drawn over the
+     * game, so a take started while it is still on screen would be recorded
+     * with it.
+     */
+    private static final long DEFERRED_PLAYBACK_DELAY_MS = 1000L;
+    /**
+     * Gap between releasing the key latch and the pulse that stops a take. The
+     * runtime latches a pulse for 180 ms and arms a playback hotkey on a rising
+     * edge, so a second press inside that window reads as one long press and
+     * toggles nothing at all.
+     */
+    private static final long STOP_EDGE_GAP_MS = 120L;
+    /**
+     * How long the runtime gets to report a take before the overlay assumes it
+     * has none. A playback key can land on a runtime with nothing to play - a
+     * preset asked for while the free camera is off, a keyframe list holding
+     * fewer than two entries, a VMD that failed to load - and every one of
+     * those paths returns without logging a start or a stop, so this grace is
+     * the only thing between the user and an overlay that never comes back.
+     * The runtime publishes its journal to a file this process tails every
+     * 250 ms, so the grace is twelve times the transport latency.
+     */
+    private static final long TAKEOFF_GRACE_MS = 3000L;
+    /**
+     * How long look-pad deltas wait before they are written to the relay. A drag
+     * reports at display rate - of the order of 120 events a second - while the
+     * native side reads the relay every 10 ms and sums whatever it finds, so one
+     * line per flush carries exactly the same total as one line per event at a
+     * fraction of the writes. The wait is one frame's worth, which is below the
+     * threshold where a drag starts to feel detached from the camera.
+     */
+    private static final long LOOK_FLUSH_INTERVAL_MS = 16L;
+    /** Deltas accumulated since the last write; see LOOK_FLUSH_INTERVAL_MS. */
+    private float lookPendingX;
+    private float lookPendingY;
+    private boolean lookFlushScheduled;
+    /** Set once the relay has refused a delta, so a drag cannot spam the log. */
+    private boolean lookRejected;
+    private int deferredKey;
+    private String deferredDescription;
+    /** What the last fired playback key was, for naming the take it started. */
+    private String firedDescription;
+    /** The playback key the volume key is armed to stop; 0 when none runs. */
+    private int runningKey;
+    /** What started that take, for the journal. */
+    private String runningDescription;
+    /** True while the panel and the handle are both hidden for a take. */
+    private boolean stoodDown;
+    /** Registered with the entry so a volume key can reach this surface. */
+    private final XposedEntry.VolumeKeyListener volumeKeys = code -> onVolumeKey(code);
+    /** Registered with the journal so the runtime's playback events arrive here. */
+    private final RuntimeLog.Observer journalLines = this::observeJournalLine;
 
     static void install(Application app, ClassLoader loader, Supplier<OverlayFeatures> features) {
         RuntimeLog.record("overlay install: checking UnityPlayer");
@@ -47,6 +107,9 @@ final class GameOverlay {
                 // Make sure the save dialog's result can reach us even if this
                 // activity overrides onActivityResult without calling super.
                 XposedEntry.hookConcreteActivityResult(activity.getClass());
+                // Likewise for the volume key: an activity that overrides
+                // dispatchKeyEvent does not necessarily call super.
+                XposedEntry.hookConcreteActivityKeys(activity.getClass());
                 OverlayFeatures current;
                 try {
                     current = features.get();
@@ -82,6 +145,10 @@ final class GameOverlay {
                 // reach the controls, not just the panel's visibility.
                 surface.ui.resumed();
                 surface.refresh();
+                // Returning to the foreground is a new session for this surface:
+                // a stand-down armed in the last one is over, and a handle still
+                // hidden would leave the overlay with no way back in.
+                surface.endStandDown("the game came back to the foreground");
                 surface.updateJournal();
                 surface.host.setVisibility(
                         current.panel() && !surface.closed ? View.VISIBLE : View.GONE);
@@ -101,6 +168,12 @@ final class GameOverlay {
                 // Leaving a held movement key latched would keep the camera
                 // drifting for as long as the game stays in the background.
                 surface.releaseHeldKeys();
+                // An armed take belongs to the foreground session it was armed
+                // in; firing it into a backgrounded game would be a surprise.
+                surface.cancelDeferredPlayback();
+                // A drag belongs to the panel the finger was on, not to a game
+                // the user has just left.
+                surface.dropPendingLook();
                 surface.ui.paused();
                 surface.host.setVisibility(View.GONE);
             }
@@ -154,8 +227,12 @@ final class GameOverlay {
                 if (preview) remove(); else collapsePanel();
             }
             @Override public void drag(float dx, float dy) { dragBy(dx, dy); }
+            @Override public void look(float dx, float dy) { accumulateLook(dx, dy); }
             @Override public void pulse(int key, String description) {
                 GameOverlay.this.pulse(key, description);
+            }
+            @Override public void delayedPulse(int key, String description) {
+                GameOverlay.this.deferPlayback(key, description);
             }
             @Override public void hold(int key, boolean pressed, String description) {
                 sendKey(key, pressed ? NativeCommandBridge.KEY_PRESS
@@ -190,6 +267,12 @@ final class GameOverlay {
         panel.setVisibility(preview ? View.VISIBLE : View.GONE);
         refresh();
         updateJournal();
+        // A hidden overlay has no touch target left, so the volume key relay and
+        // the runtime's own playback journal are the only channels back in.
+        if (!preview) {
+            XposedEntry.setVolumeKeyListener(volumeKeys);
+            RuntimeLog.observe(journalLines);
+        }
         host.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or_, ob) -> layout());
         host.requestApplyInsets();
         host.post(this::layout);
@@ -360,6 +443,274 @@ final class GameOverlay {
         sendKey(virtualKey, NativeCommandBridge.KEY_PULSE, title);
     }
 
+    /**
+     * Starts a playback key (motion preset, keyframe replay, VMD replay) only
+     * once the panel is down and {@link #DEFERRED_PLAYBACK_DELAY_MS} has
+     * passed. These three are the keys whose whole point is what the camera
+     * does next, so the take has to start on a clean screen - which is also why
+     * only these three are deferred and every other control still fires under
+     * the finger, where an adjustment belongs.
+     *
+     * <p>The wait runs on the controller's own handler, never on a Compose
+     * scope inside the panel: the moment the panel is collapsed is exactly when
+     * a composable's lifetime stops being something to rely on, and a scope
+     * cancelled with the panel would swallow the key silently.
+     *
+     * <p>A second tap inside the window replaces the pending key rather than
+     * queueing another; expanding the panel again, leaving the activity, tearing
+     * the surface down or pressing a volume key cancels it, which is also how a
+     * take is abandoned before it starts.
+     */
+    private void deferPlayback(int virtualKey, String description) {
+        if (preview) {
+            pulse(virtualKey, description);
+            return;
+        }
+        collapsePanel();
+        // The handle is drawn over the game too, so it goes with the panel: the
+        // point of the wait is a clean screen for the camera to start on.
+        standDown();
+        deferredKey = virtualKey;
+        deferredDescription = description;
+        mainHandler.removeCallbacks(deferredPlayback);
+        mainHandler.postDelayed(deferredPlayback, DEFERRED_PLAYBACK_DELAY_MS);
+        RuntimeLog.record("playback armed: " + description + " in "
+                + DEFERRED_PLAYBACK_DELAY_MS + " ms (volume key cancels)");
+    }
+
+    private void runDeferredPlayback() {
+        String description = deferredDescription;
+        if (description == null) return;
+        int virtualKey = deferredKey;
+        deferredKey = 0;
+        deferredDescription = null;
+        firedDescription = description;
+        pulse(virtualKey, description);
+        RuntimeLog.record("playback fired: " + description
+                + " (volume key stops it while it runs)");
+        // The runtime is now the only party that knows whether anything is
+        // playing, so the handle waits for it to say so; see TAKEOFF_GRACE_MS
+        // for what happens when it stays silent.
+        mainHandler.removeCallbacks(takeoffCheck);
+        mainHandler.postDelayed(takeoffCheck, TAKEOFF_GRACE_MS);
+    }
+
+    // ------------------------------------------------------------- look pad
+
+    /**
+     * Takes a look-pad drag. Aiming is a stream rather than an event: the native
+     * side adds whatever deltas arrive, so they are summed here and written at a
+     * fixed rate instead of one file write per touch sample.
+     */
+    private void accumulateLook(float dx, float dy) {
+        if (preview || closed) return;
+        lookPendingX += dx;
+        lookPendingY += dy;
+        if (lookFlushScheduled) return;
+        lookFlushScheduled = true;
+        mainHandler.postDelayed(lookFlush, LOOK_FLUSH_INTERVAL_MS);
+    }
+
+    private void flushLook() {
+        lookFlushScheduled = false;
+        // Whole pixels: the native counter is an int. The fraction stays behind
+        // rather than being cleared, because a drag slower than half a pixel per
+        // window would otherwise be rounded away on every flush and never amount
+        // to anything, however long it is held.
+        int dx = Math.round(lookPendingX);
+        int dy = Math.round(lookPendingY);
+        lookPendingX -= dx;
+        lookPendingY -= dy;
+        if (dx == 0 && dy == 0) return;
+        try {
+            if (NativeCommandBridge.look(dx, dy)) {
+                lookRejected = false;
+                return;
+            }
+        } catch (Throwable failure) {
+            if (!lookRejected) {
+                lookRejected = true;
+                RuntimeLog.record("look delta failed: " + failure);
+            }
+            return;
+        }
+        if (!lookRejected) {
+            lookRejected = true;
+            RuntimeLog.record("look deltas rejected (relay not configured)");
+        }
+    }
+
+    /**
+     * Drops an in-flight drag without sending it. Called when the panel goes
+     * away or collapses mid-gesture: a delta that arrives after the control it
+     * came from is gone would turn the camera with nothing on screen to explain
+     * why.
+     */
+    private void dropPendingLook() {
+        mainHandler.removeCallbacks(lookFlush);
+        lookFlushScheduled = false;
+        lookPendingX = 0f;
+        lookPendingY = 0f;
+    }
+
+    private void cancelDeferredPlayback() {
+        if (deferredDescription == null) return;
+        deferredKey = 0;
+        deferredDescription = null;
+        mainHandler.removeCallbacks(deferredPlayback);
+        RuntimeLog.record("playback cancelled before it fired");
+    }
+
+    // ------------------------------------------------------- stand-down / escape
+
+    /**
+     * Hides the handle, leaving nothing of the overlay on screen. What brings it
+     * back is the runtime reporting that the take has ended, a volume key press,
+     * or the game going to the background and returning. A take that runs
+     * forever never reports an end - the motion preset without a duration, the
+     * keyframe loop and the VMD loop can all run until stopped - so for those
+     * the volume key remains the way out.
+     */
+    private void standDown() {
+        stoodDown = true;
+        // runningKey describes the take of the stand-down that is starting now,
+        // not one from an earlier session that a journal replay might mention.
+        runningKey = 0;
+        runningDescription = null;
+        if (handle.getVisibility() != View.VISIBLE) return;
+        handle.animate().cancel();
+        handle.animate().alpha(0f).setDuration(100)
+                .withEndAction(() -> handle.setVisibility(View.GONE)).start();
+    }
+
+    /** Brings the handle back and forgets the stand-down, whatever ended it. */
+    private void endStandDown() {
+        endStandDown(null);
+    }
+
+    /** As above, naming the cause in the journal. */
+    private void endStandDown(String reason) {
+        if (!stoodDown) return;
+        stoodDown = false;
+        runningKey = 0;
+        runningDescription = null;
+        mainHandler.removeCallbacks(takeoffCheck);
+        if (handle.getVisibility() == View.VISIBLE && handle.getAlpha() == 1f) return;
+        handle.animate().cancel();
+        handle.setAlpha(0f);
+        handle.setVisibility(View.VISIBLE);
+        handle.animate().alpha(1f).setDuration(140).start();
+        RuntimeLog.record("overlay handle restored"
+                + (reason == null ? "" : ": " + reason));
+    }
+
+    /**
+     * Fires when the runtime never reported a take for the key that was just
+     * sent. Nothing is playing, so the overlay has no reason to stay hidden -
+     * and unlike the volume key, which can always be pressed, this one arrives
+     * without the user having to know that a hidden overlay still listens.
+     */
+    private void onTakeoffCheck() {
+        if (closed || !stoodDown || runningKey != 0) return;
+        RuntimeLog.record("no take reported within " + TAKEOFF_GRACE_MS
+                + " ms; the runtime had nothing to play");
+        endStandDown("no take started");
+    }
+
+    /**
+     * A volume key press while the overlay is standing down. With the panel and
+     * the handle both gone this is the only control left on the glass, so it
+     * does the obvious thing: a take that has not fired yet is dropped, a take
+     * the runtime reports as running is stopped, and a stand-down whose take
+     * already ended just restores the handle.
+     *
+     * <p>It stays idempotent because a host activity that overrides
+     * dispatchKeyEvent and calls super delivers one press twice; the first call
+     * consumes the state and the second one finds nothing to do.
+     */
+    private void onVolumeKey(int keyCode) {
+        if (!stoodDown) return;
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            mainHandler.post(() -> onVolumeKey(keyCode));
+            return;
+        }
+        // Logged before anything else so a press that turns out to have nothing
+        // to do still proves the relay reached this process.
+        RuntimeLog.record("volume key " + keyCode + " during stand-down");
+        if (runningKey != 0) {
+            String description = runningDescription == null ? "播放" : runningDescription;
+            int virtualKey = runningKey;
+            // Leave the runtime a rising edge to see: see STOP_EDGE_GAP_MS.
+            runningKey = 0;
+            runningDescription = null;
+            releaseHeldKeys();
+            mainHandler.postDelayed(() -> pulse(virtualKey, "中断 " + description),
+                    STOP_EDGE_GAP_MS);
+            RuntimeLog.record("take stopped by volume key: " + description
+                    + " (vk " + Integer.toHexString(virtualKey) + ")");
+        } else if (deferredDescription != null) {
+            String dropped = deferredDescription;
+            cancelDeferredPlayback();
+            RuntimeLog.record("armed playback dropped by volume key: " + dropped);
+        } else {
+            RuntimeLog.record("volume key: no take is running, restoring the handle");
+        }
+        endStandDown();
+    }
+
+    /**
+     * Watches the runtime's own journal for playback events. The native module
+     * is the only party that knows whether a take is running: it logs a started
+     * line when one begins and a stop line when it ends, for every reason
+     * (finished, switched, or stopped by its own hotkey), and a stop line is
+     * also what brings the handle back. A take that fails to start logs neither,
+     * which is why nothing is assumed from the key we sent - without a started
+     * line the volume key cannot try to stop what never began, and the handle
+     * comes back on {@link #TAKEOFF_GRACE_MS} instead.
+     */
+    private void observeJournalLine(String line) {
+        if (line.indexOf("[native] ") < 0) return;
+        boolean stopped = line.contains("Free camera playback stopped")
+                || line.contains("Free camera disabled");
+        int startedKey = 0;
+        if (line.contains("Free camera motion started")) {
+            startedKey = Hotkeys.MOTION;
+        } else if (line.contains("Free camera keyframe playback started")) {
+            startedKey = Hotkeys.KEYFRAME_PLAY;
+        } else if (line.contains("VMD camera playback started")) {
+            startedKey = Hotkeys.VMD_PLAY;
+        }
+        if (!stopped && startedKey == 0) return;
+        final int began = startedKey;
+        final boolean ended = stopped;
+        // Journal lines arrive on the recording thread - the panel, the native
+        // log poller, or a hook - and the state they touch is main-thread only.
+        mainHandler.post(() -> applyPlaybackState(began, ended));
+    }
+
+    private void applyPlaybackState(int startedKey, boolean stopped) {
+        if (stopped) {
+            if (runningKey == 0) return;
+            String description = runningDescription == null ? "播放" : runningDescription;
+            runningKey = 0;
+            runningDescription = null;
+            // A take that has ended leaves the overlay nothing to stay hidden
+            // for. Nothing to do when the panel is up, which is why this only
+            // records and restores while a stand-down is in flight.
+            if (!stoodDown) return;
+            RuntimeLog.record("take finished: " + description);
+            endStandDown("the take ended");
+            return;
+        }
+        if (runningKey != 0 || startedKey == 0) return;
+        // The runtime owns the take now; its own stop line ends the watch.
+        mainHandler.removeCallbacks(takeoffCheck);
+        runningKey = startedKey;
+        runningDescription = firedDescription;
+        RuntimeLog.record("take running: " + (firedDescription == null
+                ? "vk " + Integer.toHexString(startedKey) : firedDescription));
+    }
+
     private void sendKey(int virtualKey, int action, String description) {
         if (preview) {
             if (action != NativeCommandBridge.KEY_RELEASE) {
@@ -461,6 +812,9 @@ final class GameOverlay {
 
     private void togglePanel() {
         if (panel.getVisibility() == View.VISIBLE) { collapsePanel(); return; }
+        // Re-opening the panel is the user changing their mind about an armed
+        // take; it must not start behind the panel they just brought back.
+        cancelDeferredPlayback();
         refresh();
         updateJournal();
         panel.setAlpha(0f);
@@ -471,6 +825,7 @@ final class GameOverlay {
 
     private void collapsePanel() {
         releaseHeldKeys();
+        dropPendingLook();
         panel.animate().alpha(0f).setDuration(100)
                 .withEndAction(() -> panel.setVisibility(View.GONE)).start();
     }
@@ -480,8 +835,15 @@ final class GameOverlay {
         removedByUs = true;
         mainHandler.removeCallbacks(reattachCheck);
         mainHandler.removeCallbacks(composeCheck);
+        mainHandler.removeCallbacks(takeoffCheck);
         closed = true;
         releaseHeldKeys();
+        cancelDeferredPlayback();
+        dropPendingLook();
+        // Both registrations are static and outlive this surface; a volume key
+        // that still reached a torn-down overlay would have nowhere to land.
+        XposedEntry.clearVolumeKeyListener(volumeKeys);
+        RuntimeLog.stopObserving(journalLines);
         ui.dispose();
         if (host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);

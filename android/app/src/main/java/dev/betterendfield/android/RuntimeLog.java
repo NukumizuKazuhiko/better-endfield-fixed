@@ -31,13 +31,46 @@ public final class RuntimeLog {
         flush();
     }
 
-    public static synchronized void record(String message) {
-        String stamp = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-        if (LINES.size() >= CAPACITY) LINES.pollFirst();
-        LINES.addLast(stamp + " " + message);
-        Log.i("BetterEndfield.Runtime", message);
-        long now = System.currentTimeMillis();
-        if (now - lastFlushAt >= FLUSH_INTERVAL_MS) flush();
+    /**
+     * Sees every journal line as it is recorded. The overlay uses this to read
+     * the native module's own playback events - the runtime reports a started
+     * or stopped take through the log it already publishes, and nothing else in
+     * the process can tell whether a take is still running.
+     */
+    public interface Observer {
+        void onJournalLine(String line);
+    }
+
+    private static final java.util.concurrent.CopyOnWriteArrayList<Observer> OBSERVERS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Registers an observer; it must be removed before its surface goes away. */
+    public static void observe(Observer observer) {
+        OBSERVERS.addIfAbsent(observer);
+    }
+
+    public static void stopObserving(Observer observer) {
+        OBSERVERS.remove(observer);
+    }
+
+    public static void record(String message) {
+        String line = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(new Date())
+                + " " + message;
+        synchronized (RuntimeLog.class) {
+            if (LINES.size() >= CAPACITY) LINES.pollFirst();
+            LINES.addLast(line);
+            Log.i("BetterEndfield.Runtime", message);
+            long now = System.currentTimeMillis();
+            if (now - lastFlushAt >= FLUSH_INTERVAL_MS) flush();
+        }
+        if (OBSERVERS.isEmpty()) return;
+        // Notified outside the lock, and never allowed to take the journal down
+        // with it: an observer runs on whichever thread recorded the line.
+        for (Observer observer : OBSERVERS) {
+            try {
+                observer.onJournalLine(line);
+            } catch (Throwable ignored) { /* observation must never break logging */ }
+        }
     }
 
     /** Force a rewrite of the remote preference; returns false when unbound. */

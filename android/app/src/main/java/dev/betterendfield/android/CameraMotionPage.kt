@@ -41,7 +41,36 @@ fun CameraMotionPage(state: SettingsState) {
             subtitle = stringResource(R.string.camera_motion_subtitle),
             status = state.cameraCardStatus,
         ) {
-            GroupLabel(stringResource(R.string.motion_group_preset), top = Be.Space.l)
+            // First, because it is the one value here a user will want to change
+            // while holding the phone: the pad it scales is the control they use
+            // on every shot, while everything below it is a parameter of a
+            // one-off take.
+            GroupLabel(stringResource(R.string.motion_group_look), top = Be.Space.l)
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                SliderRow(
+                    label = stringResource(R.string.motion_look_sensitivity_label),
+                    value = state.mouseSensitivity,
+                    onValueChange = state::updateMouseSensitivity,
+                    valueRange = 0.02f..0.5f,
+                    unit = stringResource(R.string.motion_look_sensitivity_unit),
+                    // 48 stops across 0.02-0.5: one stop is one hundredth of a
+                    // degree per pixel, which is the increment the record's own
+                    // bounds and the stored text are written in.
+                    steps = 48,
+                    decimals = 2,
+                    enabled = state.cameraMotionAvailable,
+                )
+                BodyText(stringResource(R.string.motion_look_hint))
+                SwitchRow(
+                    title = stringResource(R.string.motion_look_invert),
+                    description = stringResource(R.string.motion_look_invert_hint),
+                    checked = state.mouseInvertY,
+                    onCheckedChange = state::updateMouseInvertY,
+                    enabled = state.cameraMotionAvailable,
+                )
+            }
+
+            GroupLabel(stringResource(R.string.motion_group_preset))
             Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
                 FieldLabel(stringResource(R.string.motion_preset_label), top = Be.Space.none)
                 SelectField(

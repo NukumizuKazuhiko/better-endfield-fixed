@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
  *   "&lt;vk&gt; &lt;action&gt;\n"  latch a virtual key
  *   "c &lt;payload&gt;\n"       submit a runtime command
  *   "r\n"               release every latched key
+ *   "m &lt;dx&gt; &lt;dy&gt;\n"     accumulate a mouse-look delta
  */
 final class NativeCommandBridge {
     /** Matches betterendfield::VirtualKeyAction in native/shared/android_compat. */
@@ -69,6 +70,18 @@ final class NativeCommandBridge {
 
     static boolean releaseKeys() {
         return append("r\n");
+    }
+
+    /**
+     * Adds a mouse-look delta, in the screen pixels and the axis directions the
+     * free camera's mouse term already expects (x right, y down). Deliberately
+     * not a "press and release" pair like {@link #key}: looking is a stream, not
+     * a state, and the native side sums whatever arrives instead of queueing it,
+     * so a dropped line costs a few pixels rather than a movement.
+     */
+    static boolean look(int dx, int dy) {
+        if (dx == 0 && dy == 0) return false;
+        return append("m " + dx + " " + dy + "\n");
     }
 
     /**

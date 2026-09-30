@@ -16,12 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.22-alpha.6)'
+        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.22-alpha.8)'
         required: true
         # Tracks versionName on the branch this runs against. A stale default is
         # harmless -- the run stops on the mismatch check rather than tagging a
         # version the source does not declare -- but a wrong one wastes a build.
-        default: '3.3.22-alpha.6'
+        default: '3.3.22-alpha.8'
       draft:
         description: 'Create the release as a draft instead of publishing it'
         type: boolean

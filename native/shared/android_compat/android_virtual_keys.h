@@ -37,4 +37,22 @@ void ReleaseAllVirtualKeys();
 
 bool VirtualKeyDown(int virtual_key);
 
+// Mouse look has no virtual key: it is not a state the game samples, it is a
+// stream of deltas the Windows mouse hook accumulates into (see
+// FreeCameraMouseHook). A device has no cursor to hook, so the panel's look pad
+// accumulates here instead, in the same coordinates the hook produces - screen
+// pixels, x to the right and y downwards - which is exactly what the free
+// camera's mouse term expects.
+//
+// Not routed through the runtime command pump: that pump is a single slot, so a
+// drag would overwrite its own deltas and the camera would move in steps of one
+// pointer sample. Two counters accumulate instead, and the module folds them
+// into its own deltas on every tick.
+void AddVirtualMouseDelta(int dx, int dy);
+
+// Moves the accumulated deltas into dx/dy, summing every contribution since the
+// last call, and reports whether there was anything to take. The caller owns the
+// result, so a tick that finds nothing does not have to touch its own counters.
+bool DrainVirtualMouseDelta(int& dx, int& dy);
+
 }  // namespace betterendfield

@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -115,11 +116,55 @@ internal fun MovementPad(callbacks: OverlaySurface.Callbacks) {
     }
 }
 
+/**
+ * Aiming, which on a desktop is what the mouse does. A device has no cursor for
+ * the free camera's mouse hook to watch, so the drag is the input: whatever the
+ * finger moves is what the camera turns, with the desktop's own sensitivity and
+ * inversion settings applied by the native side.
+ *
+ * The deltas go out in screen pixels with y downwards, exactly the coordinates
+ * the hook produces, so dragging right turns right and dragging up looks up -
+ * the first of those is the desktop convention and the second is the touch one.
+ * At the native default sensitivity (0.1 deg per pixel) one swipe across the pad
+ * already turns the camera a good part of a turn on a typical phone, which is why
+ * the settings page exposes the sensitivity alongside this.
+ *
+ * The pad consumes its drags, so a drag here never scrolls the panel. Everything
+ * else in the panel is a tap or a hold and keeps working while the camera is
+ * armed; look input is ignored during a playback, which is what makes a preset
+ * or VMD shot reproducible.
+ */
+@Composable
+internal fun LookPad(callbacks: OverlaySurface.Callbacks) {
+    OverlaySection("镜头转向（拖动）") {
+        Box(
+            Modifier.fillMaxWidth().height(62.dp)
+                .background(Be.Colors.overlayField, RoundedCornerShape(12.dp))
+                .border(1.dp, Be.Colors.outline, RoundedCornerShape(12.dp))
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        callbacks.look(dragAmount.x, dragAmount.y)
+                    }
+                }
+                .semantics { contentDescription = "镜头转向：按住拖动，右为右转，上为上抬" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("拖动转向", color = Be.Colors.textSecondary, fontSize = 13.sp)
+        }
+    }
+}
+
 @Composable
 internal fun MotionControls(features: OverlayFeatures, callbacks: OverlaySurface.Callbacks) {
     OverlaySection("运镜 / 关键帧") {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            OverlayActionRow("播放 / 停止", { callbacks.pulse(Hotkeys.MOTION, "运镜 播放/停止") },
+            // These three start a shot, so they do not fire on the tap: the
+            // controller collapses the panel first and sends the key a second
+            // later, leaving the camera a clean screen to start on. Everything
+            // else here is an adjustment that belongs under the finger, which
+            // is why nothing else is deferred.
+            OverlayActionRow("播放 / 停止", { callbacks.delayedPulse(Hotkeys.MOTION, "运镜 播放/停止") },
                 "视角回正", { callbacks.pulse(Hotkeys.VIEW_RESET, "视角回正") })
             // The zoom keys are read while they are down on the desktop, so a
             // 180 ms pulse only steps the lens about 3.6 degrees per tap. Holding
@@ -133,7 +178,7 @@ internal fun MotionControls(features: OverlayFeatures, callbacks: OverlaySurface
                 HoldControl("滚转 ↻", Hotkeys.ROLL_RIGHT, "顺时针滚转", Modifier.weight(1f), callbacks)
             }
             OverlayAction("记录关键帧") { callbacks.pulse(Hotkeys.KEYFRAME_ADD, "记录关键帧") }
-            OverlayActionRow("回放关键帧", { callbacks.pulse(Hotkeys.KEYFRAME_PLAY, "回放关键帧") },
+            OverlayActionRow("回放关键帧", { callbacks.delayedPulse(Hotkeys.KEYFRAME_PLAY, "回放关键帧") },
                 "清除", { callbacks.pulse(Hotkeys.KEYFRAME_CLEAR, "清除关键帧") })
             // Offered only once a .vmd has been imported: without one the native
             // side logs "no VMD camera file is configured", so the button would
@@ -141,7 +186,7 @@ internal fun MotionControls(features: OverlayFeatures, callbacks: OverlaySurface
             // the free camera by itself when it is not running yet.
             if (features.vmdCamera()) {
                 OverlayAction("VMD 镜头 播放 / 停止") {
-                    callbacks.pulse(Hotkeys.VMD_PLAY, "VMD 镜头 播放/停止")
+                    callbacks.delayedPulse(Hotkeys.VMD_PLAY, "VMD 镜头 播放/停止")
                 }
             }
         }

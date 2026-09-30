@@ -1636,7 +1636,33 @@ void PumpFirstPerson() {
 // re-entrancy guard stops managed calls made from inside it from re-entering.
 thread_local bool t_in_engine_tick = false;
 
+#if !defined(_WIN32)
+// A device has no cursor for the low-level mouse hook to watch, so the panel's
+// look pad is what moves the free camera's aim: it sends screen-space drag
+// deltas through the input relay, the compat layer accumulates them, and they
+// are folded into the same counters the hook fills on Windows. Everything
+// downstream - sensitivity, inversion, the pitch clamp, the behavior during a
+// playback - is therefore the shared desktop code, unchanged.
+//
+// Drained on every tick rather than only while the free camera is armed, so a
+// drag made with the camera off cannot be handed over as one jump when it comes
+// up. EnterFreeCamera clears the result anyway, which is what makes the arming
+// moment clean even for the deltas that arrive between the last tick and it.
+void FoldPanelLookInput() {
+    int dx = 0;
+    int dy = 0;
+    if (!betterendfield::DrainVirtualMouseDelta(dx, dy)) {
+        return;
+    }
+    g_mouse_dx.fetch_add(dx, std::memory_order_relaxed);
+    g_mouse_dy.fetch_add(dy, std::memory_order_relaxed);
+}
+#endif
+
 void PumpFromEngineTick(const char* source) {
+#if !defined(_WIN32)
+    FoldPanelLookInput();
+#endif
     if (t_in_engine_tick) {
         return;
     }

@@ -599,8 +599,9 @@ class SettingsState(private val context: Context) {
     /*
      * The free camera's motion/keyframe/VMD block, stored as one record by
      * ModuleSettings. mouseInvertY and mouseSensitivity travel with it because
-     * the configuration has always carried them; nothing on the phone steers
-     * them yet, so they keep their defaults until the on-screen look pad lands.
+     * the configuration has always carried them, and since the panel grew a look
+     * pad they are what steers it: they are the desktop mouse settings, applied
+     * to the drag deltas the pad sends.
      */
     var mouseInvertY by mutableStateOf(false)
         private set
@@ -830,11 +831,19 @@ class SettingsState(private val context: Context) {
         saveCameraSettings()
     }
 
+    /** A look-pad drag turns the camera up instead of down when this is on. */
     fun updateMouseInvertY(value: Boolean) {
         mouseInvertY = value
         saveCameraSettings()
     }
 
+    /**
+     * Degrees of turn per screen pixel dragged, which is the desktop mouse
+     * setting applied to the pad. The slider's range is narrower than the native
+     * clamp (0.01-2.0): at 0.5 one swipe across the pad turns the camera more
+     * than a full circle, and below 0.02 the pad would read as broken rather
+     * than slow.
+     */
     fun updateMouseSensitivity(value: Float) {
         mouseSensitivity = value
         saveCameraSettings()

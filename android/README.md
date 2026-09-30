@@ -6,12 +6,19 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.6 is an experimental prerelease: the in-game Compose handle
+Version 3.3.22-alpha.8 is an experimental prerelease: the in-game Compose handle
 appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
 still need device acceptance. The camera module's motion presets, keyframes and
-VMD parameters are configurable from the app and a `.vmd` can now be imported
-there, but the motion stack itself has never been validated on a device on either
-platform, so its first acceptance run is also Windows' first.
+VMD parameters are configurable from the app, and a `.vmd` can be imported there
+and played back: the user's acceptance run of 3.3.22-alpha.6 passed end to end, so
+the motion stack's first device run on either platform - on Android, ahead of
+Windows - was a successful one. Since then the panel's three playback keys arm a
+take instead of firing on the tap, the overlay stands down completely while it
+runs, and the free camera gained the steering input it never had on the phone
+(see "Interface, camera and sustained dash" below). None of that has been through device acceptance yet,
+and the alpha.7 and alpha.8 builds are still sitting on the same `versionCode`,
+so the only way to tell them apart on a device is the `构建 3.3.22-alpha.N` line
+at the top of the runtime journal.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -167,12 +174,14 @@ else is on the settings screen.
 | Time freeze | `8` | switch on the page, button on the panel |
 | First person | `-` | switch on the page, button on the panel |
 | Free-camera movement | arrows, PageUp/PageDown | press-and-hold pad on the panel |
+| Camera steering (look) | the mouse | look pad on the panel: drag to aim, with sensitivity and Y-invert on the page |
 | Camera roll / FOV in-out / view reset | `Numpad7`, `Numpad9`, `Numpad1`, `Numpad3`, `Numpad5` | roll and FOV are press-and-hold, view reset is a tap |
-| Motion preset play/stop | `Numpad8` | button on the panel |
-| Keyframe record/play/clear | `Numpad0`, `Numpad2`, `Numpad4` | buttons on the panel |
-| VMD replay | `Numpad6` | button on the panel, shown only once a `.vmd` has been imported |
+| Motion preset play/stop | `Numpad8` | button on the panel, deferred (see below) |
+| Keyframe record/play/clear | `Numpad0`, `Numpad2`, `Numpad4` | record and clear are taps, play is deferred (see below) |
+| VMD replay | `Numpad6` | button on the panel, shown only once a `.vmd` has been imported, deferred (see below) |
+| Escape from the hidden overlay / stop a running take | none | volume up / down / mute (relayed, never consumed) |
 | Runtime journal | none | read-only list on the panel, plus "save log to file" |
-| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters and the `.vmd` import | ini values | sliders, switches and a document picker on the page and its sub-pages |
+| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters, look sensitivity and Y-invert, and the `.vmd` import | ini values | sliders, switches and a document picker on the page and its sub-pages |
 | Sustained special dash | none | Enhancements page only |
 
 The panel only offers a control whose module was actually configured to load. A
@@ -413,7 +422,9 @@ Research catalogs and source PCK/CHK files stay under ignored
   first person, the free-camera movement pad and the roll / FOV / view-reset /
   motion-preset / keyframe group all press the virtual keys the ported desktop
   modules poll; VMD replay is one of them, and its button appears once a `.vmd`
-  has been imported. BEM hot switching is still not connected.
+  has been imported. The three keys that start a shot are deferred rather than
+  sent on the tap; see "Deferred playback" below. BEM hot switching is still not
+  connected.
 - The three ported modules are build-verified for ARM64 and their settings and
   panel were exercised on a local emulator. The emulator has no LSPosed, so
   their in-game behaviour has not been run against the injected client; the
@@ -728,9 +739,120 @@ configuration. The panel's "VMD camera play/stop" button appears only once an
 import exists, for the same reason the zoom keys are press-and-hold: a control
 whose only outcome is a complaint is worse than one that is not there.
 
-`mouse_invert_y` and `mouse_sensitivity` are written at their own defaults and
-deliberately have no UI, because the phone still has no steering input:
-`g_mouse_dx/dy` stays 0 while the mouse hook is compiled out, so the free camera
-can move, rise, roll and zoom but cannot turn. The panel's zoom buttons are
-press-and-hold rather than a 180 ms tap, matching what the desktop keys mean - a
-tap only steps the lens by about 3.6 degrees.
+**Deferred playback.** The three keys that start a shot - the motion preset, the
+keyframe replay and the VMD replay - do not fire on the tap. Tapping one of them
+collapses the panel, and the key goes out a second later. The panel covers about a
+third of the screen and takes roughly 100 ms to fade, and the tap lands while the
+finger is still on the glass, so a key sent immediately starts the shot with the
+controls in frame. Every other control still fires under the finger, which is where
+an adjustment belongs.
+
+The wait is posted on the foreground controller's own handler, never on a Compose
+scope inside the panel: collapsing the panel is exactly the moment when a
+composable's lifetime stops being something to rely on, and a scope cancelled with
+the panel would swallow the key without leaving a line in the log. Keeping the wait
+in the controller also provides the cancellation semantics - a second tap inside
+the window replaces the pending key rather than queueing another, and re-expanding
+the panel, pressing a volume key, backgrounding the game or tearing the surface down
+all cancel it. The delay itself is a timing behaviour and has no product-level
+evidence behind it; what was checked locally is that the release build and its
+entry-point gate still pass.
+
+**Standing down, and the handle coming back.** The handle goes with the panel for
+the same reason the panel does: it is a 50 dp box drawn over the game, so a take
+started while it is still on screen records it. With both gone there is no touch
+target left, so the handle has to find its own way back, and it does - from either
+of two directions. The runtime reporting that the take ended (a stop line, which
+covers finishing, being switched away from, being stopped by its own hotkey and
+leaving the free camera) fades it back in where it was left; so does the runtime
+staying silent for `TAKEOFF_GRACE_MS` after the key went out. The panel stays
+collapsed either way - it is one tap on the handle away, and expanding it is the
+user's decision, not a side effect of a take ending.
+
+That second path is not a nicety. A preset asked for while the free camera is
+off, a keyframe list holding fewer than two entries and a VMD that failed to load
+all return on the native side without logging either a start or a stop, so with no
+grace those are stand-downs that never end - and the user has no reason to suspect
+that a hidden overlay is still listening to the volume keys. Three seconds is
+twelve times the latency of the 250 ms journal poll, which is the only thing
+between a native line and this decision.
+
+A take that runs forever never reports an end and so never brings the handle back:
+the motion preset runs for as long as its configured duration (zero means forever),
+and the keyframe and VMD loops never end at all. A volume key is the interrupt
+there - it drops a key that has not fired yet, or stops the playback the runtime
+reports as running and brings the handle back. Backgrounding the game and
+returning restores it too, so no state here is a dead end.
+
+Whether a take is running is taken from the runtime's own journal rather than
+assumed from the key that was sent. The native module logs
+`Free camera motion started`, `Free camera keyframe playback started` or
+`VMD camera playback started` when a take begins, and
+`Free camera playback stopped: <reason>` when it ends - for every reason, including
+being switched and being stopped by its own hotkey - plus `Free camera disabled` on
+the way out of the free camera. A stop line is also what ends a stand-down, and it
+is honoured only for a take the overlay was told had started, so a stop belonging
+to something else cannot bring the handle back early. A take that fails to start
+logs no started line, so
+the volume key cannot try to stop a playback that never began, and a take that has
+already ended cannot be restarted by the same press. That last property is why the
+start line is required instead of trusting the fired key: it makes the failure mode
+"the volume key only restores the handle" instead of "the volume key re-runs a shot
+the user thought was over".
+
+Stopping re-sends the key that started the take, because the three playback hotkeys
+are toggles in the native module (`StopPlayback("hotkey")` when the same kind is
+already playing). It cannot be sent immediately: the virtual-key latch holds a pulse
+for 180 ms and the input thread arms a hotkey on a rising edge only, so a second
+press inside that window reads as one long press and toggles nothing. The controller
+therefore releases the whole latch first and sends the pulse 120 ms later.
+
+The volume keys are relayed by hooking `Activity.dispatchKeyEvent`, plus the host
+activity's own override wherever that override is declared - Unity's base activity
+is the kind of class that overrides it without calling super, so hooking only the
+framework method would miss it, while asking only the leaf class would report "no
+override" for an activity that merely extends one. The event is never consumed: the
+phone's volume still changes, the relay stays purely additive, and a host that both
+overrides the method and calls super simply delivers one press twice - the first call
+consumes the state and the second finds nothing to do. Repeats from a held volume key
+are ignored, so one press is one interruption.
+
+**Touch steering.** The desktop free camera is aimed with the mouse: a low-level
+hook accumulates `g_mouse_dx/dy`, and `StepFreeCamera` turns those into yaw and
+pitch. A device has no cursor to hook, so the panel's look pad is the mouse
+instead, and the whole of the rest of that path is shared desktop code.
+
+The deltas travel as a new relay line, `m <dx> <dy>`, in the coordinates the hook
+itself produces - screen pixels, x to the right and y downwards - because that is
+what makes the shared mouse term the correct consumer: dragging right turns right
+and dragging up looks up (the first is the desktop convention, the second the
+touch one), and `mouse_invert_y` means the same thing on both platforms. Deltas
+are *summed*, not queued, in two atomics in the compat layer; the camera module
+folds them into `g_mouse_dx/g_mouse_dy` on every main-thread tick, under
+`#if !defined(_WIN32)`. Nothing accumulates across the moment the camera comes up,
+both because the fold runs whether or not the camera is armed and because
+`EnterFreeCamera` already clears the mouse input.
+
+The panel does not write a line per touch event. A drag reports at display rate
+and the native side reads the relay every 10 ms, so the controller sums the deltas
+and writes at most one line per 16 ms; the running total is identical, and the
+relay sees tens of writes a second instead of hundreds. A drag in flight is
+dropped rather than sent when the panel collapses, the game goes to the background
+or the surface is torn down - a delta arriving after the control it came from is
+gone would turn the camera with nothing on screen to explain it.
+
+Sensitivity and inversion are the desktop settings, `mouse_sensitivity` (degrees
+of turn per pixel dragged) and `mouse_invert_y`, now with a slider and a switch on
+the Motion & Lens page. They had been written at their defaults since the Android
+port began, with no UI, because there was no steering input for them to affect.
+The slider's range is 0.02-0.5, narrower than the native clamp of 0.01-2.0: at the
+default 0.1 a swipe across the pad turns the camera roughly a quarter turn, and at
+0.5 more than a full circle.
+
+Look input is ignored while a playback runs, which is not a new rule - the shared
+`StepFreeCamera` clears the mouse input and returns while a preset, keyframe or
+VMD take is in flight. That is what keeps a scripted shot reproducible no matter
+what the thumb does.
+
+The panel's zoom buttons are press-and-hold rather than a 180 ms tap, matching
+what the desktop keys mean - a tap only steps the lens by about 3.6 degrees.

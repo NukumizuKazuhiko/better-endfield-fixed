@@ -237,6 +237,31 @@ Android 上模块与应用分处两个进程、两个 UID，应用既读不到�
 
 原生侧不需要为此改动：`LoadVmdCamera` 把路径直接交给 `CreateFileW`，Android 替身层将其实现为 `open(path, O_RDONLY)`，因此路径必须是绝对路径（相对路径会按进程工作目录解析，不可依赖）。
 
+## Android 侧的面板输入中继
+
+游戏内悬浮窗按的是桌面端同一套热键，但**不经过 JNI**：原生库注册在游戏的类加载器下，面板的桥接类属于 LSPosed 模块类加载器，Android 对同一 `.so` 路径的按类加载器隔离二次打开（`UnsatisfiedLinkError`）。两侧同进程，改用游戏自己数据目录里的普通文件中继——面板追加事件行（`NativeCommandBridge`，`O_APPEND` + 单锁串行），原生侧一个线程每 10 ms 读一次（`input_relay.cpp` 的 `StartInputRelay`）。
+
+输入文件协议，一行一个事件，UTF-8：
+
+| 行 | 含义 |
+|---|---|
+| `<vk> <action>` | 锁存一个虚拟键；action 0 松开 / 1 按住 / 2 脉冲（180 ms 后自动松开） |
+| `c <payload>` | 提交运行时命令（单槽泵，会被后来的命令覆盖） |
+| `r` | 释放所有已锁存的键（面板收起、切后台、Activity 拆除时） |
+| `m <dx> <dy>` | 累加一次鼠标视角增量（屏幕像素，x 向右、y 向下），超出 ±1000 夹取 |
+
+`<vk>` 用 Windows 键码数值，因此同一份配置在两端含义相同。键盘状态不是真的键盘：`GetAsyncKeyState` 读的是替身层的一张斜率表（`android_virtual_keys.h`），脉冲时长与"按住"语义都由它定义。命令泵是单槽、带代次校验、在 Unity 钩子上排空——形状适合配置，不适合连续输入或"按住"的松开事件，因此转向增量走累计器（见下节）而不是命令泵。
+
+### Android 侧的转向输入
+
+设备上没有光标，桌面端那只低级鼠标钩子（`FreeCameraMouseHook`，仅 `_WIN32` 编译）不存在，所以自由相机的鼠标项在 Android 上原本恒为 0：相机能移动、升降、滚转、变焦，但不能转向。补法是让面板的「拖动转向」当那只鼠标：
+
+1. **面板**：`LookPad`（`detectDragGestures`）报出屏幕像素增量；控制器把它们求和，最多每 16 ms 写一行 `m <dx> <dy>`（原生侧每 10 ms 读一次，总量不变，写入次数降一个量级）。面板收起 / 切后台 / 悬浮窗拆除时把在飞的增量丢掉而不是补发。
+2. **替身层**：`AddVirtualMouseDelta` 两个原子累加，`DrainVirtualMouseDelta` 取走并清零——与虚拟键锁存同级同风格，同样不是 Windows 的模拟，而是"设备上这只鼠标"。
+3. **相机模块**：`PumpFromEngineTick` 顶部（`#if !defined(_WIN32)`）把累计器折进 `g_mouse_dx/g_mouse_dy`。**每个 tick 都折**，不只在自由相机开着时，这样相机没开时拖的几下不会被当成开机第一下；`EnterFreeCamera` 本来就调的 `ClearMouseInput()` 再兜一道。
+
+因此下游没有一行是新的：灵敏度 `mouse_sensitivity`、反转 `mouse_invert_y`、俯仰夹取、以及播放运镜期间忽略转向，全是共享的桌面代码。增量用"屏幕像素、y 向下"这套与钩子同向同单位的坐标，所以右滑右转、上滑抬头；Windows 侧因为整段在 `#if !defined(_WIN32)` 里而完全不变。
+
 ## 失败规则
 
 动态方法、字段、Hook 目标或 Catalog 校验失败时，模块进入 `contract-mismatch` 或 `failed` 状态并记录原因。Host 不尝试其他地址、过期配置、过期资源映射或未知代理链。

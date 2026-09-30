@@ -21,6 +21,12 @@ constexpr std::uint64_t kHeldForever = ~std::uint64_t{0};
 // anything else is the monotonic millisecond at which a pulse expires.
 std::atomic<std::uint64_t> g_key_deadline[kVirtualKeyCount];
 
+// Screen-space look deltas from the panel's look pad; see the header. Relaxed
+// ordering is enough: the counters are independent of each other and nothing
+// else is published through them.
+std::atomic<int> g_mouse_delta_x{0};
+std::atomic<int> g_mouse_delta_y{0};
+
 std::uint64_t NowMilliseconds() {
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -62,6 +68,17 @@ bool VirtualKeyDown(int virtual_key) {
     g_key_deadline[virtual_key].compare_exchange_strong(
         expected, 0, std::memory_order_acq_rel, std::memory_order_acquire);
     return false;
+}
+
+void AddVirtualMouseDelta(int dx, int dy) {
+    if (dx != 0) g_mouse_delta_x.fetch_add(dx, std::memory_order_relaxed);
+    if (dy != 0) g_mouse_delta_y.fetch_add(dy, std::memory_order_relaxed);
+}
+
+bool DrainVirtualMouseDelta(int& dx, int& dy) {
+    dx = g_mouse_delta_x.exchange(0, std::memory_order_relaxed);
+    dy = g_mouse_delta_y.exchange(0, std::memory_order_relaxed);
+    return dx != 0 || dy != 0;
 }
 
 namespace win32 {

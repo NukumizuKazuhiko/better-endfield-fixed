@@ -30,15 +30,45 @@ public final class XposedEntry extends XposedModule {
     private static volatile HostResultListener resultListener;
     /** Concrete activity classes whose own onActivityResult is already hooked. */
     private static final java.util.Set<String> hookedResultClasses = new java.util.HashSet<>();
+    /** Consumer for volume key presses in the hosted activity (the overlay). */
+    private static volatile VolumeKeyListener volumeListener;
+    /** Concrete activity classes whose own dispatchKeyEvent is already hooked. */
+    private static final java.util.Set<String> hookedKeyClasses = new java.util.HashSet<>();
 
     /** Receives host activity results relayed by the module's hooks. */
     interface HostResultListener {
         void onHostResult(int requestCode, int resultCode, Intent data);
     }
 
+    /**
+     * Receives a volume key press that reached the hosted activity. The overlay
+     * registers here because a hidden overlay has no touch target left: while it
+     * stands down for a take, the volume key is the only control on the glass.
+     */
+    interface VolumeKeyListener {
+        void onVolumeKey(int keyCode);
+    }
+
     /** Registers the listener that receives the host activity's results. */
     static void setActivityResultListener(HostResultListener listener) {
         resultListener = listener;
+    }
+
+    /** Registers the overlay as the consumer of volume key presses. */
+    static void setVolumeKeyListener(VolumeKeyListener listener) {
+        volumeListener = listener;
+    }
+
+    /** Releases the registration, but only if it is still this surface's. */
+    static void clearVolumeKeyListener(VolumeKeyListener listener) {
+        if (volumeListener == listener) volumeListener = null;
+    }
+
+    /** Whether this is a key the overlay may act on. */
+    static boolean isVolumeKey(int keyCode) {
+        return keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE;
     }
 
     /** Whether startActivityForResult results can reach the module at all. */
@@ -101,6 +131,91 @@ public final class XposedEntry extends XposedModule {
     private void dispatchActivityResult(int requestCode, int resultCode, Intent data) {
         HostResultListener listener = resultListener;
         if (listener != null) listener.onHostResult(requestCode, resultCode, data);
+    }
+
+    /**
+     * Hooks the activity class's own {@code dispatchKeyEvent}, wherever the
+     * override actually lives. An activity that overrides it without calling
+     * super never reaches {@link #installVolumeKeyRelay}, and Unity's own
+     * activity is exactly that kind of class, so the concrete override is
+     * hooked too. Walking up to the declaring class matters: the game's activity
+     * usually extends a base that carries the override, and asking only the leaf
+     * class would look like "no override at all".
+     */
+    static void hookConcreteActivityKeys(Class<?> cls) {
+        XposedEntry module = instance;
+        if (module == null) return;
+        Method method = null;
+        for (Class<?> type = cls; type != null && type != Activity.class; type = type.getSuperclass()) {
+            try {
+                method = type.getDeclaredMethod("dispatchKeyEvent",
+                        android.view.KeyEvent.class);
+                break;
+            } catch (NoSuchMethodException next) {
+                // Not declared here; an ancestor may carry it.
+            }
+        }
+        if (method == null) {
+            // Activity.dispatchKeyEvent itself; the base relay already covers it.
+            return;
+        }
+        final String owner = method.getDeclaringClass().getName();
+        synchronized (hookedKeyClasses) {
+            if (!hookedKeyClasses.add(owner)) return;
+        }
+        try {
+            module.hook(method).intercept(chain -> {
+                Object result = chain.proceed();
+                try {
+                    relayVolumeKey(chain.getArg(0));
+                } catch (Throwable ignored) { /* the relay must never break input */ }
+                return result;
+            });
+            RuntimeLog.record("volume key relay: hooked " + owner + ".dispatchKeyEvent");
+        } catch (Throwable error) {
+            RuntimeLog.record("volume key relay on " + owner + " failed: " + error);
+        }
+    }
+
+    /**
+     * Hooks the base {@code Activity.dispatchKeyEvent}, which is the first
+     * Activity-level entry point a key event passes through. It is the relay
+     * for every host that does not override the method.
+     */
+    private void installVolumeKeyRelay() {
+        try {
+            hook(Activity.class.getDeclaredMethod("dispatchKeyEvent",
+                    android.view.KeyEvent.class)).intercept(chain -> {
+                Object result = chain.proceed();
+                try {
+                    relayVolumeKey(chain.getArg(0));
+                } catch (Throwable ignored) { /* the relay must never break input */ }
+                return result;
+            });
+            RuntimeLog.record("volume key relay installed (Activity.dispatchKeyEvent)");
+        } catch (Throwable error) {
+            RuntimeLog.record("volume key relay failed: " + error);
+        }
+    }
+
+    /**
+     * Reports volume key presses to the overlay. The event is never consumed:
+     * the phone's volume still changes, and the relay stays additive so it can
+     * never take a key away from the game. A host that both overrides
+     * dispatchKeyEvent and calls super sees this twice for one press, which is
+     * why the consumer is written to be idempotent.
+     */
+    private static void relayVolumeKey(Object event) {
+        if (!(event instanceof android.view.KeyEvent)) return;
+        android.view.KeyEvent key = (android.view.KeyEvent) event;
+        if (key.getAction() != android.view.KeyEvent.ACTION_DOWN) return;
+        if (key.getRepeatCount() != 0) return;  // one interruption per press
+        if (!isVolumeKey(key.getKeyCode())) return;
+        VolumeKeyListener listener = volumeListener;
+        if (listener == null) return;
+        try {
+            listener.onVolumeKey(key.getKeyCode());
+        } catch (Throwable ignored) { /* the overlay must never break input */ }
     }
 
     @Override public void onModuleLoaded(ModuleLoadedParam param) {
@@ -187,6 +302,7 @@ public final class XposedEntry extends XposedModule {
             RuntimeLog.record("attached; Application.attach hook installed, "
                     + "waiting for game startup");
             installActivityResultRelay();
+            installVolumeKeyRelay();
             startRemoteCommandPoller();
         } catch (Throwable error) { report("entry failed: " + error); }
     }

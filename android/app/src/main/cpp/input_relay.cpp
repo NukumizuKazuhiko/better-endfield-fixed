@@ -9,12 +9,17 @@
 //   "<vk> <action>\n"   latch a virtual key (VirtualKeyAction: 0/1/2)
 //   "c <payload>\n"     submit a runtime command (single-slot pump)
 //   "r\n"               release every latched key
+//   "m <dx> <dy>\n"     accumulate a mouse-look delta (screen pixels, y down)
+// The look deltas are summed rather than queued, so the panel can send a drag at
+// whatever rate its gesture recogniser reports without the runtime having to
+// keep up event by event.
 // The status file is rewritten whenever the runtime command status changes.
 
 #include "android_virtual_keys.h"
 #include "core/command_pump.h"
 #include "core/log.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -73,6 +78,21 @@ void HandleLine(const std::string& line) {
     }
     if (line[0] == 'c' && line.size() >= 3 && line[1] == ' ') {
         SubmitRuntimeCommand(line.c_str() + 2, line.size() - 2);
+        return;
+    }
+    if (line[0] == 'm' && line.size() >= 3 && line[1] == ' ') {
+        const char* first = line.c_str() + 2;
+        char* end = nullptr;
+        const long dx = std::strtol(first, &end, 10);
+        if (end == nullptr || end == first || *end != ' ') return;
+        const char* second = end + 1;
+        const long dy = std::strtol(second, &end, 10);
+        if (end == nullptr || end == second) return;
+        // A screen cannot produce a 1000-pixel jump between two report events;
+        // clamping keeps a garbled line from throwing the camera far away.
+        AddVirtualMouseDelta(static_cast<int>(
+            std::clamp(dx, -1000L, 1000L)), static_cast<int>(
+            std::clamp(dy, -1000L, 1000L)));
         return;
     }
     char* end = nullptr;
