@@ -1,0 +1,30 @@
+name: "Better Endfield code scanning"
+
+# `paths-ignore` is only honoured for analysis that does not build the code,
+# which is the case for every compiled language in this repository: csharp and
+# c-cpp both run with `build-mode: none` (java-kotlin builds for real, but the
+# retired tree below contains no Java or Kotlin, so it is unaffected).
+#
+# Why this filter is necessary rather than cosmetic. Without it the C# extractor
+# never finishes: its build analysis reports "745 source files found on the
+# filesystem", prints "Extracting...", and then emits nothing at all -- a run
+# that sat there for 32 minutes until it was cancelled by hand, twice, in both
+# the default setup and the advanced setup. 700 of those 745 .cs files live
+# under legacy/, and the bulk of them are not hand-written code:
+#
+#   legacy/better-endfield-2.3.1/references/source-research/endfield-dumper
+#     340 .cs, 187 MB of IL2CPP decompiler output; Gameplay.Beyond.dll.cs alone
+#     is 24 MB, MemoryPack.Beyond.dll.cs is 12 MB, Assembly-CSharp.dll.cs is 11 MB
+#   legacy/better-endfield-2.3.1/references/source-research/runs
+#     340 .cs of the same kind, captured per session
+#
+# legacy/ is 677 MB in total and is a frozen snapshot of the retired 2.3.1
+# BepInEx plugin. It is dead: BetterEndfield.slnx references only
+# ui/BetterEndfield.UI, no build step ever compiles it, and nothing in the
+# shipped mod reads it. Excluding it drops C# extraction from 745 files to 45
+# (ui/ and tools/) and leaves the whole tree out of the other analyses as well.
+#
+# A literal directory name matches that directory and everything under it, the
+# same way the documented `src/node_modules` example does.
+paths-ignore:
+  - legacy

@@ -34,10 +34,25 @@ name: codeql
 #                        the same toolchain plus the Dobby fetch from
 #                        android-build.yml if full-accuracy native results are
 #                        ever wanted.
-#   csharp       none    The desktop side (legacy/**, ui/**) is .NET/WPF and does
-#                        not build on Linux.
+#   csharp       none    The desktop side (ui/**) is .NET/WPF and does not build
+#                        on Linux, so extraction runs without a build. legacy/**
+#                        is filtered out by the config file: it is a retired
+#                        677 MB snapshot whose 680 IL2CPP-dump .cs files stop
+#                        the extractor from ever returning. With that filter the
+#                        extractor sees 45 files instead of 745.
 #   python, javascript-typescript, actions
 #                        Interpreted languages; nothing to build.
+#
+# A second failure is independent of the build mode and had to be fixed as well:
+# default setup's csharp job did not fail, it hung. The log stops at
+#
+#   745 source files found on the filesystem
+#   Extracting...
+#   [001] Overlay: Overlay mode not enabled.
+#
+# and stays there until the job is cancelled. .github/codeql/codeql-config.yml
+# carries the filter that makes the extractor terminate; the same hang first
+# reproduced in this workflow's csharp job before that filter existed.
 #
 # Committing this file is not by itself what switched the repository over: code
 # scanning refuses advanced-setup results while default setup is enabled
@@ -68,7 +83,11 @@ jobs:
   analyze:
     name: analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Every language here finishes in under 7 minutes once it works at all
+    # (java-kotlin ~4 on a cold Gradle cache, c-cpp ~6). The ceiling is a
+    # hang detector, not a budget: a job that reaches it has stopped making
+    # progress, and 30 minutes is long enough to tell that apart from slowness.
+    timeout-minutes: 30
     strategy:
       # Results for the languages that do work must survive one that does not:
       # this workflow is the repository's only source of code scanning now.
@@ -97,6 +116,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # Keeps the retired legacy/ snapshot out of every analysis. It is the
+          # difference between the csharp job finishing and the csharp job
+          # hanging forever, so it is not optional; the file explains the
+          # measurement behind that claim.
+          config-file: ./.github/codeql/codeql-config.yml
 
       # --- java-kotlin: the custom build steps -----------------------------
       #
