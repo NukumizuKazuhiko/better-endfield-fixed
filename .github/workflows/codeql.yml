@@ -1,0 +1,143 @@
+name: codeql
+
+# Advanced setup for code scanning. This file replaces the repository's default
+# setup, because default setup cannot be given custom build commands.
+#
+# Why the auto-build failed. Default setup chooses one build mode per language
+# for the whole repository, and for java-kotlin it chooses `autobuild` as soon
+# as Kotlin is present -- Kotlin analysis needs a real build. The build it then
+# ran was
+#
+#   ./gradlew --no-daemon ... -Dorg.gradle.java.home=<jdk17> clean
+#
+# on a runner with no Android SDK components installed, so AGP failed while it
+# was still *configuring* the project, before any javac/kotlinc invocation:
+#
+#   A problem occurred configuring project ':app'.
+#   > NDK not configured. Download it with SDK manager.
+#     Preferred NDK version is '28.2.13676358'.
+#
+# That version string is AGP's own built-in default, baked into the message as a
+# literal in NdkLocatorKt -- it is not the 27.2.12479018 this project pins, and
+# it is not reported from the build script. The repository's own build is fine:
+# android-build.yml installs the SDK components first and passes in ~4 minutes.
+#
+# So this workflow keeps default setup's language set and build modes, and fills
+# in the one build that cannot be auto-detected:
+#
+#   java-kotlin  manual  JDK 21 plus the same platform/build-tools/NDK/CMake set
+#                        android-build.yml and android-release.yml install, then
+#                        a traced Gradle compile of the debug Java and Kotlin.
+#   c-cpp        none    The mode default setup already used, and it succeeded:
+#                        the native library is built by AGP's CMake integration,
+#                        which autobuild cannot drive. Move it to `manual` with
+#                        the same toolchain plus the Dobby fetch from
+#                        android-build.yml if full-accuracy native results are
+#                        ever wanted.
+#   csharp       none    The desktop side (legacy/**, ui/**) is .NET/WPF and does
+#                        not build on Linux.
+#   python, javascript-typescript, actions
+#                        Interpreted languages; nothing to build.
+#
+# Committing this file is not by itself what switched the repository over: code
+# scanning refuses advanced-setup results while default setup is enabled
+# ("CodeQL analyses from advanced configurations cannot be processed when the
+# default setup is enabled"). Default setup was disabled in the repository's
+# settings before this workflow ran.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly, so a query-pack update reaches the branch even while it is idle.
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  # Needed to upload the results to the code scanning dashboard.
+  security-events: write
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # Results for the languages that do work must survive one that does not:
+      # this workflow is the repository's only source of code scanning now.
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+          - language: python
+          - language: javascript-typescript
+          # No `build-mode` key above, and none is needed: the action reads the
+          # input as optional, so an absent value (rendered as an empty string)
+          # means "not specified" rather than an invalid mode.
+          - language: csharp
+            build-mode: none
+          - language: c-cpp
+            build-mode: none
+          - language: java-kotlin
+            build-mode: manual
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # --- java-kotlin: the custom build steps -----------------------------
+      #
+      # AGP resolves the NDK while configuring :app -- the module declares both
+      # externalNativeBuild and an abiFilter, and resolution happens even for a
+      # Java-only task graph (measured locally: the CXX5106 warning is emitted
+      # during configuration of `:app:compileDebugKotlin`). So the toolchain has
+      # to be installed even though this job never builds the native library.
+      # Versions are the ones android-build.yml and android-release.yml pin.
+      - name: Set up JDK 21
+        if: ${{ matrix.build-mode == 'manual' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install platform / build tools / NDK / CMake
+        if: ${{ matrix.build-mode == 'manual' }}
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      - name: Compile the debug variant
+        if: ${{ matrix.build-mode == 'manual' }}
+        working-directory: android
+        run: |
+          # Only the Java and Kotlin compile tasks: they are what the extractor
+          # needs, and stopping there keeps AGP's native build -- and therefore
+          # the gitignored Dobby source this job has no use for -- out of the
+          # graph. `--no-daemon` matters here: a pre-existing Gradle daemon
+          # would not carry the extractor's JVM instrumentation, and the
+          # compilations it performed would be invisible to CodeQL.
+          ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin \
+            --no-daemon --stacktrace
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
