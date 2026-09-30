@@ -8,6 +8,7 @@
   },
   "overrides": {
     "axios": "^0.34.0",
-    "qs": "^6.16.0"
+    "qs": "^6.16.0",
+    "@cloudbase/database": "^1.5.1"
   }
 }
