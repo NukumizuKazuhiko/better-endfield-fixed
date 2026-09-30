@@ -6,7 +6,7 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.8 is an experimental prerelease: the in-game Compose handle
+Version 3.3.22-alpha.9 is an experimental prerelease: the in-game Compose handle
 appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
 still need device acceptance. The camera module's motion presets, keyframes and
 VMD parameters are configurable from the app, and a `.vmd` can be imported there
@@ -14,11 +14,12 @@ and played back: the user's acceptance run of 3.3.22-alpha.6 passed end to end, 
 the motion stack's first device run on either platform - on Android, ahead of
 Windows - was a successful one. Since then the panel's three playback keys arm a
 take instead of firing on the tap, the overlay stands down completely while it
-runs, and the free camera gained the steering input it never had on the phone
-(see "Interface, camera and sustained dash" below). None of that has been through device acceptance yet,
-and the alpha.7 and alpha.8 builds are still sitting on the same `versionCode`,
-so the only way to tell them apart on a device is the `构建 3.3.22-alpha.N` line
-at the top of the runtime journal.
+runs, the free camera gained the steering input it never had on the phone, and a
+camera parameter change stopped needing a restart (see "Interface, camera and
+sustained dash" below). None of that has been through device acceptance yet,
+and the alpha.7, alpha.8 and alpha.9 builds are still sitting on the same
+`versionCode`, so the only way to tell them apart on a device is the
+`构建 3.3.22-alpha.N` line at the top of the runtime journal.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -198,6 +199,65 @@ shipped is gone: its two switches (hide UID, disable dither) are now served by
 the shared desktop sources, and keeping both would have installed two hooks on
 `GameObject.SetActive` from two different brokers. The old preference keys are
 read once on upgrade so the user's choice carries over.
+
+### Reloading the camera configuration (3.3.22-alpha.9)
+
+The camera configuration used to be read once, from the environment the game
+process sets before loading the library, which is why every parameter change
+needed a force-stop. It is now also delivered through the runtime command pump:
+`ModuleSettings.setCameraSettings` writes the same string the boot path would
+have carried, `ModuleCommandRouter.issue` puts it into the framework's remote
+file space as a `camera_config` command, the game process's poller relays it, and
+the camera module drains it on its engine tick and hands it back to
+`ConfigurationChanged` - the very entry point the host calls at start-up.
+
+Replaying through the boot entry point instead of inventing per-key commands is
+the whole design. That function already stores every key as one idempotent block
+under its own mutex, and it already knows the two transitions assignment cannot
+express: the free camera and the first-person camera being switched off, which
+request an exit rather than a `false`. A reload therefore cannot leave a
+half-applied configuration behind, and it cannot miss a key that a hand-written
+command forgot.
+
+What it cannot do is add the module to a process that never loaded it: whether a
+launch runs the camera module at all is decided by the configuration that launch
+started with. The first time the camera is switched on still needs a restart;
+everything after that within the same session is live, including switching it off
+and on again. The switches that belong to other modules - hide UID/HUD, sustained
+dash, the voice catalog, model replacement - keep their start-up semantics.
+
+Four things had to be fixed for the channel to carry a configuration at all:
+
+- The command payload ceiling was 512 characters and a camera configuration is
+  about 1.3 KB. `ModuleCommandRouter` now checks the whole payload against the
+  native pump's own limit, 4096 bytes.
+- The framework's remote file is opened read/write without truncating, so a
+  shorter payload left the tail of the previous one behind. For a plain command
+  that tail is invisible; for a configuration it is not - stale `key=value` lines
+  would be parsed as part of the new one and, being later, would win.
+- `movement_speed`, `field_of_view` and `first_person_fov` were written without
+  clamping while every key inside the two records was clamped. `NaN` survives
+  `%.4f` as the literal `NaN`, which the native parser hands to the float that
+  drives the camera position. They are now clamped to the native ranges: 0.5-100
+  and 20-120.
+- The pump holds a single slot shared by every module in the process, and the
+  custom-model module used to take whatever was in it and answer "unsupported"
+  for anything that was not its own command. With two modules loaded, whichever
+  hooked function ran first would swallow the other's command. Consumers now
+  acquire by command name (`AcquireRuntimeCommand`) and leave another module's
+  command untouched.
+
+An imported `.vmd` rides the same path. The configuration names a file inside the
+game's own files directory and that copy is normally made once, at start-up, so a
+reload right after an import would point the module at a file that does not exist
+yet. The poller therefore materializes the slot from the remote space before
+forwarding the command, and holds the configuration back - keeping the previous
+working one - when it cannot.
+
+Each reload logs `Camera configuration reloaded from the settings app: N bytes,
+applied without restarting the game.` followed by the module's own
+`Camera configuration applied: ...` and `Free camera extras: ...` lines, so the
+journal shows whether it happened.
 
 ### Panel input relay and runtime journal (3.3.20)
 
@@ -699,13 +759,34 @@ The 3.3.22 app also exposes `first_person_movement=false`,
 `first_person_animation_strength=0.35` (0–1),
 `first_person_yield_dialogue=false`, `first_person_third_person_in_combat=false`,
 `first_person_transition_seconds=0`
-(0–1), and `first_person_external_head_scale=false`. Fully stop and restart
-the game after saving; the native module reads a startup snapshot. The
+(0–1), and `first_person_external_head_scale=false`. Saving applies to a running
+game as of 3.3.22-alpha.9 (see "Reloading the camera configuration" above),
+except the first time the camera is switched on at all, which still needs a
+restart because the module would not have been loaded into the process. The
 external head-scale option also removes the head shadow. The combat option
 hands camera control back to the game during combat and restores first person
 after combat. The user reports the operable first-person settings passed on
 Android 3.3.21 except external head scale, which was not tested. The GPU mesh
 readback and cap path still requires separate contract and runtime evidence.
+
+The current development build also gives the game its own camera while an
+ultimate skill is being cast, during a game cinematic, or when the active camera
+controller is no longer the main level controller. The character screen is the
+target for that last handoff. First person stays armed and returns when the game
+resumes the level camera. The perspective journal names the handoff reason as
+`ultimate`, `cinematic`, or `game_camera`, and then `first_person` on return. This
+change passed offline policy tests and Android compilation. The user reports
+that ultimate and character-screen handoff and return passed on a device; logs
+and screenshots have not been supplied for independent review.
+
+The first-person head-hiding path also covers head-attached accessories even
+when their names do not contain a head or hair token. A skinned renderer needs
+every bone in its palette under the player's head bone; a plain renderer needs
+its transform there. Mixed head/body palettes are left to the existing mesh
+path. The shadow-only renderer lease preserves shadows and restores the prior
+mode when first person ends. This uses the existing head-hiding setting and
+does not require GPU mesh readback. Offline tests and Android compilation passed;
+character outfits and restoration still need in-game acceptance.
 
 Since 3.3.22-alpha.5 the same app also writes the free camera's motion, keyframe
 and VMD parameters: `motion_preset=orbit` (`orbit` | `dolly_zoom` | `crane` |
