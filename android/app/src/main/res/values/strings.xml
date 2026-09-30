@@ -97,7 +97,7 @@
     <string name="camera_fp_eye_height">眼位高度（游戏单位）</string>
     <string name="camera_fp_near_clip">近裁剪面（游戏单位）</string>
     <string name="camera_fp_extend_look_range">放宽俯仰范围</string>
-    <string name="camera_fp_extend_look_range_hint">扩大第一人称上下观察范围；默认关闭。修改后需重启游戏。</string>
+    <string name="camera_fp_extend_look_range_hint">扩大第一人称上下观察范围；默认关闭。保存后立即生效。</string>
     <string name="camera_first_person">启用第一人称视角功能</string>
     <string name="camera_first_person_hint">将视点固定到当前操控角色的头部。与自由视角相互独立，可单独启用。</string>
     <string name="camera_hide_head">隐藏头部（第一人称）</string>
@@ -109,7 +109,7 @@
 
     <!-- betterendfield.camera · 运镜与镜头 -->
     <string name="camera_motion_hint_short">预设运镜、关键帧段长与 VMD 镜头参数</string>
-    <string name="camera_motion_subtitle">自由镜头的进阶参数。触发按钮在悬浮窗的「运镜 / 关键帧」区，这里只决定参数；这些值在游戏启动时读入，修改后需重启游戏。</string>
+    <string name="camera_motion_subtitle">自由镜头的进阶参数。触发按钮在悬浮窗的「运镜 / 关键帧」区，这里只决定参数。这一页（含第一人称与自由视角）的改动会直接投递给正在运行的游戏，无需重启——只有首次启用相机功能时需要重启一次，因为那时模块还没被载入游戏进程。</string>
     <string name="motion_group_look">转向（拖动）</string>
     <string name="motion_look_sensitivity_label">转向灵敏度</string>
     <string name="motion_look_sensitivity_unit">°/像素</string>
@@ -139,13 +139,16 @@
     <string name="motion_vmd_fov_bias_label">视野偏置</string>
     <string name="motion_vmd_loop">循环播放 VMD</string>
     <string name="motion_vmd_loop_hint">播完最后一帧后从头继续。</string>
-    <string name="motion_vmd_note">作用于导入的 .vmd 镜头文件（MMD 相机轨道）。导入后路径在游戏启动时写入配置，修改导入只能重启游戏生效；标定值（位移缩放 0.07、视野偏置 +5°）来自 MMD 场景，本作里可能需要按实际画面微调。按下悬浮窗的 VMD 按钮会自动进入自由视角。</string>
+    <string name="motion_vmd_note">作用于导入的 .vmd 镜头文件（MMD 相机轨道）。导入的文件会在游戏运行中被同步到游戏自己的目录，配置也随之即时生效，无需重启。标定值（位移缩放 0.07、视野偏置 +5°）来自 MMD 场景，本作里可能需要按实际画面微调。按下悬浮窗的 VMD 按钮会自动进入自由视角。</string>
     <string name="motion_vmd_import">导入 VMD 镜头文件</string>
     <string name="motion_vmd_clear">清除导入</string>
     <string name="motion_vmd_not_imported">还没有导入 .vmd 镜头文件，按下 VMD 按钮只会在面板日志里提示未配置文件。</string>
     <string name="motion_vmd_slot_summary">已导入：%1$s · %2$s · %3$s</string>
     <string name="motion_vmd_import_working">正在读取所选文件…</string>
-    <string name="motion_vmd_imported">已导入 %1$s（%2$s）。重启游戏后生效。</string>
+    <string name="motion_vmd_imported">已导入 %1$s（%2$s）。游戏运行中会立即生效。</string>
+    <string name="camera_settings_live">相机设置已保存，正在运行的游戏会立即采用。</string>
+    <string name="camera_settings_not_delivered">相机设置已保存，但没有送达游戏进程（游戏未运行、模块未激活或框架服务未连接）。下次启动游戏时生效。</string>
+    <string name="camera_settings_unchanged">相机设置没有变化。</string>
     <string name="motion_vmd_import_failed">导入失败：%1$s</string>
     <string name="motion_vmd_unreadable">无法读取所选文件</string>
     <string name="motion_vmd_too_large">文件超过 64 MiB，原生装载器不接收</string>

@@ -1,5 +1,6 @@
 #include "../modules/camera/first_person_policy.h"
 #include <iostream>
+#include <string>
 using namespace BetterEndfield::FirstPerson;
 int main() {
     PolicyState state;
@@ -24,5 +25,14 @@ int main() {
     input.requested=false; StepPolicy(state,input);
     input.requested=true; input.combat=false;
     if (!StepPolicy(state,input).apply) return 9;
-    std::cout << "first_person_policy: dialogue, combat, unavailable state, cooldown and exit reset passed\n";
+    input.game_camera=true;
+    if (StepPolicy(state,input).reason != Suppression::GameCamera) return 10;
+    input.game_camera=false; input.ultimate=true;
+    if (StepPolicy(state,input).reason != Suppression::Ultimate) return 11;
+    input.ultimate=false; input.cinematic=true;
+    if (StepPolicy(state,input).reason != Suppression::Cinematic) return 12;
+    input.cinematic=false;
+    if (!StepPolicy(state,input).apply) return 13;
+    if (std::string(SuppressionName(Suppression::GameCamera)) != "game_camera") return 14;
+    std::cout << "first_person_policy: dialogue, combat, game camera, ultimate, cinematic and return passed\n";
 }

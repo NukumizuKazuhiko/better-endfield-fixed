@@ -35,10 +35,22 @@ bool SubmitRuntimeCommand(const char* payload, size_t size) {
     return true;
 }
 
-bool ConsumeRuntimeCommand(std::string& payload) {
+bool AcquireRuntimeCommand(const char* command, std::string& value) {
+    if (!command || !*command) return false;
     std::lock_guard lock(g_mutex);
     if (g_pending.empty()) return false;
-    payload = std::move(g_pending);
+    // The payload is "BE_COMMAND_V1\n<generation>\n<command>\n<value...>", whose
+    // shape SubmitRuntimeCommand has already validated.
+    const size_t first = g_pending.find('\n', 14);
+    const size_t second = first == std::string::npos
+        ? std::string::npos : g_pending.find('\n', first + 1);
+    if (second == std::string::npos) {
+        g_pending.clear();
+        return false;
+    }
+    if (g_pending.compare(first + 1, second - first - 1, command) != 0) return false;
+    value = g_pending.substr(second + 1);
+    while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) value.pop_back();
     g_pending.clear();
     return true;
 }

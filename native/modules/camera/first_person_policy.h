@@ -4,9 +4,10 @@
 
 namespace BetterEndfield::FirstPerson {
 enum class Suppression { None, NotRequested, DialogueUnavailable, Dialogue,
-    CombatUnavailable, Combat, CombatCooldown };
+    CombatUnavailable, Combat, CombatCooldown, GameCamera, Ultimate, Cinematic };
 struct PolicyInput {
     bool requested = false;
+    bool game_camera = false, ultimate = false, cinematic = false;
     bool yield_dialogue = false, dialogue_known = false, dialogue = false;
     bool third_person_in_combat = false, combat_known = false, combat = false;
     float elapsed = 0, return_delay = .5f;
@@ -22,6 +23,11 @@ inline PolicyDecision StepPolicy(PolicyState& state, const PolicyInput& input) {
         if (input.combat) state.remaining = delay;
         else state.remaining = std::max(0.f,state.remaining-elapsed);
     }
+    // Game-owned shots take precedence over the configured dialogue/combat
+    // handoff. The user's first-person request remains armed throughout.
+    if (input.game_camera) return {false,Suppression::GameCamera};
+    if (input.ultimate) return {false,Suppression::Ultimate};
+    if (input.cinematic) return {false,Suppression::Cinematic};
     if (input.yield_dialogue) {
         if (!input.dialogue_known) return {false,Suppression::DialogueUnavailable};
         if (input.dialogue) return {false,Suppression::Dialogue};
@@ -32,5 +38,20 @@ inline PolicyDecision StepPolicy(PolicyState& state, const PolicyInput& input) {
         if (state.remaining > .0001f) return {false,Suppression::CombatCooldown};
     }
     return {true,Suppression::None};
+}
+inline const char* SuppressionName(Suppression reason) {
+    switch (reason) {
+    case Suppression::None: return "first_person";
+    case Suppression::NotRequested: return "not_requested";
+    case Suppression::DialogueUnavailable: return "dialogue_unavailable";
+    case Suppression::Dialogue: return "dialogue";
+    case Suppression::CombatUnavailable: return "combat_unavailable";
+    case Suppression::Combat: return "combat";
+    case Suppression::CombatCooldown: return "combat_cooldown";
+    case Suppression::GameCamera: return "game_camera";
+    case Suppression::Ultimate: return "ultimate";
+    case Suppression::Cinematic: return "cinematic";
+    }
+    return "unknown";
 }
 } // namespace BetterEndfield::FirstPerson

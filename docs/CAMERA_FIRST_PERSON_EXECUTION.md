@@ -1,5 +1,25 @@
 # 第一人称 S0–S8 执行合同
 
+## 2026-09-30：第一人称自动隐藏头部配件（设备部分验证，组合件仍失败）
+
+范围为所有角色模型中附着于头骨的配件。现有 `first_person_hide_head` 默认开启；进入第一人称时，Camera owner 继续按已有名称处理头发与面部部件，并对名称未命中的 Renderer 增加纯 CPU 头骨附着判定：蒙皮 Renderer 的骨骼必须全部位于当前角色头骨或其子层级，非蒙皮 Renderer 的 Transform 必须位于该层级。空骨板、混合头部/躯干骨板、读取失败及超过层级深度上界均不按整块头饰隐藏，防止误隐藏身体。命中后沿用 `ShadowsOnly` 租约保留阴影，退出第一人称或游戏接管相机时沿用现有读回与有界恢复流程；LOD 和角色重建仍由原有 30 帧重扫覆盖。GPU 网格读取不可用不阻断此判定。没有新增设置或 UI 状态，陀螺仪仍不在本轮。
+
+离线门禁：`BetterEndfield.FirstPersonHeadAttachmentTests` 覆盖头骨子层级、混合骨板、空骨板和循环层级；Windows `BetterEndfield.Camera` Release 构建、Android `:app:assembleRelease` 和 `:app:verifyReleaseEntryPoints` 通过。实机门禁：至少在两个不同角色进入第一人称，检查独立头饰/发饰不遮挡视线且身体装备仍正常；退出第一人称、触发终结技/角色界面收回、切角色与 LOD 后检查配件重新显示或再次隐藏，并核对 `First person mesh: ... set to shadow-only rendering` 与恢复画面。角色模型若把头饰绑定到躯干或放在模型扫描范围之外，当前判据会保守跳过；需以具体部件名、骨板或画面证据决定是否扩展，不能仅凭离线测试宣称覆盖所有造型。
+
+本地验收包：`D:\CodexData\bem-camera-retract-build\betterendfield-3.3.22-alpha.9-head-accessories-release.apk`，8,706,612 字节，SHA-256 `80007E91E52C5F39E657EA7988FD8808D028081F3A27F93E59F6C0E5412C34F8`；`apksigner verify --print-certs` 通过，证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。该包包含工作树现有其他 alpha.9 修改，未提交或发布，不是单功能正式版本。
+
+2026-10-01 实机复核：PJX110 `b992bd53` 已安装的模块 APK 从设备拉取后 SHA-256 与上列验收包相同。启动游戏前开启 `adb logcat -v time -s BetterEndfield.Runtime:I '*:S'`，日志保存到 `D:\CodexData\headwear-audit\device-first-person-20261001.log`。用户进入庄方仪第一人称并退出，反馈“仍有遮挡，退出后恢复正常”。日志记录头骨 `Bip001_Head`、第一人称启用、239 个相机补丁帧和退出；`vfxpart_01/02/03_lod1` 与面部、头发等 Renderer 成功设置为 `ShadowsOnly`。同一部件树里的 `S_actor_zhuangfy_cloth_01_lod1` 没有隐藏记录。此日志无法仅凭名称断定剩余遮挡的每一个三角面归属，也未独立证明角色切换及所有角色恢复。
+
+本机 VFS 离线解包见 `D:\CodexData\headwear-audit\README.md`：庄方仪 `cloth_01_lod0` 是单个子网格，既有头部骨骼主导的顶点/三角面，也有大量身体面，不能整 Renderer 隐藏。实机初始化报告 `Mesh::get_vertexBufferCount`、`GetVertexAttributeFormat/Dimension/Stream/Offset`、`GetVertexBufferStride`、`GetSubMesh_Injected`、`SetSubMesh_Injected`、`SetIndexBufferParams`、`InternalSetIndexBufferData` 等绑定缺失，最终为 `named GPU readback/clone bindings unavailable`。因此现有局部网格补丁未运行，组合头饰目标未通过；下一步必须先取得完整、可验证的 Android 顶点/索引读取与上传合同，再在真实角色和 LOD 中验证局部隐藏及阴影，不能扩大整块 `ShadowsOnly` 判定以掩盖失败。
+
+## 2026-09-30：终结技与角色界面视角收回（用户侧验收通过）
+
+范围为手机 LSPosed 模块的第一人称自动让出与恢复。用户确认终结技动画和角色界面期间交还游戏原生视角，结束后自动恢复且不关闭第一人称开关；陀螺仪与头饰隐藏不在本轮。Android 与 Windows 继续编译同一份 Camera owner。
+
+本轮只扩展 `first_person_policy.h` 的临时抑制输入与 `first_person_retract_runtime.inc` 的游戏状态采样；Compose 面板和配置不另建状态机。当前 Windows 客户端元数据已核对：`CameraUtils.get_cameraManager`、`CameraManager.get_curActiveController/GetMainLevelCameraController`，以及 `Entity.get_inCinematic`、`AbilitySystem.get_inSkill/get_curSkill/get_curUltimateSkill`、`Skill.get_skillId` 的所属类、静态性、零参数与返回类型。运行时仍按完整描述符和方法静态性验证，缺少可选技能合同只停用对应采样并记录原因。主关卡控制器退场、终结技施放或角色进入剧情状态时策略交还原生视角；恢复后保留第一人称请求。用户侧已反馈本轮约定的终结技与角色界面收回、结束后自动恢复行为验证通过；具体运行时信号及控制器切换路径尚无日志可独立复核。
+
+离线门禁：`cmake --build D:\CodexData\bem-first-person\native-vs18 --config Release --target BetterEndfield.Camera BetterEndfield.FirstPersonPolicyTests` 成功；执行 `BetterEndfield.FirstPersonPolicyTests.exe` 成功；Android `:app:assembleDebug`、`:app:assembleRelease` 与 `verifyReleaseEntryPoints` 成功。供设备验收的本地 release APK 为 `D:\CodexData\bem-camera-retract-build\betterendfield-3.3.22-alpha.9-camera-retract-release.apk`，8,705,248 字节，SHA-256 `33667FF534968AE77B9BEAD5B8BF72CAE82A601BE74EDDDEA7CC69077A0C3336`；签名证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`，与现有 alpha.9 release 身份一致。另有 debug APK `D:\CodexData\bem-camera-retract-build\betterendfield-3.3.22-alpha.9-camera-retract-debug.apk`，SHA-256 `95AC797480593C5AE78C48C30DDCD60B12B26315E4703563504FD88FE983CA97`。两包 `apksigner verify` 均通过，arm64 `.so` 均含新策略字符串。工作树已有未提交的 alpha.9 改动，本轮未提交、未安装、未发布；两包均为合成工作树验收包，不能当作单功能正式发布。Android 构建另有既存的 `ndk.dir` 废弃提示、Compose Kotlin 冗余转换，以及其它模块的 C++ 警告；本轮 Camera 编译未报新警告。设备验收路径：确认 APK 哈希和 LSPosed 作用域，进入第一人称后分别触发终结技、打开/关闭角色界面，拍摄交还与恢复画面，导出含 `First person perspective reason=` 的运行日志；重复三轮并确认退出/切角色后头部显示恢复。2026-09-30 用户回复“验证通过”，据本轮约定范围记为用户侧实机验收通过；未收到设备序列号、所装 APK 哈希、运行日志、截图或重复轮次记录，因此不标记独立复核通过，也不扩大为 S0–S8 全部通过。
+
 状态：执行中。入口为 [路线图](CAMERA_FIRST_PERSON_ROADMAP_20260928.md)，参考证据为 [上游差异分析](CAMERA_EE_ADDON_DIFF_20260928.md)。本文件面向内部实现与验收，不替代用户使用说明。
 
 ## 基线与边界

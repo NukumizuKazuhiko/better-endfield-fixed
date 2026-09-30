@@ -45,6 +45,57 @@ struct FpRoot {
     ~FpRoot(){Reset();}
     explicit operator bool() const {return object&&handle;}
 };
+struct FpHeadBoneArray {
+    size_t (*length)(void*) = nullptr;
+    uint32_t (*bytes)(void*) = nullptr;
+    size_t (*header_size)() = nullptr;
+    size_t header = 0;
+    bool attempted = false;
+    bool ready = false;
+
+    bool Init() {
+        if (attempted) return ready;
+        attempted = true;
+        auto game = GetModuleHandleW(L"GameAssembly.dll");
+        if (!game) return false;
+        length = reinterpret_cast<decltype(length)>(GetProcAddress(game, "il2cpp_array_length"));
+        bytes = reinterpret_cast<decltype(bytes)>(GetProcAddress(game, "il2cpp_array_get_byte_length"));
+        header_size = reinterpret_cast<decltype(header_size)>(GetProcAddress(game, "il2cpp_array_object_header_size"));
+        if (!length || !bytes || !header_size) return false;
+        header = FpValue<size_t>(0, header_size);
+        ready = header >= sizeof(void*) * 2 && header <= 128;
+        return ready;
+    }
+
+    bool Read(void* renderer, std::vector<void*>& bones) {
+        if (!Init()) return false;
+        FpRoot array(Invoke(Contract("unity.skinned_mesh_renderer.bones.get"), renderer, nullptr));
+        if (!array) return false;
+        const size_t count = FpValue<size_t>(0, length, array.object);
+        if (!count || count > 512 || FpValue<uint32_t>(0, bytes, array.object) != count * sizeof(void*))
+            return false;
+        bones.resize(count);
+        return FpCopy(bones.data(), static_cast<const uint8_t*>(array.object) + header,
+            count * sizeof(void*));
+    }
+};
+FpHeadBoneArray g_fp_head_bones;
+
+bool FpIsHeadAttachment(const HeadPartProbe& part) {
+    if (!part.renderer || !g_first_person.head) return false;
+    const auto parent = [](void* bone) {
+        return Invoke(Contract("unity.transform.parent.get"), bone, nullptr);
+    };
+    if (part.skinned) {
+        std::vector<void*> bones;
+        return g_fp_head_bones.Read(part.renderer, bones) &&
+            BetterEndfield::FirstPerson::AllBonesUnderHead(bones, g_first_person.head, parent);
+    }
+    void* game_object = Invoke(Contract("unity.component.game_object"), part.renderer, nullptr);
+    void* transform = game_object
+        ? Invoke(Contract("unity.game_object.transform"), game_object, nullptr) : nullptr;
+    return BetterEndfield::FirstPerson::IsUnderHead(transform, g_first_person.head, parent);
+}
 struct FpAttribute {int attribute=0,format=0,dimension=0,stream=0;};
 struct FpBounds {float center[3]{},extents[3]{};};
 struct FpSubmesh {FpBounds bounds;int topology=0,index_start=0,index_count=0,base_vertex=0,first_vertex=0,vertex_count=0;};
@@ -563,12 +614,17 @@ void EnsureNeckCap() {
     state.tree_logged=true;
     ScanPartNodes(model,0,visited,parts,tree,logged);
     if(!tree.empty())Log("First person part tree:"+tree);
+    // Name-independent, CPU-only head attachments are hidden whole. A mixed
+    // head/body bone palette must stay on the existing mesh-patch path.
+    for(auto& part:parts) if(part.renderer&&!part.matched&&!part.dedicated_head)
+        part.head_attached=FpIsHeadAttachment(part);
     state.attempts.Prune([&](void* renderer) {
         return std::any_of(parts.begin(),parts.end(),[&](const auto& part) {
             return part.renderer==renderer;
         });
     });
     if(readback) for(const auto& part:parts) {
+        if(part.head_attached)continue;
         if(!part.renderer||part.vertex_count<=0)continue;
         if(std::any_of(state.patches.begin(),state.patches.end(),[&](const auto& p){return p.renderer.object==part.renderer;}))continue;
         auto source=FpValue<void*>(nullptr,e.get_mesh,part.renderer);if(!source)continue;
@@ -590,10 +646,10 @@ void EnsureNeckCap() {
     // Skinned parts still owned by the patch pipeline (source readable,
     // retries left) are left alone; everything else matched is covered.
     for(const auto& part:parts) {
-        if(!part.renderer||!(part.matched||part.dedicated_head))continue;
+        if(!part.renderer||!(part.matched||part.dedicated_head||part.head_attached))continue;
         if(std::any_of(state.patches.begin(),state.patches.end(),
             [&](const auto& p){return p.renderer.object==part.renderer;}))continue;
-        if(readback&&part.skinned&&part.vertex_count>0) {
+        if(readback&&!part.head_attached&&part.skinned&&part.vertex_count>0) {
             auto source=FpValue<void*>(nullptr,e.get_mesh,part.renderer);
             if(source&&!state.attempts.Exhausted(part.renderer))continue;
         }

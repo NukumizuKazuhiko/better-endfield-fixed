@@ -148,15 +148,12 @@ void CustomModelResourceProbe::Finish(void* proxy, void* asset, void* method) {
     // pass to the game's original function exactly once.
     static thread_local bool observing = false;
     auto* self = instance_.load(std::memory_order_acquire);
-    std::string command;
-    if (ConsumeRuntimeCommand(command)) {
-        const size_t first = command.find('\n', 14);
-        const size_t second = first == std::string::npos ? std::string::npos : command.find('\n', first + 1);
-        const std::string name = first == std::string::npos || second == std::string::npos
-            ? std::string{} : command.substr(first + 1, second - first - 1);
-        const char* result = name == "overlay_hide" ? "applied" : "unsupported";
-        AcknowledgeRuntimeCommand(result);
-        LogInfo("command_pump", ("Unity-thread command " + std::string(result) + ": " + name).c_str());
+    std::string value;
+    // Only the model module's own command; the slot is shared with the camera
+    // module's configuration reload (see command_pump.h).
+    if (AcquireRuntimeCommand("overlay_hide", value)) {
+        AcknowledgeRuntimeCommand("applied");
+        LogInfo("command_pump", "Unity-thread command applied: overlay_hide");
     }
     if (self && asset && !observing) {
         observing = true;

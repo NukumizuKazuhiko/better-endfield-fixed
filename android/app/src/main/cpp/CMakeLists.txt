@@ -87,6 +87,7 @@ add_library(betterendfield_android SHARED
     core/log.cpp
     core/runtime.cpp
     core/command_pump.cpp
+    core/panel_commands.cpp
     modules/custom_model/resource_probe.cpp
     modules/custom_model/mesh_layout_probe.cpp
     modules/custom_model/mesh_skin_metadata_adapter.cpp

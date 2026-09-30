@@ -38,6 +38,14 @@ final class FrameworkSettings {
         if (remoteService == null || payload == null) return false;
         try (ParcelFileDescriptor descriptor = remoteService.openRemoteFile("command.next");
                 FileOutputStream stream = new FileOutputStream(descriptor.getFileDescriptor())) {
+            // The remote file is opened for read/write, not truncated, so a
+            // shorter payload would leave the tail of the previous one behind.
+            // That tail matters: a camera configuration that follows a longer
+            // one would be parsed together with the stale key=value lines, and
+            // the old values would win by coming last.
+            java.nio.channels.FileChannel channel = stream.getChannel();
+            channel.truncate(0);
+            channel.position(0);
             stream.write(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             stream.flush();
             return true;

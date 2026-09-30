@@ -428,7 +428,18 @@ final class ModuleSettings {
         return 64L * 1024 * 1024;
     }
 
-    static void setCameraSettings(
+    /**
+     * What one write of the camera configuration did, for the page's status line.
+     *
+     * {@code firstEnable} is the one change a reload cannot carry. Whether the
+     * game process loads the camera module at all is decided by the
+     * configuration that process started with, so switching the camera on when
+     * the stored configuration was empty still needs a restart - and the page
+     * has to say so instead of claiming the change is already live.
+     */
+    record CameraWrite(boolean changed, boolean firstEnable, boolean delivered) {}
+
+    static CameraWrite setCameraSettings(
             Context context,
             boolean disableDither,
             boolean freeCamera,
@@ -448,11 +459,23 @@ final class ModuleSettings {
         eyeForward = bounded(eyeForward, 0.03, 0.0, 0.5);
         eyeHeight = bounded(eyeHeight, 0.05, -0.5, 0.5);
         nearClip = bounded(nearClip, 0.03, 0.001, 1.0);
+        // The three scalars that go straight to the native parser's own clamps,
+        // which are 0.5-100 (speed) and 20-120 (both FOVs). Without this the
+        // text could carry a value the reader silently corrects - or "NaN",
+        // which "%.4f" renders literally and the parser then hands to the float
+        // that drives the camera position. The screen's speed slider starts at
+        // 0.2, below the native floor, so that end of its travel has always
+        // meant 0.5 in the game; this only makes the configuration say so.
+        movementSpeed = bounded(movementSpeed, 5.0, 0.5, 100.0);
+        fieldOfView = bounded(fieldOfView, 60.0, 20.0, 120.0);
+        firstPersonFov = bounded(firstPersonFov, 75.0, 20.0, 120.0);
         // World pause is a free-camera sub-mode on desktop: its hotkey is only
         // read while the free camera is armed, so offering it alone would be a
         // switch that does nothing.
         boolean pause = worldPause && freeCamera;
         boolean any = disableDither || freeCamera || firstPerson;
+        String previous = preferences(context).getString(CAMERA_CONFIGURATION, "");
+        if (previous == null) previous = "";
         String configuration = any
                 ? "schema_version=3\n"
                         + "enabled=true\n"
@@ -513,6 +536,17 @@ final class ModuleSettings {
         advanced.store(edit);
         motion.store(edit);
         edit.commit();
+        if (configuration.equals(previous)) return new CameraWrite(false, false, false);
+        // The native module also reads this string once, from the environment
+        // the game process sets before loading the library - which is why a
+        // parameter change used to cost a restart. Handing the same string to
+        // the runtime command pump is what makes the change live: the game
+        // process relays it and the camera module replays it through that same
+        // boot-time entry point. An empty configuration is delivered too; it is
+        // a valid instruction ("turn the camera module's features off") and the
+        // native reload carries the exits that assignment alone cannot express.
+        boolean delivered = ModuleCommandRouter.issue(context, "camera_config", configuration);
+        return new CameraWrite(true, !configuration.isEmpty() && previous.isEmpty(), delivered);
     }
 
     // ----------------------------------------------------------- sustained dash

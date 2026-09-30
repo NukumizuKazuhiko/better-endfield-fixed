@@ -18,10 +18,11 @@
 | 播放按键时机 | ~~取景问题~~ **已补齐（alpha.7）** | 三个播放键按下后先收起面板、延迟 1 秒再发键；这一秒里 handle 一起隐藏 |
 | 隐藏期的出口与归位 | ~~缺口~~ **已补齐（alpha.7）** | 音量键=打断（丢待发键 / 停正在跑的运镜）；handle 自动归位两条路：原生 stopped 行、或按键发出后 3 秒无 started 行（兜住「原生没东西可播」的静默返回） |
 | 触摸转向 | ~~缺口 C~~ **已补齐（alpha.8）** | 面板 `LookPad` 拖拽 → 中继 `m dx dy` → 替身层 `AddVirtualMouseDelta` 累计 → 相机模块每 tick 折进 `g_mouse_dx/dy`；共享桌面源一行未改，灵敏度/反转页内可调 |
+| 参数生效方式 | ~~boot-only~~ **已补齐（alpha.9）** | 相机整段配置经命令泵重放，改完即生效，不必重启；首次启用相机功能例外（模块是否载入由启动配置决定） |
 
-**分阶段方案**：P1 配置面+面板补齐（零原生改动）→ P2 VMD 投递链（零原生改动）→ P3 触摸转向（原生三处小改）→ P4（可选）运行时热调参。
+**分阶段方案**：P1 配置面+面板补齐（零原生改动）→ P2 VMD 投递链（零原生改动）→ P3 触摸转向（原生三处小改）→ P4 运行时热调参（原生排空点 + 通道修正）。
 
-**进度**：P1 / P2 / 播放倒计时 + 隐藏期音量键出口 + 播完自动回 handle / P3 触摸转向均已交付（`3.3.22-alpha.5` / `alpha.6` / `alpha.7` / `alpha.8`，alpha.7 与 alpha.8 尚未验收）；P2 的 VMD 链路已由用户实机验收通过（导入 → 远程投递 → 物化 → 播放全通）。**三个缺口全部补完**，P4（运行时热调参）可选未立项。
+**进度**：P1 / P2 / 播放倒计时 + 隐藏期音量键出口 + 播完自动回 handle / P3 触摸转向 / P4 运行时热调参均已交付（`3.3.22-alpha.5` … `alpha.9`，alpha.7 ~ alpha.9 尚未验收）；P2 的 VMD 链路已由用户实机验收通过（导入 → 远程投递 → 物化 → 播放全通）。**三个缺口与 P4 全部完成。**
 
 ---
 
@@ -132,15 +133,78 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 **验收判据**：LookPad 拖动 → yaw/pitch 连续变化；冻结（timeScale=0）中仍可转向（心跳 fallback 生效证据：`Cinemachine is not pushing; writing the camera transform` 日志 + 画面确实转动）；滚转/FOV 按住语义复查。
 
-### P4（可选）运行时热调参
+### P4 运行时热调参（已立项并实施，2026-09-30）
 
-相机模块消费 `runtime command`（`command_pump` 已有，custom_model 消费先例）：`motion_preset=N`、`vmd reload` 等免重启。**P1 实测重启成本可接受则不做**；做则需给相机模块加泵排空点（挂 `PumpFreeCameraRequests` 所在泵），并把 `AcknowledgeRuntimeCommand` 状态接进面板日志。
+**立项理由**：P1 交付后实测的结论与立项时的假设相反——不是「重启成本可接受」，而是**重启不该出现在参数调整的闭环里**。运镜参数（预设、速度、角速度、时长、灵敏度、Y 轴反转、两个 FOV、眼位、VMD 标定值）全都是「对着画面调」的量：调一次要强停游戏、等加载、再进自由视角，一轮几十秒，而一次取景往往要试三五轮。P1/P3 之后参数面还变大了（灵敏度、反转、13 个运镜键），成本只会更显眼。
+
+**做法：整段配置重放，而不是逐键命令**
+
+原方案写的是「消费 runtime command：`motion_preset=N`、`vmd reload`」。实施改成**把整段配置文本交回原生，走它启动时那个入口重放**。理由是逐键命令有三件必须自己维护的事，而重放一件都不用：
+
+1. **键的完备性**：13 个运镜键 + 2 个灵敏度键 + 第一人称的 8 个进阶键，任何一条命令漏掉一个键，那个键就停在启动时的值上——而且不会报错。
+2. **两个不是赋值的转换**：`free_camera_enabled`、`first_person_camera_enabled` 由 true 变 false 时，原生要做的是**退出**（`g_force_exit_request` / `g_first_person_exit_request`），不是把布尔置 false。`ConfigurationChanged` 里已经写好这两个分支；照抄一份就是照抄一个会过时的副本。
+3. **原子性**：`ConfigurationChanged` 在自己的 mutex 下把整块键一次写完；逐键命令会在键与键之间留下可观测的半套配置。
+
+于是模块侧只剩一件事：**在 tick 里排空命令，把文本交回 `ConfigurationChanged`**。
+
+**链路**（沿用既有通道，不新增跨进程机制）：
+
+```
+设置页改动 → ModuleSettings.setCameraSettings（文本变了才发）
+           → ModuleCommandRouter.issue("camera_config", 整段配置)
+           → 远程文件空间 command.next            （唯一跨进程通道，见 §7）
+游戏进程   → XposedEntry 的 poller（250 ms）读取，并先物化 VMD 槽
+           → NativeCommandBridge.submit → 单槽命令泵
+原生       → PumpFromEngineTick 顶部 AcquirePanelCommand("camera_config")
+           → ConfigurationChanged(文本) → AcknowledgePanelCommand("applied")
+```
+
+**改动清单**
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 原生核心 | `core/command_pump.h/.cpp` | `ConsumeRuntimeCommand` → `AcquireRuntimeCommand(command, value)`：**按命令名取用**，别人的命令留在槽里 |
+| 原生替身层 | `android_panel_commands.h`（新）、`core/panel_commands.cpp`（新）、`android_win32.h` | 桌面模块经 `<Windows.h>` 链拿到 `AcquirePanelCommand` / `AcknowledgePanelCommand` |
+| 原生相机模块 | `native/modules/camera/module.cpp` | `#if !defined(_WIN32)` 的 `DrainConfigurationReload()`，挂在 `PumpFromEngineTick` 顶部；`free_camera_runtime.inc` 一行未改 |
+| 既有消费点 | `custom_model_module.cpp`、`resource_probe.cpp` | 改用按名取用 |
+| Java 设置 app | `ModuleCommandRouter.java` | value 上限从 512 字符改为「整段 payload ≤ 4096 字节」（原生泵的真实判据） |
+| Java 设置 app | `FrameworkSettings.java` | `writeRemoteCommand` 补 `truncate(0)` |
+| Java 设置 app | `ModuleSettings.java` | `setCameraSettings` 返回 `CameraWrite(changed, firstEnable, delivered)`；文本变化才投递；三个 scalar 按原生范围夹取 |
+| Java 游戏进程 | `XposedEntry.java` | 转发前物化 VMD 槽；物化不成功则**扣下**这条配置并记日志 |
+| Kotlin | `SettingsState.kt`、`strings.xml` | 相机改动不再计入「需要重启的更改」；提示语区分「已投递 / 未送达 / 首次启用」 |
+
+**四条必修的边角（都是实施时才发现的，不是设计时想到的）**
+
+1. **单槽命令泵必须按名取用。** 泵只有一个槽，而一个进程里可能同时有自定义模型模块与相机模块：谁先跑，谁就把对方的命令取走并 Ack 成 `unsupported`。此前只有一个消费者，所以这个缺陷从未被触发。`AcquireRuntimeCommand` 改成「名字不匹配就不动槽」。
+2. **远程文件必须截断。** `openRemoteFile` 是读写打开、不截断；旧实现写完不截断，短 payload 后面会留下上一段的尾巴。对普通命令无害（解析只看前三个换行），但**对配置是致命的**：残留的 `key=value` 行会被原生解析器当成新配置的一部分，而且因为排在后面，旧值会赢过新值。
+3. **VMD 槽要跟着重载一起物化。** 配置里引用的是游戏自己 filesDir 里的 `current.vmd`，那份副本本来只在启动时拷一次。运行中导入一个 .vmd 时配置会立刻引用它，而文件还不存在——原生只会说 `could not be opened`，用户以为功能坏了。所以游戏进程在转发前按远程快照的字节数先物化；物化不了就**不发**，保留上一份能用的配置。
+4. **投递出去的文本必须已经在原生范围内。** `movement_speed` / `field_of_view` / `first_person_fov` 三个 scalar 此前是直接拼进文本的（`CameraMotion` 与 `FirstPersonAdvanced` 里的键都有夹取，这三个没有）。这段文本现在每改一次就实时进游戏，越界值等于在原生侧被静默改写；`NaN` 更糟——`%.4f` 把它渲染成字面量 `NaN`，原生解析后落进驱动相机位置的 float。已按原生 clamp 夹取（0.5–100 / 20–120）。
+
+**边界（必须写进用户文档，不能让人以为「什么都能热更新」）**
+
+- **首次启用相机功能仍需重启一次**：本次启动是否加载相机模块，由**启动时的配置**决定（`native_bridge.cpp` 的 `AnyModuleRequested`）。模块没被载入，就没有人接这条命令。此后同一会话内所有相机参数改动都即时生效，包括「关掉再打开」。
+- **不在本期范围**：UI 模块（隐藏 UID/HUD）、sustained dash、配音 catalog、模型替换仍按启动时配置生效——它们各有各的资源物化路径。
+- **VMD 的标定值**（缩放 / 视野偏置 / 循环）可热调；**VMD 文件本身**在运行中导入也会同步（见边角 3）。
+
+**验收判据（面板日志）**
+
+| 事件 | 期望日志 |
+|---|---|
+| 游戏在跑时改任一相机参数 | `Camera configuration reloaded from the settings app: N bytes, applied without restarting the game.`，紧跟原生自己的 `Camera configuration applied: enabled=true, ...` 与 `Free camera extras: ...` |
+| 关掉自由视角 | 上面几行之后出现 `Free camera disabled`（重放走的是同一个退出分支） |
+| 运行中导入 .vmd | `VMD camera motion ready: <path> (N bytes)`，然后是重载那两行 |
+| .vmd 尚未就绪 | `configuration reload held back: the imported .vmd is not materialized yet (declared N bytes)`，旧配置继续有效 |
+| 游戏没在跑 | 设置页提示「没有送达游戏进程」；`command.next` 留在远程空间，下次启动读到就重放（幂等） |
+
+**代价**：`ConfigurationChanged` 会打两行日志，每次改动都进面板日志。这是有意的——热重载最需要能看见的就是「它到底发生了没有」。
+
+**验证**：见 §10。
 
 ---
 
 ## 3. 关键设计决策（记录理由）
 
-1. **重启生效（boot-only）vs 热更新**：跟随第一人称先例（`ModuleConfigurations` 明注「设置 Activity 写、注入侧只读」；CHANGELOG 3.3.21 明示强停重启）。运镜参数属低频调整，P4 视实测体验再立项。
+1. **重启生效（boot-only）→ 热重载（P4 已实施）**：立项时跟随第一人称先例（`ModuleConfigurations` 明注「设置 Activity 写、注入侧只读」；CHANGELOG 3.3.21 明示强停重启）。P4 改为热重载，但**保留了 boot-only 决定的那一件事**：模块是否载入进程仍由启动配置决定，所以「首次启用」依旧是重启语义。热重载只覆盖已经载入的模块的参数。
 2. **VMD 导入在设置 app、投递在 RuntimeBootstrap**：与 actions 骨骼库「APK 资产 → 游戏进程物化」同构；避免在游戏进程内跑 SAF 选择器（中继依赖 hook、存在降级路径）；HLK-AL00 可脱离游戏回归导入功能。
 3. **路径占位符 `%files%`**：RuntimeBootstrap 是唯一同时握有游戏 filesDir 与配置串的组件；避免设置 app 硬拼 `/data/user/<uid>/...` 在多用户/克隆应用场景失效。
 4. **转向走「替身原子量 + relay 行」**：同一 `.so` 内原生符号中转（`betterendfield_desktop_features` 静态链接进 `betterendfield_android`），无 JNI、无新权限、无类加载器问题；连续增量语义天然匹配拖拽。
@@ -165,7 +229,7 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 ## 5. 交付节奏与文档同步
 
-- **版本**：P1 → `3.3.22-alpha.5`（已交付）；P2 → `alpha.6`（已交付）；播放倒计时 → `alpha.7`（已交付）；P3 → `alpha.8`（已交付）。
+- **版本**：P1 → `3.3.22-alpha.5`（已交付）；P2 → `alpha.6`（已交付）；播放倒计时 → `alpha.7`（已交付）；P3 → `alpha.8`（已交付）；P4 → `alpha.9`（已交付）。
 - **闭环**：push → CI（debug）→ 本地 `assembleRelease` 交付 release 包（release 签名，原位覆盖）→ PJX110 实机 → 用户贴面板日志 → 诊断。
 - **文档四件套**：每阶段 `CHANGELOG.md` / `README.md` / `README.en.md` / `android/README.md`；P2 占位符机制与 P3 relay 行协议属机制类，另加 `docs/GAME_INTERFACES.md`。
 - **验收基线设备**：HLK-AL00（冷启动回归 + 设置 app 可测导入）；PJX110（游戏内全链路）。
@@ -297,7 +361,7 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 5. **在飞的增量在面板收起 / 切后台 / 悬浮窗拆除时丢弃**：控件已经不在了还在转镜头，用户无从解释。
 6. **灵敏度 UI 的范围比原生夹取窄**（0.02–0.5 对 0.01–2.0）：`CameraMotion` 记录本来就夹在这一段（P1 定的），滑杆与之对齐；0.5 时滑过整个拖动区已超过一整圈，再往上没有可用手感。
 
-**验收判据**：拖动转向区 → 相机连续转向；时间冻结中仍可转向（心跳 fallback 生效的证据：`Cinemachine is not pushing; writing the camera transform` 且画面确实转了）；播放运镜（预设/关键帧/VMD）期间拖动无效；调过灵敏度或 Y 轴反转后需重启游戏生效（配置是启动时读入的）。
+**验收判据**：拖动转向区 → 相机连续转向；时间冻结中仍可转向（心跳 fallback 生效的证据：`Cinemachine is not pushing; writing the camera transform` 且画面确实转了）；播放运镜（预设/关键帧/VMD）期间拖动无效；调过灵敏度或 Y 轴反转后**立即生效**（P4 起配置热重载，见 §10——本档交付时还是重启生效）。
 
 **验证**（本机）：release 构建 + `verifyReleaseEntryPoints` 五类断言通过；`assembleDebugAndroidTest` 通过；**本版有原生改动，因此核对到产物**：`libbetterendfield_android.so` 本次重编，APK 内该库含 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta` 符号（`FoldPanelLookInput` 是内部函数，被 strip 属预期，未 strip 的中间产物里在），dex 含 `look deltas rejected (relay not configured)` 与面板文案，资源表含新设置文案。**转向手感是交互行为，没有产物级证据**，只能实机看。
 
@@ -305,3 +369,90 @@ Win UI：`ui/BetterEndfield.UI/Models/FreeCameraExtras.cs` 13 个功能键 + 10 
 
 **已知取舍**：转向只在自由相机实际开着时生效（增量被消费的地方就是 `StepFreeCamera`），面板上拖动区与移动区同门控，因此「设置里开了自由相机但没按自由视角」时拖动无反应——与移动键一致；灵敏度是「度/像素」，同一段拖动在不同分辨率的机器上转过的角度不同（设置页文案已注明）；播放运镜期间不接管转向，这是可复现性的前提，不是漏改。
 
+
+---
+
+## 10. P4 实施结果（2026-09-30，已交付 3.3.22-alpha.9）
+
+**设计**：见 §2 的 P4 节（立项理由、链路、四条边角、边界、判据）。本节只记实施后的事实与证据。
+
+**本档第一次改动命令泵本身**：`ConsumeRuntimeCommand` → `AcquireRuntimeCommand`（按命令名取用，别人的命令留在槽里），并新增替身层转发（`android_panel_commands.h` + `core/panel_commands.cpp`，由 `android_win32.h` 带入），让桌面模块经既有的 `<Windows.h>` 链就能拿到它——与 P3 的虚拟键累计器同一手法。`free_camera_runtime.inc` 一行未改；`native/modules/camera/module.cpp` 的改动全在 `#if !defined(_WIN32)` 分支内（Windows 行为不变），`custom_model` 的两个既有消费点改用按名取用。
+
+**设备外证据（纯 JVM，跑的是真生产代码）**
+
+`F:/tmp/p4verify` 把 `ModuleSettings` / `ModuleCommandRouter` / `FrameworkSettings` 三个真文件编到 JVM 上跑（只桩掉 `android.content.Context`、`SharedPreferences`、`android.util.Log`、`ParcelFileDescriptor` 与 libxposed 服务句柄），三组输入各写一次：
+
+| 组 | 输入 | 结果 |
+|---|---|---|
+| A 全开 + 默认 | — | 53 行、1347 字节 |
+| B 全部越界 | 速度 −20、两个 FOV 180、时长 600… | 夹取后 `movement_speed=0.5`、`field_of_view=120`、`first_person_fov=120`；53 行、1347 字节 |
+| C NaN + 未知预设 | 6 个 scalar 传 `NaN`、`preset="nonsense"` | 回退默认（`5` / `60` / `75`）、预设回落 `orbit`、`animation_mode` 回落 `0`；53 行、1303 字节 |
+
+- **最长一档 1347 字节**，投递出的整段 payload **1334 字节**（`BE_COMMAND_V1\n<gen>\ncamera_config\n<配置>\n`），对原生 4096 的上限余量充足。`issue` 现在按整段 payload 的 UTF-8 字节数判据，512 字符的天花板已撤（它本来就会拒绝这份配置）。
+- **命令内容逐字核对**：`header=BE_COMMAND_V1\n3`、`command=camera_config`、`body=1304 字节`（配置 1303 + 结尾换行）。
+- **键名交叉核对**：从真实输出文本里提取 53 个键，与原生 `ParseConfiguration` 认得的 54 个键取差集 ⇒「写了但原生不认」为**空**。反向差集两项都是有意为之：`first_person_enabled`（旧键名，Java 写的是 `first_person_camera_enabled`）与 `first_person_neck_plug_scale`（未暴露的设置项，用原生默认 1.0）。
+- **重复写不投递**：同参数再写一次 ⇒ `changed=false, delivered=false`，不产生多余命令。
+
+**产物证据**：release 构建 + `verifyReleaseEntryPoints` 五类断言通过；`assembleDebugAndroidTest --rerun-tasks` 通过；本档有原生改动，逐个核对到产物——APK 内 `libbetterendfield_android.so` 含 `AcquirePanelCommand` / `AcknowledgePanelCommand` / `AcquireRuntimeCommand` 符号（`DrainConfigurationReload` 是内部函数，strip 后不在，未 strip 的中间产物里有），dex 含 `camera_config` 与新增提示文案，`resources.arsc` 含新字符串。
+
+**未验项（实机）**
+
+- 热重载本身完全没验过：判据见 §2 的表，全是日志行，可逐条核对。
+- 唯一有实质不确定性的地方是**tick 是否覆盖「相机功能全关」的会话**：`DrainConfigurationReload` 挂在 `PumpFromEngineTick`（render loop / unscaled delta 两个钩子），这两个钩子只要 Initialize 成功就装着，与功能开关无关——按代码路径应当成立，但没有设备级证据。
+- VMD 槽物化的耗时：运行中导入一个较大的 .vmd 时，物化发生在命令 poller 线程里（同步），期间该线程不轮询；对几十 KB 的典型相机轨道可以忽略，对接近 64 MiB 上限的文件会让配置晚几秒生效。没有实测。
+
+---
+
+## 11. 实机验收步骤（3.3.22-alpha.9，照着做）
+
+产物：`betterendfield-3.3.22-alpha.9-30322.apk`（8,702,192 B，SHA-256 `854DE97A…28E98EF3`，`CN=BEM Release` / 证书 `8CD6FDC1…8EFD`）。α.9 的验收重点是 **P4 热重载**，同时把 alpha.7、alpha.8 两档一并回归（它们此前都未过实机）。全程**不需要重启游戏**，唯一例外是第 1 步的「首次启用」。
+
+### 步骤 0 · 前置（一次性）
+
+1. 另一台手机需 **Android 9+**（`minSdk 29`）且已 root、装好 **LSPosed**。
+2. 安装本 APK。**全新手机直接装即可**；只有装过 `3.3.20` / `3.3.21` / `3.3.22-alpha.1` 这些旧临时身份的机器才需要先卸载（签名不相容）。alpha.2 及以后的原位覆盖，从 alpha.8 升上来同样不用卸载。
+3. 在 LSPosed 里**启用本模块**，作用域勾选**游戏**（终末地）；若要用 BEM 包管理器，把它也勾上。设置 app 本身**不需要**在作用域里。
+4. 强制停止游戏（或重启手机）让 LSPosed 生效。
+
+### 步骤 1 · 首次启用（唯一需要重启的一次）
+
+5. 打开设置 app →「体验 → 自由视角 / 相机」，把相机功能打开。此时提示应写明**首次启用需重启**。
+6. **完全退出游戏**（从最近任务里划掉，不是切后台），再重新进入并进到可活动场景。
+
+> 判据：这一步之后，本次游戏进程已经载入了相机模块；后续任何参数改动都不再需要重启。
+
+### 步骤 2 · P4 主验收：运行中改参数，当场生效
+
+7. 游戏内呼出悬浮窗 → 进入**自由视角**。
+8. **切后台**到设置 app（不要退出游戏）→「体验 → 运镜与镜头」。
+9. 挑一个**肉眼立刻能分辨**的参数改：`运镜速度`（拉到最大或最小）或 `视野 FOV`。保存。
+10. 切回游戏 → 在自由视角里移动/拖动一次，确认手感或画幅**已经变了**。
+
+> 面板日志判据（这是 P4 是否成立的唯一硬证据）：
+> - `Camera configuration reloaded from the settings app: N bytes, applied without restarting the game.`
+> - 紧随其后的原生行 `Camera configuration applied: enabled=true, …` 与 `Free camera extras: …`
+>
+> 三条提示语分别对应三种状态，别混淆：**游戏在跑** → 已投递生效；**游戏没在跑** → 「没有送达游戏进程」（配置留在远程空间，下次启动重放）；**首次启用** → 需重启。
+
+### 步骤 3 · 三个边界（最容易误判的地方）
+
+11. **边界 A：首次启用之后关掉再打开相机，不应再要求重启。** 在同一会话里把相机功能关掉再打开，观察是否即时生效（重放走的是同一个退出/进入分支）。
+12. **边界 B：VMD 运行中导入。** 游戏在跑时，在设置页导入一个 `.vmd` → 切回游戏 → 应即时生效，日志应出现 `VMD camera motion ready: <path> (N bytes)` 与重载那两行。可再拿一个较大的 `.vmd`（几百 KB~MB）观察延迟——物化在游戏进程的轮询线程里同步做，大文件会让配置晚几秒生效。
+13. **边界 C：未送达不清空。** 游戏**没在跑**时改一个参数 → 设置页提示未送达 → 启动游戏 → 该配置应被重放（幂等，不会重复生效）。
+
+### 步骤 4 · 回归（alpha.7 + alpha.8，一并验）
+
+14. **alpha.7 播放时序**：按面板上的三个播放键之一（预设运镜 / 回放关键帧 / VMD 播放）→ 面板应**先收起**、handle 一起消失，约 **1 秒后**才开始播放；播放中按**音量键**应能停掉并唤回 handle（手机音量本身照常变化，音量键不被吞）；一次**会自然播完**的运镜结束后 handle 应**自动回来**、面板保持收起。
+    - 注意：**不限时 / 循环**的运镜永远不会发结束信号，这类只能靠音量键或切后台再回来。
+15. **alpha.8 触摸转向**：面板「镜头转向（拖动）」区按住拖动 → 右滑右转、上滑抬头；时间冻结状态下仍可转向；**播放运镜期间拖动应无效**。灵敏度与 Y 轴反转在设置页可调，且（P4 之后）改完即时生效。
+
+### 步骤 5 · 取证
+
+16. 任一步不符预期，把**面板日志整段**贴回来即可（它同时含 Java ring 与 `[native]` 尾行，是判定链路走到哪一环的主要依据）。
+17. 需要更底层时（需 root）：游戏进程日志文件在
+    `/data/data/<游戏包名>/files/betterendfield/native.log`
+    → `adb shell su -c 'cat /data/data/<游戏包名>/files/betterendfield/native.log'`。
+
+### 一句话预期
+
+「改完就生效」应成立，且全程只做一次「重启」——就是步骤 1 那次首次启用。若在步骤 2 里发现必须重启才生效，则本档的核心功能不成立，按第 16 步取证。

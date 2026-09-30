@@ -251,15 +251,13 @@ bool CustomModelModule::InitializeSharedReplacement(const std::string& config) {
 
 namespace {
 void ConsumeModelCommand() {
-    std::string payload;
-    if (!ConsumeRuntimeCommand(payload)) return;
-    const size_t first = payload.find('\n', 14);
-    const size_t second = first == std::string::npos ? std::string::npos : payload.find('\n', first + 1);
-    const std::string command = first == std::string::npos || second == std::string::npos
-        ? std::string{} : payload.substr(first + 1, second - first - 1);
-    const char* result = command == "overlay_hide" ? "applied" : "unsupported";
-    AcknowledgeRuntimeCommand(result);
-    LogInfo("command_pump", ("Unity-thread command " + std::string(result) + ": " + command).c_str());
+    // Acquire rather than consume: the pump slot is shared with the camera
+    // module's configuration reload, and taking a command that is not ours
+    // would acknowledge someone else's request as unsupported.
+    std::string value;
+    if (!AcquireRuntimeCommand("overlay_hide", value)) return;
+    AcknowledgeRuntimeCommand("applied");
+    LogInfo("command_pump", "Unity-thread command applied: overlay_hide");
 }
 
 std::string NativeAddress(void* address) {

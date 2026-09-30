@@ -21,6 +21,17 @@ public final class XposedEntry extends XposedModule {
     private String processName;
     private final AtomicBoolean attached = new AtomicBoolean();
     private final AtomicBoolean nativeReady = new AtomicBoolean();
+    /**
+     * The game's own context, kept for work the command poller has to do in this
+     * process - materializing a reloaded .vmd into this app's files directory,
+     * which is a place the settings app cannot write to.
+     */
+    private volatile Context gameContext;
+    /**
+     * The last command the poller refused to deliver, so a payload whose own
+     * precondition cannot be met is not retried four times a second.
+     */
+    private volatile String heldBackCommand;
 
     /** This module instance, so helper classes in this package can reach hook(). */
     private static volatile XposedEntry instance;
@@ -267,6 +278,7 @@ public final class XposedEntry extends XposedModule {
                 try {
                     Application application = (Application) chain.getThisObject();
                     Context context = (Context) chain.getArg(0);
+                    gameContext = context;
                     ClassLoader loader = context.getClassLoader();
                     GameOverlay.install(application, loader,
                             () -> {
@@ -354,6 +366,62 @@ public final class XposedEntry extends XposedModule {
         RuntimeLog.record(message);
     }
 
+    /**
+     * Splits a runtime command payload into its command name and body.
+     *
+     * The shape is fixed by the native pump: {@code BE_COMMAND_V1\n<generation>
+     * \n<command>\n<value>}. Returns null when the header is not there, which is
+     * the only case the caller treats as "not for me".
+     */
+    private static String[] splitCommand(String payload) {
+        int first = payload.indexOf('\n', 14);
+        int second = first < 0 ? -1 : payload.indexOf('\n', first + 1);
+        if (first < 0 || second < 0) return null;
+        return new String[]{payload.substring(first + 1, second), payload.substring(second + 1)};
+    }
+
+    /**
+     * Makes sure a command's own preconditions hold before it is handed to the
+     * native module, and returns whether it may be delivered at all.
+     *
+     * Only the camera configuration needs this. A configuration that names the
+     * imported .vmd points at a file inside the game's own files directory, and
+     * the native reader takes a path - but the two processes are different UIDs,
+     * so the settings app cannot put the file there. It publishes the payload
+     * into the framework's remote space instead, and this process copies it in.
+     * That copy normally happens once, at start-up; a reload in the middle of a
+     * session would otherwise point the module at a file that does not exist
+     * yet and report "could not be opened" for a motion the user just imported.
+     *
+     * A configuration whose payload cannot be materialized is held back: keeping
+     * the previous, working configuration is better than delivering one that is
+     * known to be unreadable.
+     */
+    private boolean prepareCommand(String payload) {
+        String[] parts = splitCommand(payload);
+        if (parts == null || !"camera_config".equals(parts[0])) return true;
+        if (!parts[1].contains(ModuleSettings.VMD_FILE_SLOT)) return true;
+        Context game = gameContext;
+        if (game == null) return true;
+        long declared;
+        try {
+            declared = getRemotePreferences("module_settings")
+                    .getLong(ModuleSettings.VMD_BYTES, 0L);
+        } catch (RuntimeException unavailable) {
+            RuntimeLog.record("configuration reload held back: settings snapshot unavailable");
+            return false;
+        }
+        String path = CameraVmdFile.materialize(game, declared,
+                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                RuntimeLog::record);
+        if (path.isEmpty()) {
+            RuntimeLog.record("configuration reload held back: the imported .vmd is not "
+                    + "materialized yet (declared " + declared + " bytes)");
+            return false;
+        }
+        return true;
+    }
+
     private void startRemoteCommandPoller() {
         Thread worker = new Thread(() -> {
             String last = "";
@@ -439,11 +507,20 @@ public final class XposedEntry extends XposedModule {
                         StringBuilder content = new StringBuilder(); String line;
                         while ((line = reader.readLine()) != null) content.append(line).append('\n');
                         String value = content.toString();
-                        if (!value.isEmpty() && !value.equals(last)) {
+                        if (!value.isEmpty() && !value.equals(last)
+                                && !value.equals(heldBackCommand)) {
                             // Returns false only while the relay channel has not
                             // been configured; otherwise the command sits in the
                             // runtime's pump slot until the runtime consumes it.
-                            if (NativeCommandBridge.submit(value)) last = value;
+                            if (prepareCommand(value) && NativeCommandBridge.submit(value)) {
+                                last = value;
+                            } else {
+                                // Tried once per distinct payload: the settings
+                                // app rewrites the whole command whenever the
+                                // user changes anything, so a later attempt
+                                // arrives as a different value.
+                                heldBackCommand = value;
+                            }
                         }
                     }
                 } catch (java.io.FileNotFoundException missing) {

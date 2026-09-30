@@ -11,6 +11,7 @@
 #include "first_person_mesh.h"
 #include "first_person_shadow.h"
 #include "first_person_retry.h"
+#include "first_person_head_attachment.h"
 
 #include <Windows.h>
 
@@ -299,6 +300,7 @@ BE_ResolvedClassV1 g_snapshot_controller_class{};
 BE_ResolvedClassV1 g_animator_class{};
 BE_ResolvedClassV1 g_skinned_mesh_renderer_class{};
 BE_ResolvedClassV1 g_mesh_renderer_class{};
+BE_ResolvedClassV1 g_renderer_class{};
 
 namespace FpMesh = BetterEndfield::FirstPersonMesh;
 namespace FpMath = BetterEndfield::FirstPersonMath;
@@ -312,6 +314,7 @@ struct HeadPartProbe {
     int32_t vertex_count = -1;
     bool skinned = false;
     bool matched = false;
+    bool head_attached = false;
     // Role classification, ported from the upstream enhancer. A dedicated head
     // mesh is collapsed whole; a body mesh only loses the triangles whose three
     // vertices are dominated by head/neck skin, which is the lip around the neck
@@ -1066,9 +1069,8 @@ void ReadMeshProbe(void* mesh, HeadPartProbe& probe) {
     }
 }
 
-// Only skinned renderers are probed: the head, the hair and the head
-// accessories are skinned parts, and leaving the other component types out keeps
-// the probe independent of the prefab layout.
+// Probe skinned meshes first so the existing mesh path keeps its data. Other
+// renderer subtypes may also carry head ornaments and use shadow-only hiding.
 void ReadPartComponents(void* game_object, HeadPartProbe& probe) {
     const MethodContract* get_component = Contract("unity.game_object.get_component");
     if (!game_object || !get_component || !get_component->resolved) {
@@ -1086,11 +1088,14 @@ void ReadPartComponents(void* game_object, HeadPartProbe& probe) {
             return;
         }
     }
-    // Hair and head accessories may also render through a plain MeshRenderer;
-    // the shadow-only fallback only needs a Renderer reference, so probe that
-    // too when the node carries no skinned renderer.
+    // The shadow-only fallback only needs a Renderer reference.
     if (g_mesh_renderer_class.type_object) {
         void* parameters[1]{g_mesh_renderer_class.type_object};
+        probe.renderer = Invoke(get_component, game_object, parameters);
+    }
+    // A head ornament can also be a particle, trail or other Renderer subtype.
+    if (!probe.renderer && g_renderer_class.type_object) {
+        void* parameters[1]{g_renderer_class.type_object};
         probe.renderer = Invoke(get_component, game_object, parameters);
     }
 }
@@ -1330,6 +1335,7 @@ void TryBindHeadTransform() {
 #include "first_person_motion_runtime.inc"
 #include "first_person_dialogue_runtime.inc"
 #include "first_person_combat_runtime.inc"
+#include "first_person_retract_runtime.inc"
 #include "first_person_scale_runtime.inc"
 
 void FpRefreshHiddenParts(bool hide) {
@@ -1657,10 +1663,50 @@ void FoldPanelLookInput() {
     g_mouse_dx.fetch_add(dx, std::memory_order_relaxed);
     g_mouse_dy.fetch_add(dy, std::memory_order_relaxed);
 }
+
+// The camera configuration used to be read once, from the environment the host
+// set before loading this library, so every parameter change cost a game
+// restart. It is now also delivered through the runtime command pump: the
+// settings app writes the same configuration string the boot path would have
+// carried, the panel's poller hands it to the pump, and this drains it on the
+// engine tick.
+//
+// The reload reuses ConfigurationChanged - the exact entry point the host calls
+// at boot. That matters more than it looks: the function already stores every
+// key as one idempotent block under its own mutex, and it already knows the two
+// transitions that cannot be expressed by assignment (the free camera and the
+// first-person camera being switched off, which request an exit). A reload
+// therefore cannot leave a half-applied configuration behind, and it cannot
+// invent behavior the boot path does not have.
+//
+// What a reload cannot do is add the module to a process that never started it:
+// whether this library runs the camera module at all is decided by the boot
+// configuration, so the first time the camera is switched on still needs a
+// restart. Everything after that is live.
+BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration);
+
+void DrainConfigurationReload() {
+    std::string configuration;
+    if (!betterendfield::AcquirePanelCommand("camera_config", configuration)) {
+        return;
+    }
+    const BE_Result applied = ConfigurationChanged(configuration.c_str());
+    const bool ok = applied == BE_Result_Ok;
+    betterendfield::AcknowledgePanelCommand(ok ? "applied" : "rejected");
+    char summary[160];
+    std::snprintf(summary, sizeof(summary),
+        "Camera configuration reloaded from the settings app: %zu bytes, %s "
+        "without restarting the game.", configuration.size(), ok ? "applied" : "rejected");
+    Log(summary);
+}
 #endif
 
 void PumpFromEngineTick(const char* source) {
 #if !defined(_WIN32)
+    // Both drained ahead of the re-entrancy guard: they carry input and
+    // configuration that must not be skipped just because this tick was entered
+    // from inside another one.
+    DrainConfigurationReload();
     FoldPanelLookInput();
 #endif
     if (t_in_engine_tick) {
@@ -2027,6 +2073,11 @@ bool ResolveContracts() {
                 "UnityEngine", "MeshRenderer", &mesh_renderer_class) == BE_Result_Ok) {
             g_mesh_renderer_class = mesh_renderer_class;
         }
+        BE_ResolvedClassV1 renderer_class{};
+        if (g_host->resolve_class(g_host->context, "UnityEngine.CoreModule.dll",
+                "UnityEngine", "Renderer", &renderer_class) == BE_Result_Ok) {
+            g_renderer_class = renderer_class;
+        }
 
     }
 
@@ -2308,6 +2359,7 @@ void BE_CALL Shutdown() {
     FpReleaseShadowHides(true);
     g_fp_sync_readback.Close();
     FpResetPerspective();
+    g_fp_retract=FpRetractSampler{};
     ExitFreeCamera("shutdown");
     ReleaseCameraRoot();
     if (g_host && g_host->release_module_hooks) {

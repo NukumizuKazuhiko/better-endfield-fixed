@@ -1065,7 +1065,7 @@ class SettingsState(private val context: Context) {
     }
 
     private fun saveCameraSettings() {
-        ModuleSettings.setCameraSettings(
+        val write = ModuleSettings.setCameraSettings(
             context,
             disableDither,
             freeCamera,
@@ -1111,7 +1111,31 @@ class SettingsState(private val context: Context) {
                 vmdLoop,
             ),
         )
-        afterEnhancementChange()
+        afterCameraChange(write)
+    }
+
+    /**
+     * The camera block is the one the running game picks up on its own: the
+     * configuration string is handed to the native module's runtime command pump
+     * and replayed there through the same entry point the boot path uses, so a
+     * parameter change no longer costs a restart. Two cases keep the old
+     * wording - the first time the camera is switched on, because whether the
+     * module is loaded into the process at all was decided when it started, and
+     * a delivery that never reached the game process.
+     */
+    private fun afterCameraChange(write: ModuleSettings.CameraWrite) {
+        refreshDiagnostics()
+        status = context.getString(
+            when {
+                !write.changed() -> R.string.camera_settings_unchanged
+                write.delivered() -> R.string.camera_settings_live
+                else -> R.string.camera_settings_not_delivered
+            },
+        )
+        if (write.firstEnable()) {
+            markPending()
+            status = context.getString(R.string.restart_required)
+        }
     }
 
     private fun saveDashSettings() {

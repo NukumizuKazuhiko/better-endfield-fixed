@@ -31,6 +31,7 @@
 #include <strings.h>
 
 #include "android_virtual_keys.h"
+#include "android_panel_commands.h"
 
 // The desktop modules spell out the x86 calling convention on every detour and
 // every managed function pointer. AArch64 has one convention, so the qualifier

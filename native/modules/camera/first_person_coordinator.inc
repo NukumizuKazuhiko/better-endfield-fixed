@@ -70,12 +70,15 @@ void FpCoordinateState(void* brain,void* state) {
     input.yield_dialogue=g_first_person_yield_dialogue.load(std::memory_order_relaxed);
     input.third_person_in_combat=g_first_person_third_person_in_combat.load(std::memory_order_relaxed);
     input.elapsed=elapsed;
+    if (input.requested) {
+        g_fp_retract.Sample(input.game_camera,input.ultimate,input.cinematic);
+    }
     if (input.requested && input.yield_dialogue) input.dialogue_known=FpDialogueActive(input.dialogue);
     if (input.requested && input.third_person_in_combat) input.combat_known=FpCombatActive(input.combat);
     const auto decision=StepPolicy(owner.policy,input);
-    if (decision.reason!=owner.decision.reason && owner.reports<8) {
+    if (decision.reason!=owner.decision.reason && owner.reports<32) {
         ++owner.reports;
-        Log("First person perspective reason="+std::to_string(static_cast<int>(decision.reason)));
+        Log(std::string("First person perspective reason=")+SuppressionName(decision.reason));
     }
     owner.decision=decision;
     const auto before=g_push_state_patches.load(std::memory_order_relaxed);
