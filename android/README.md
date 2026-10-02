@@ -6,13 +6,13 @@ Android 端是 Better Endfield 的 ARM64 LSPosed 模块，同时提供设置应�
 
 ## 兼容范围
 
-- APK 版本：`3.4.0`（versionCode `30400`）；最低 Android 版本为 10，设备需为 ARM64。
+- APK 版本：`3.4.1`（versionCode `30401`）；最低 Android 版本为 10，设备需为 ARM64。
 - 需要可用的 LSPosed 环境，并将模块加入实际游戏包名的作用域。预选包名包括 `com.hypergryph.endfield` 和 `com.gryphline.endfield.gp`。
 - 内置 834 份头饰资源，面向原生 Android 游戏 versionCode 50。其他客户端版本、渠道包和逐角色表现需分别验证。
 
 ## 安装与使用
 
-1. 从 [3.4.0 发行页](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.0)下载 APK，并核对发行说明中的 SHA-256 与签名信息。
+1. 从 [3.4.1 发行页](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.1)下载 APK，并核对发行说明中的 SHA-256 与签名信息。
 2. 安装 APK，在 LSPosed 中启用模块并勾选实际游玩的游戏包名。更新模块后若配置未同步，可在 LSPosed 中重新启用模块。
 3. 打开设置应用，配置角色、相机与其他功能，然后彻底停止并重新启动游戏。
 4. 在游戏内使用悬浮面板进行自由相机、时间冻结、第一人称与运镜等即时操作。模块的运行日志可在应用“工具 → 运行日志”中查看和导出。

@@ -25,7 +25,7 @@ Better Endfield 是面向《明日方舟：终末地》的模块化扩展项目�
 
 ### Android
 
-1. 从 [Android 3.4.0 发行页](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.0)取得 APK，核对发行说明中的适用版本与校验值。
+1. 从 [Android 3.4.1 发行页](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.1)取得 APK，核对发行说明中的适用版本与校验值。
 2. 安装 APK，在 LSPosed 中启用模块并勾选实际游玩的 Endfield 包名。
 3. 在设置应用中配置功能，彻底停止游戏后重新启动。首次启用某些模块需要冷启动。
 

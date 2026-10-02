@@ -5,8 +5,8 @@ name: android-release
 # gitignored): the distribution repository is public, and anyone holding that
 # keystore could sign an APK Android accepts as an in-place upgrade of the
 # installed app. This job therefore materialises the keystore and its
-# credentials from repository secrets before building -- see android/README.md,
-# section "Signing", for the three secrets and how to produce them. The debug
+# credentials from repository secrets before building -- see
+# docs/TECHNICAL_DETAILS.md, section "签名", for the signing contract. The debug
 # identity needs none of this: it is committed, because a debug signature
 # protects nothing.
 #
@@ -16,12 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.4.0)'
+        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.4.1)'
         required: true
         # Tracks versionName on the branch this runs against. A stale default is
         # harmless -- the run stops on the mismatch check rather than tagging a
         # version the source does not declare -- but a wrong one wastes a build.
-        default: '3.4.0'
+        default: '3.4.1'
       draft:
         description: 'Create the release as a draft instead of publishing it'
         type: boolean
@@ -65,7 +65,7 @@ jobs:
           [ -n "$KEYSTORE_PASSWORD" ] || missing+=(ANDROID_RELEASE_KEYSTORE_PASSWORD)
           [ -n "$KEY_ALIAS" ] || missing+=(ANDROID_RELEASE_KEY_ALIAS)
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::missing repository secret(s): ${missing[*]} (android/README.md, section \"Signing\")"
+            echo "::error::missing repository secret(s): ${missing[*]} (docs/TECHNICAL_DETAILS.md, section \"签名\")"
             exit 1
           fi
 
@@ -167,6 +167,8 @@ jobs:
             echo "versionName \`${version_name}\` / versionCode \`${version_code}\` / arm64-v8a / minSdk 29 / targetSdk 35."
             echo
             echo "APK: \`$(basename "$apk")\` ($(du -h "$apk" | cut -f1) file size)"
+            echo "SHA-256: \`$(sha256sum "$apk" | cut -d ' ' -f1)\`"
+            echo "Signer certificate SHA-256: \`$RELEASE_CERT_SHA256\`"
             echo
             awk -v v="$version_name" '
               $0 ~ ("^## " v "[[:space:]]*$") { found = 1; next }

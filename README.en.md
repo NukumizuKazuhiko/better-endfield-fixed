@@ -25,7 +25,7 @@ Both platforms use the same standard `.bem` package format. See the [BEM creator
 
 ### Android
 
-1. Download the APK from the [Android 3.4.0 release](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.0), and check its compatibility notes and checksum.
+1. Download the APK from the [Android 3.4.1 release](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.1), and check its compatibility notes and checksum.
 2. Install it, enable the module in LSPosed, and select the Endfield package you play.
 3. Configure features in the companion app, fully stop the game, then start it again.
 
