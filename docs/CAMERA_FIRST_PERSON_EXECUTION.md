@@ -6,6 +6,8 @@
 
 本轮本地复核：从公开 Release 重新下载归档、SHA-256 校验与 835/835 文件比对通过；已有打包器生成资源 ID `1fb67e1585ec27b6013437d008a989c48fe18555dd3d6c1c02efa79b37471640`。以下载目录运行 Android `:app:assembleRelease :app:verifyReleaseEntryPoints` 与 `:app:assembleDebug` 均成功。Release APK 读回 `versionName=3.4.0`、`versionCode=30400`，834 份资源加 manifest 与 alpha.21 已验收 APK 835/835 逐字节一致，签名证书仍为 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。本机尚未对新 versionName/versionCode 组合进行设备安装和运行验证。Gradle 的 `ndk.dir` 废弃提示、Kotlin `srcDir` 废弃提示、既有 C++/Java 警告仍按非本轮资源/版本链路债务记录。
 
+远端 `android-apk` Debug 构建 36970134290、`android-release` 正式发布构建 36970297467 与修复资源输入后的 CodeQL 六语言扫描 36970296090 均成功。`v3.4.0` 是正式 Release，tag 指向 `0a2d3c3a67aaf1de9247a19ef19b100faa6f424a`，保留 `v3.3.22-alpha.21` 供 CI 读取资源。重新下载发布 APK 后读回 `3.4.0/30400`、原 release 签名证书和同一资源 ID，835/835 包内资源与已验收 alpha.21 APK 一致；附件 49,163,703 字节、SHA-256 `B4E69560969DD509CBD79DD0B67D58127AD59798828AB1BE188D537EADF952D2`。该远端 APK 尚未独立实机复测。
+
 ## 2026-10-02：陀螺仪与内置头饰资源合成包（本地主线）
 
 将隔离工作树 `D:/CodexData/bem-headwear-canary` 的头饰网格实现、834 份资源的生成/打包合同和游戏私有目录自动部署接入本地 `main`，同时保留 `2d87f57` 的陀螺仪实现、第一人称 look 探针和 `3.3.22-alpha.21` 版本。接线冲突只涉及 Android native include、`RuntimeBootstrap` 的加载参数和本文新增章节；合成后的 `load()` 同时接收头饰目录与陀螺仪设置快照。第三方 `.bem` 外观包仍走用户导入链路，不能与本节头饰 `.behw` 资源混称。

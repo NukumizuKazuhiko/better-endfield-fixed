@@ -166,7 +166,7 @@ jobs:
             echo
             echo "versionName \`${version_name}\` / versionCode \`${version_code}\` / arm64-v8a / minSdk 29 / targetSdk 35."
             echo
-            echo "APK: \`$(basename "$apk")\` ($(du -h "$apk" | cut -f1) uncompressed)"
+            echo "APK: \`$(basename "$apk")\` ($(du -h "$apk" | cut -f1) file size)"
             echo
             awk -v v="$version_name" '
               $0 ~ ("^## " v "[[:space:]]*$") { found = 1; next }
