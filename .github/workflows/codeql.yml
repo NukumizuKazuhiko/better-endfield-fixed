@@ -148,6 +148,14 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
+      - name: Fetch verified headwear catalog
+        if: ${{ matrix.build-mode == 'manual' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/Camera/fetch_android_headwear_catalog.py --output "$RUNNER_TEMP/headwear"
+          echo "HEADWEAR_CATALOG_DIR=$RUNNER_TEMP/headwear/catalog-bundled" >> "$GITHUB_ENV"
+
       - name: Compile the debug variant
         if: ${{ matrix.build-mode == 'manual' }}
         working-directory: android
@@ -159,7 +167,7 @@ jobs:
           # would not carry the extractor's JVM instrumentation, and the
           # compilations it performed would be invisible to CodeQL.
           ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin \
-            --no-daemon --stacktrace
+            -PheadwearCatalogDir="$HEADWEAR_CATALOG_DIR" --no-daemon --stacktrace
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
