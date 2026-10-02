@@ -8,6 +8,185 @@
 - 终结技施放、剧情镜头与非主关卡相机期间临时交还游戏原生视角；结束后自动恢复第一人称，保留用户开关。使用当前技能与终结技 ID、角色剧情状态以及相机管理器当前/主关卡控制器的元数据合同采样，不改游戏相机状态。终结技与角色界面的收回和自动恢复已有用户侧实机通过反馈，具体运行时触发路径尚无日志独立复核。
 - 离线策略测试、Windows Camera Release 与 Android debug APK 编译通过；用户于 2026-09-30 回复“验证通过”。设备、所装 APK 哈希、画面、运行日志及重复轮次尚未提供，不将此反馈扩大为其他功能或完整 S0–S8 验收。当前构建含工作树中其他尚未提交的 alpha.9 修改，不作为独立发布版本。
 
+## 3.3.22-alpha.21：修「第一人称陀螺仪像方向键一样跳固定角度」——输入单位错了
+
+alpha.20 把注入点改对了（`CameraManager.OnInput`），实机**有反应了**，但转动是**离散跳变**：用户描述「像上下左右的按钮，点一下转向固定角度，没有平滑移动」。这不是限位，是输入被量化成了固定步长。
+
+**根因：`OnInput(inputX, inputY)` 的参数是「屏幕百分比增量」，不是像素；而且前一版把像素量级压得太低，落进了控制器的最小速度阈值量化区。** 决定性证据来自 IL2CPP 反编译（`legacy/.../IL2CPP_Dump_Normal/Gameplay.Beyond.dll.cs`）：`CustomFreeLookCameraController.DragCameraHorizontal(System.Single deltaScreenPercentageX)` / `DragCameraVertical(System.Single deltaScreenPercentageY)` 的参数名明示单位是**屏幕百分比**；同一控制器的 `CameraInputCtrlConfig` 里有 `_xDragSpeed` / `_yDragSpeed` 与 `_xAccelerationConfig` / `_yAccelerationConfig`（后者含 `_speedMinThreshold` 最小速度阈值）。玩家手指在屏幕上滑动的像素被换算成「滑动距离 ÷ 屏幕尺寸」的百分比后喂进这条链，再由 DragSpeed 缩放成角度。前一版做错了两处：
+
+1. **单位错**：把「像素增量」原样喂给要吃「屏幕百分比」的 `OnInput`。
+2. **量级错**：`PIXELS_PER_RADIAN=30` 太小，慢速转动时 Java 侧 `(int) residualX` 截断只吐 ±1 像素，落在 `_speedMinThreshold` 阈值边缘，被游戏吸附量化为「点一下跳一格」的离散动作。
+
+n12.log 实测证据：55 条 `applied` 行里 `dx`/`dy` 全部只有 0/±1，从未超过 1——增量在进 `OnInput` 之前就被量化成了 ±1。
+
+**修复（两层，不改自由视角路径）：**
+
+- **单位换算**：新增 `unity.screen.width.get` / `unity.screen.height.get` 合同（`UnityEngine.Screen` 静态属性），在 `ApplyFirstPersonLook()` 里把像素增量 ÷ 实时渲染分辨率 → 屏幕百分比，再喂 `OnInput`。屏幕分辨率拿不到时**丢弃增量**而非按像素误喂（宁可慢一拍也不重新引入吸附）。方向符号不变：`look_x = dx / screen_w`、`look_y = -dy / screen_h`。
+- **量级校准**：Java 侧 `GyroscopeController.PIXELS_PER_RADIAN` 从 30 调到 **1100**——锚点是「1 弧度转动 ≈ 1 屏幕宽拖拽」。约 1080–1440px 的横屏下，1 rad/s 转动产出约 1.0 屏幕百分比/秒，与手指快速拖拽（约 0.8 百分比/秒）同量级，灵敏度滑杆（0.2–5.0）在此范围内微调；同时让增量远离阈值量化区。
+
+`versionName=3.3.22-alpha.21`、`versionCode=30322`。**构建与门禁通过，待实机验收**：百分比→角度的精确系数（DragSpeed 数值）与「最小速度阈值」是否仍会在极慢转动时量化，仍需实机标定，预期 1 轮。
+
+## 3.3.22-alpha.20：修「陀螺仪在第一人称下依旧无动作」——注入对象用错了
+
+alpha.19 改了门控，实机依旧没有 `applied` 行，但根因和上一轮**不同**：门控这次放行了（用户按了模块第一人称热键，`module_fp=1`），卡在**注入对象不存在**。
+
+**根因：`SnapshotCameraController` 是拍照/快照相机，不是模块第一人称的 look 控制器。** 探针枚举（`fp_look_probe`）把它的方法列全了，签名是决定性证据——`ActivateSnapshotCamera` / `DeactivateSnapshotCamera` / `SetAperture` / `SetFocusDistance` / `GetCameraParamFullSnapshot` / `GetCameraRoll` / `_HideChar` / `_ShowChar`，全是摄影语义。它只在 `ActivateSnapshotCamera()` 时才被激活进场景，玩家常规游玩（含模块第一人称）时 `FindObjectOfType` 找不到实例，于是 alpha.16–19 的 `RotateCamera*` 注入拿到了空指针、直接静默 return。
+
+**正确的注入点是 `CameraManager::OnInput(float, float)`。** 模块第一人称（0xBD 热键）走 Cinemachine CameraState 改写（`ApplyFirstPersonState` 只动 position/FOV、朝向原样保留游戏值），它的朝向由**游戏主相机控制器** `Beyond.Gameplay.View.CameraManager` 驱动。探针枚举出 `CameraManager` 共 134 个方法，其中 `OnInput(float,float)` + `get/set_curFrameInput(Vector2)` 就是主相机的 look 输入入口——玩家触摸转动视角走的就是它，把陀螺仪增量喂进去和手指拖动是同一条路径。
+
+- **新增方法合同** `camera_manager.on_input`（`CameraManager.OnInput(float,float)->Void`），删除走错方向的 `snapshot.rotate_horizontal` / `snapshot.rotate_vertical`。
+- **`DetourTailLateTick` 缓存 `CameraManager` 实例**：模块本就 hook 了 `CameraManager::TailLateTick`，每帧白拿实例，加 gchandle 钉住存入 `g_first_person.camera_manager`。不用 `FindObjectOfType` 去找。
+- **`ApplyFirstPersonLook()` 注入改为**：门控只认 `g_first_person_active`（模块第一人称），取增量后 `InvokeVoid("camera_manager.on_input", manager, {dx*scale, dy*scale})`。删除了读 `snapshot.is_first_person` 的 `FirstPersonLookAvailable()`——那条路径在模块第一人称下同样走不通（模块第一人称不设置游戏的原生第一人称标志）。
+- **就绪判定** `g_first_person_gyro_contract_ready` 改为依赖 `camera_manager.on_input` + `camera_manager.tail_late_tick`。
+- **探针扩展**（只读）：`android/.../first_person_look_probe.cpp` 新增枚举 `CameraManager` / `CameraMono`，这正是本轮定位正确注入点的依据。`CameraMono` 全是 dither（网格淡出）方法，与 look 无关，排除。
+
+`versionName=3.3.22-alpha.20`、`versionCode=30322`。**构建与门禁通过，待实机验收**：`OnInput` 参数的单位与符号（增量像素 vs 弧度、x/y 方向）需实机标定，预期 1–2 轮。
+
+## 3.3.22-alpha.19：修「陀螺仪在第一人称下依旧无动作」——门控用错了状态
+
+alpha.16 把消费端接上了，实机仍然毫无反应。alpha.17/18 是加诊断的迭代，本版是真正的原因。
+
+**根因：门控读的是模块自己的第一人称状态，而玩家处在游戏自己的第一人称里。** `ApplyFirstPersonLook()` 的第一道门是 `g_first_person_active`，而这个变量只在 `EnterFirstPerson()` 里被置真——它由**模块自己的第一人称热键**（`VK_OEM_MINUS`，189）经 `PumpFirstPerson()` 触发，含义是「本模块把游戏切进了第一人称相机」。玩家实际所在的第一人称是**游戏原生的视角**，用游戏自己的操作走进去，从头到尾不碰模块热键。于是门永远是关的，而增量的唯一痕迹是诊断行里的 `active=0`。
+
+实机日志（alpha.18，用户已进第一人称并晃手机）逐字为证：
+
+```
+Camera tick heartbeat: source=render loop ticks=900 game_fp=0 module_fp=0 fp_enabled=1 free=0 gyro_look=1 pending=-1,-1
+First person gyro: deltas present but gated by camera state active=0 free=0 pending=-53,-324 seq=840
+```
+
+`pending=-53,-324`（并随晃动增大）证明陀螺仪增量确实在累加器里等待消费；`gyro_look=1`、`fp_enabled=1`、`free=0`、心跳在跑，其余四个门全开；**只有 `active=0` 是零**。日志里没有任何 `First person camera enabled` 行，说明模块的 `EnterFirstPerson()` 从未被调用。
+
+- **新增 `FirstPersonLookAvailable()`**：读**游戏自己的** `snapshot.is_first_person` 标志（`SnapshotCameraController` 的 `<isFirstPerson>k__BackingField`，字段合同早已存在，此前只被 `photo_mode_exit` 的可用性判定用到）。控制器实例没找到、或字段读不出来时**返回 false**——这是正确答案：没有实例就没有可调的旋转方法，应用不了任何东西，增量必须留给自由视角。
+- **门控改为「自由视角 armed 则让路，否则看两人称状态」**：`if (g_free_camera_active) return;` 先行（与 `PumpFromEngineTick` 里两个消费端的先后顺序一致），随后 `game_first_person || module_first_person` 任一成立即消费。保留 `module_first_person` 一档，是因为模块热键仍然是一条合法路径。
+- **拿不准时不取走增量**：读不到游戏标志就让它留在累加器里，自由视角 arming 时照旧找得到——与改动前完全一致。因此这次改动对自由视角是**零风险**的，它对增量的可见性只增不减。
+- **心跳行字段重命名**：`fp_active` 拆成 `game_fp` 与 `module_fp` 两个字段，使「玩家在不在第一人称」与「模块有没有切第一人称」不再共用一个数字——上一版正是这个混淆让诊断多花了两轮。
+- **拦截行措辞改为「held, no first person camera」**：它现在表达的是「两个消费端都没认领」，而不再是「被相机状态挡住」。
+
+`versionName=3.3.22-alpha.19`、`versionCode=30322`。**构建与门禁通过，待实机验收**：`RotateCamera*` 的参数单位（度/帧 vs 度/秒）尚未标定，因此灵敏度手感预计还需一到两轮实机调整。
+
+## 3.3.22-alpha.18：诊断版本（无功能变更）
+
+心跳行与拦截行已经证明陀螺仪增量确实到达累加器，但被门控拦下。本版把「哪一档门是关的」拆得更细：心跳行加打 `fp_enabled`、`gyro_look`，拦截行改为每次取用前无条件打 `active/free/pending/seq`（此前是 `% 40` 采样，无法区分「路径没跑」与「手机静止」，且用 `static bool` 锁存——只有增量为零才复位，而晃手机时永远不回到零，于是只报前几次就沉默）。同时把 `g_first_person_gyro_contract_ready` 的赋值移到 `Camera feature contracts:` 汇总日志**之前**：它原本在之后，导致每次启动都打 `first_person_gyro=unavailable`，而路径实际是 armed 的——日志在撒谎，而这条正是操作者用来判断功能是否存在的依据。
+
+## 3.3.22-alpha.17：诊断版本（无功能变更）
+
+在 `PumpFromEngineTick` 末尾加一条无条件、限流的心跳行（`% 900`）。此前的每一条候选日志都被某个条件门控（「第一人称激活」「陀螺仪开着」），而一份「门从没开过的日志」无法区分「功能坏了」与「泵根本停了」。这一行只回答这一个问题。同时修掉 Java 侧的一处键名错误：`FirstPersonGyro.toIniLines()` 发的是 `first_person_gyro_horizontal_sensitivity` / `_vertical_sensitivity`，而原生**根本不解析**这两个名字——这是「开关打开却无动作」的另一半原因，原生因此无法区分陀螺仪与手指。改为发 `first_person_gyro_look` / `_horizontal` / `_vertical`。
+
+## 3.3.22-alpha.16：陀螺仪接上第一人称（增量注入游戏自己的旋转方法）
+
+上一版定位到第一人称视角的真实入口：`Beyond.Gameplay.View.SnapshotCameraController`，它提供 `RotateCameraHorizontal(float)` / `RotateCameraVertical(float)` 两个增量旋转方法。这一版把它们接上。
+
+**问题本来不在链路，而在消费端。** 陀螺仪从 α 版起就一路通畅：传感器 → `GyroscopeController` → 输入中继 → `FoldPanelLookInput` → `g_mouse_dx/dy`。但这条增量此前**只有一个消费者**——自由视角的 `g_free_target`（`free_camera_runtime.inc:772`，只在自由视角 armed 时读取）。第一人称侧从来没接过它，所以「开了陀螺仪、第一人称下毫无反应」。自由视角的行为本身是对的，本版**不改动它**，只是**新增**一条第一人称消费分支。
+
+- **原生新增 `ApplyFirstPersonLook()`**：在 `PumpFromEngineTick` 中于 `FoldPanelLookInput()` 之后、自由视角取用之后调用。仅当第一人称激活且自由视角未激活时 `exchange(0)` 取增量，换算后经 `InvokeVoid` 调用游戏的 `RotateCameraHorizontal/Vertical`。两相机互斥——它们共用同一个累加器，同时消费会各偷走对方一半的动作。
+- **新增方法合同** `snapshot.rotate_horizontal` / `snapshot.rotate_vertical`，并引入独立就绪标志 `g_first_person_gyro_contract_ready`：这两个方法解析不到时只静默停用陀螺仪路径，**不会**把第一人称相机一起拖下水。
+- **解除一处既有耦合**：`ModuleSettings.setCameraSettings()` 此前写着「陀螺仪开 ⇒ 强制打开自由视角」。那是上一版陀螺仪只能被自由视角消费时的权宜。接上第一人称后它变成有害（会误开自由视角并让两条路径抢同一份增量），已改为「陀螺仪开 ⇒ 打开第一人称」。
+- **新增原生配置键**：`first_person_gyro_look`、`first_person_gyro_horizontal`、`first_person_gyro_vertical`。此前 `first_person_gyro_*` 全部只是「给人看」的字符串，原生一行都不解析——这正是「开关打开却无动作」的另一半原因：原生无法区分陀螺仪和手指。现在 `first_person_gyro_look` 决定增量投给哪个相机，两个 scale 是每中继像素换算给 `RotateCamera*` 的系数。
+- 灵敏度走陀螺仪**自己**的一组值，不复用自由视角的 `mouse_sensitivity`（后者是为屏幕拖拽调的，且会被运镜页覆写）。原生夹取放宽到 ±1000，因为 `RotateCamera*` 的单位无法静态确定，需要实机标定；真正的夹取在应用层（0.2–5.0）。
+- 绕开了设计文档 §3.1 警告的问题：走的是游戏自己的旋转方法，身体跟随、pitch 夹取等下游逻辑照常生效；模块不持有任何朝向真值，因此没有累积漂移、退出也不跳变；玩家触摸输入与之叠加而非被覆盖。
+- 顺带记录：本版把两处文档的表述由「陀螺仪终点错了」更正为「自由视角无需改动，第一人称缺的是消费端」；探针结果文档的方法计数由 41 更正为该控制器实际的 35 个。
+
+`versionName=3.3.22-alpha.16`、`versionCode=30322`。
+
+## 3.3.22-alpha.15：探针闸门改用设置项（设备无 root，前两种通道都走不通）
+
+实机部署时发现探针的前两种启动方式在这台设备上**都不可用**，探针因此仍然开不起来。
+
+- **设备实测**：PJX110、Android 16、**未 root**（`adb shell` 是 `uid=2000`，无 `su`）。这直接否掉两条路：① 我上一轮写进文档的 `su -c 'VAR=1 am start'` ——没有 `su`；② `setprop debug.betterendfield.fp_look_probe 1` ——属性本身能写（shell 有权限），但 **release 包读不到**：`if (!BuildConfig.DEBUG) return false;` 是编译期常量，R8 把整个分支连同属性名字符串一起折掉了（实测 release dex 里 `debug.betterendfield.fp_look_probe` 计数为 **0**）。而 `setprop` 本来也对已在运行的进程无效——模块集是在 `JNI_OnLoad` 里定的。
+- **改用设置项做闸门**：`ModuleSettings.DEBUG_FP_LOOK_PROBE = "debug_first_person_look_probe"`。这条通道**不需要 root**，而且是本仓唯一已经打通「设置进程 → 游戏进程」的既有设施——`FrameworkSettings.publish()` 把本地 `module_settings` 整份镜像到框架远程首选项，游戏侧读的正是那份快照（alpha.12 修跨进程读错文件时确立的机制）。实测 release dex 里该键字符串计数为 **1**，存活。
+- **设置页加了开关**：第一人称页新增「诊断」分组 +「接口探针」开关（`SettingsState.firstPersonLookProbe` + `updateFirstPersonLookProbe`，字符串资源 `camera_fp_look_probe` / `_hint` / `fp_group_diagnostics`），文案明确写清它是研究开关不是功能。改动需**重启游戏**生效（读一次，在库加载时）。
+- 环境变量通道保留为后备（`BETTER_ENDFIELD_FP_LOOK_PROBE=1`），两者任一为真即启用。
+- `versionName=3.3.22-alpha.15`、`versionCode=30322`。
+
+## 3.3.22-alpha.14：修「探针日志到不了日志文件」+ 日志环丢行
+
+实机跑 alpha.13 的探针，日志里 **一条 `fp_look_probe` 都没有**，但 `[runtime] Android module runtime started` 和三个真模块的启动行都在。定位到两个独立缺陷。
+
+### 缺陷一：诊断文件路径被无条件覆写，调用方指定的一律作废
+
+native 日志有三个去向：logcat、内存环（喂设备内日志）、以及 `BETTER_ENDFIELD_DIAGNOSTICS_PATH` 指向的文件。第三处是 release 包**唯一可靠**的落盘通道——注入进程的 logcat 常被系统压掉。而 `RuntimeBootstrap.load()` 只在一件事上设过它：`if (BuildConfig.DEBUG)`，然后**无条件覆盖**。
+
+两个后果叠加：release 构建**从来没有**诊断文件（该行被编译掉）；而按说明从进程环境传进 `BETTER_ENDFIELD_DIAGNOSTICS_PATH` 的做法**同样无效**——调用方设的值会被这行覆盖掉（debug 构建）或根本没人写（release 构建）。所以「探针应该写进指定文件」这件事在任何构建上都不成立。
+
+修法：只在变量**未被设置**时才填默认值。调用方先设的路径优先，这正是「探针往哪写」能生效的前提。默认值同时改为：debug 构建写 `cache/betterendfield-diagnostics.log`，release 构建只在探针被请求时写 `cache/betterendfield-fp-look-probe.log`，其余情况不设——避免给正常会话加一条逐行 fopen 的写路径。
+
+### 缺陷二：日志环丢行后不承认，尾部内容整段消失
+
+`CopyNativeLogSince` 的陈旧游标规则是 `if (cursor > g_ring_total) cursor = 0`。该规则只在「环的总计数只会前进」时成立，而同一进程内模块库重载会让计数**从 0 重开**：此时旧会话留下的游标远大于新计数，于是回绕到 0，把新会话**全部**行重新投递一遍；日志记录侧的单调序号过滤把它们**全部当作重放丢弃**——结果就是面板连着看到的第一屏永远是空的。
+
+同时 `Remember()` 覆盖环形槽位时**从未回退已投递游标**。模块初始化是 305 行的突发（用模块一行一个合约），而中继约 0.5s 才排空一次，一次突发完全可能超过 512 行容量；被挤掉的早期行（正是探针那几行）中继从未见过，却因为游标已经越过它们而被永久跳过。
+
+修法：新增 `g_ring_read` 记录中继已拷出的最高序号；`Remember()` 在写满一圈后把游标顶到仍驻留的最老行，`CopyNativeLogSince` 只在游标落后于驻留窗口（或超出总计数）时才重置，并且不再把「游标领先」误判为需要回绕到 0。环仍然只保留 512 行——丢最老的本来就该丢；不能接受的是**声称它送出去过**。
+
+### 附带：让「探针没跑」和「探针跑了但没结果」不再长得一样
+
+- 模块全部启动后追加一行 `modules started: <id> <id> ...`，未注册任何模块则打印 `(none)`。两种情况需要完全相反的修法，没有这行就区分不开。
+- 探针组件名改用 `fp_look_probe`（原为 `betterendfield.camera`），避免被相机模块自己的大量运行时行淹没——也正是这次差点被淹没的那批行。
+
+`versionName=3.3.22-alpha.14`、`versionCode=30322`。探针仍未取得枚举结果，第一人称陀螺仪仍未实现。
+
+## 3.3.22-alpha.13：陀螺仪方向默认对调 + 第一人称陀螺仪接口探针
+
+- **陀螺仪两个轴默认对调**（实机验收反馈「xy 方向都是反的」）：`first_person_gyro_invert_horizontal` / `first_person_gyro_invert_vertical` 的默认值由 `false` 改为 `true`。原始传感器轴到相机期望的映射在横竖屏下差一个符号，把校正放进默认值而不是改传感器映射，两个开关才仍然有意义——它们依然表示「翻转这个轴」，设备不同的用户可以单独关掉任一个。`FirstPersonGyro.disabled()` 的默认值同步改为 `true`：关闭态与默认态保持同一种指向，重新打开时不会静默翻轴。
+- **为第一人称加入陀螺仪的接口探针**（只读，默认不运行）。本轮先确认了一件与设计文档不符的事实：文档假设的第一人称 look 控制器（`localYaw` / soft_limit / hard_limit）**在本仓库不存在**（全仓 0 命中），且 `ApplyFirstPersonState` 的注释明确写着 orientation **原样保留游戏给出的值**、只把位置移到眼锚点。也就是说陀螺仪没有可直接喂入的入口，把增量直接折进 `CameraState` 又正是文档 §3.1 明确不推荐的（会绕过身体跟随、与瞄准输入抢朝向、退出时跳变）。定位入口需要先知道类里有什么，因此先做只读枚举。
+- 探针本体是 Android 侧模块 `android/app/src/main/cpp/modules/camera/first_person_look_probe.cpp`：枚举 `SnapshotCameraController`、`PlayerController`、`MovementComponent`、`MoveInput` 的方法与候选字段，只打日志、不改任何状态。为此在 Android 运行时里新增 `Il2CppRuntime::DescribeClass`——`ResolveMethod` 只能回答「某个成员在不在」，而定位未记录入口需要的是「有哪些成员」；实现遍历 `class_get_methods_` 并逐条输出签名、入口地址与是否可执行。字段只按候选名逐个询问是否存在，**不做字段枚举**：该运行时没有接字段名 getter，靠猜偏移报出来的字段位置等于伪造证据。
+- 探针默认关闭，不进入正常会话：只有设置进程把 `BETTER_ENDFIELD_FP_LOOK_PROBE=1` 传进游戏进程时才注册，且 `JNI_OnLoad` 的模块判定也会把它算作一次请求（否则没有任何真模块配置时 IL2CPP worker 根本不会启动）。设置侧只有 debug 构建读 `debug.betterendfield.fp_look_probe`，release 构建则接受进程环境里的同名变量，因此验收用的 release 包也能探，不必为探针单独装一个 debug 包。探针运行时把枚举写到游戏 `cache` 目录下的 `betterendfield-fp-look-probe.log`。
+- 桌面侧同名研究目标 `native/research/fp_look_probe/` 保留（走 `EXCLUDE_FROM_ALL`，不进 Android 产物），但它依赖桌面宿主的模块目录与 `.module.ini` 扫描，**该部署方式对 Android 完全不适用**——Android 不编译 `native/shared/host/`，模块是静态编入并按环境变量选择的。
+- `versionName=3.3.22-alpha.13`、`versionCode=30322`。反转对调部分待实机确认；第一人称陀螺仪本身尚未实现，取决于探针结果。
+
+## 3.3.22-alpha.12：修「陀螺仪仍无反应」与「停步后人物朝向固定方向」
+
+### 陀螺仪仍无反应：设置读的是另一个包的文件
+
+- alpha.11 把 `free_camera_mouse_look` 写成了 `true`（该修复确实进了包，日志里能看到），但实机依旧没有任何 `gyroscope` 日志行。零日志本身就是线索：`startGyroscope` 每条路径都会打印，**唯一不打印的分支就是 `!gyro.enabled()` 的提前 `return`**。
+- **根因（实测）**：设置读的是 `ModuleSettings.getFirstPersonGyro(context)` → `preferences(context)` → `FrameworkSettings.open(context)` → `context.getSharedPreferences("module_settings", MODE_PRIVATE)`。`MODE_PRIVATE` 打开的是**该 context 自己所属包**的文件。在游戏进程里 context 是**游戏的** Application，于是打开的是游戏自己的 `module_settings`——那个文件没有任何设置页面会写，七个键全部读成默认值，`enabled=false`，静默返回。
+- 设置进入游戏进程的**唯一**通道是框架远程首选项 `XposedService.getRemotePreferences("module_settings")`（`FrameworkSettings.publish()` 已把本地快照镜像过去）。跨进程读私有文件在设计上不成立：两个包 UID 不同，`/data/user/0/<pkg>` 是 0700。
+- **修法**：`ModuleSettings` 增加 `readFirstPersonGyro(SharedPreferences)` 重载，读取调用方已持有的快照；`XposedEntry` 把 `getRemotePreferences("module_settings")` 这份快照沿 `prepare` → `load` 一路传到 `startGyroscope` / `refreshGyroscope`。保留 `getFirstPersonGyro(Context)` 供设置进程使用，其语义在那里是正确的。
+
+### 停步后人物朝向固定方向：`held_yaw` 被冻在世界坐标里
+
+- **根因（实测，非推测）**：面朝状态机站立分支的原文是
+  `held_yaw = view_yaw - clamp(remainder(view_yaw - held_yaw, 360), -limit, limit)`，
+  然后只**反推** `lateral_yaw = held_yaw - view_yaw`，并重置 `target = 0`。
+  问题在于它**从不把裁剪后的值写回 `lateral_yaw`**。于是站立期间视角继续转动时，`lateral_yaw` 停在原地不动，`held_yaw` 的参考点随视角一起漂走，直到偏置饱和、`held_yaw` 被彻底钉死在一个绝对世界朝向上。
+- 用本机 MSVC 编译原生测试直接复现（视角每帧 +5°，走完后停止）：
+
+  ```
+  walk end   view= 80.0  yaw=125.000
+  stop f0    view= 85.0  yaw=125.000     <- 之后每一帧都是 125.000
+  stop f5    view=110.0  yaw=125.000
+  ```
+
+  人物**冻结在停步瞬间的世界朝向**、完全不再跟随视角——这就是「自动朝向一固定方向」。`target = 0` 让下一次起走从那个冻结值缓动回来，于是又表现为起步时的突跳。
+- **修法**：站立分支改为让偏置保持在**相对视角**的坐标系里，并按与起走相同的 0.35 s 时间常数**释放到零**。这样停步会保持走路结束时的姿态，再平滑回到视角朝向，下一步从零开始、无值可突跳。
+- 释放速率不能沿用起走分支的 16/s：60 Hz 下它在**第一个 16 ms 帧就抹掉 45° 偏置里的 34.8°**，是把突跳换了个方向。已改为 `1/0.35`，实测首帧只移动 2.0°。
+- **测试**：原生 `first_person_facing_tests` 有两条断言其实在**固化这个缺陷**（`standing side look within the limit must keep body yaw` 期望绝对 `yaw==0`、`crossing the yaw wrap` 期望相对 `179` 的差值为 0）。二者都只在视角为 0 / 恰好 179 时成立，本质是在断言「身体冻结在世界坐标」。已改为断言**相对当前视角的偏置**，并新增走路→停止→继续转视角的回归序列。全部通过（见下）。
+
+### 验证
+
+- 原生 `first_person_facing_tests`：全部通过（含新增的「停步必须衰减偏置并跟随视角，不得冻结」与「起步不得从陈旧偏置突跳」）。本机用 `F:/code` 的 MSVC 14.51 编译运行，`BUILD_OK` / `EXIT=0`。
+- Android `:app:compileReleaseJavaWithJavac` 通过。
+- `versionName=3.3.22-alpha.12`、`versionCode=30322`。**仍未实机验收**：陀螺仪轴符号、灵敏度手感、无设备降级路径，以及停步释放的手感（0.35 s 是否过长）都需实机确认。
+
+## 3.3.22-alpha.11：修「陀螺仪开着却没反应」
+
+- **根因（实测）**：`camera_config` 里写的是 `free_camera_mouse_look=false`。这个键**同时**管两件事——Windows 上挂不挂低级鼠标钩子，以及 `StepFreeCamera` 要不要把 `g_mouse_dx/dy` 折进视角。手机上没有光标可挂，所以当初按「不挂钩子」的意图把它写成了 `false`，但代价是连面板拖拽与陀螺仪的增量一起被丢掉了：增量经中继正确到达替身层累计器、也被 `FoldPanelLookInput` 折进了 `g_mouse_dx/dy`，最后在 `StepFreeCamera` 里被跳过。**写 `true` 不会挂出任何钩子**——钩子只在 `_WIN32` 下编译（`#if defined(_WIN32)` 包住 `FreeCameraMouseHook` 与整个 capture 分支），Android 上那个指针项本来就是零。
+- 交付版 alpha.10 的实机日志即为此证：`Free camera enabled` 已在（自由相机确实起来了），但按下播放键后没有任何视角变化，因为开关一开走的就是这条被跳过的路。
+- **副根因**：陀螺仪开着而自由相机没开时，`StepFreeCamera` 根本不被调用（`ApplyFreeCamera` 由 `g_free_camera_active` / `CameraManager::TailLateTick` 守卫），改配置也不会把 `free_camera_enabled` 置真。现改为：陀螺仪开关打开时，同一次写入把自由相机一并置真，`any` 也随之成立，配置才会真的落到磁盘上（否则 `any=false` 会把整段配置清空）。设置页的开关门控同步放宽为 `freeCamera || firstPerson || gyroscopeEnabled`，否则「要用它得先开另一个开关」而那个开关又依赖它。
+- 无陀螺仪设备的降级路径不变：只写一行日志。`versionName=3.3.22-alpha.11`、`versionCode=30322`。**构建与门禁通过，仍未实机验收**。
+
+## 3.3.22-alpha.10：陀螺仪视角输入
+
+- **新增陀螺仪作为视角输入源**（「第一人称」页面新增「陀螺仪」分组）。在**游戏进程内**注册 `SensorManager` 的 `TYPE_GYROSCOPE`（约 200 Hz，`maxReportLatencyUs=0` 不做 batching），把转动手机变成视角输入，与触摸/拖拽走**同一条**增量通路。按文档要求「陀螺仪只是输入源」——它不新建第二套相机状态，也不直接写 `CameraState`。
+- 必须说明的一点：本仓库的第一人称**没有**模块自持的 `localYaw`/`soft_limit`/`hard_limit`/身体跟随代码（全仓检索 0 命中）。第一人称是**游戏原生**的 `snapshot.is_first_person` 相机模式，模块在 `PushStateToUnityCamera` 钩子里**只改眼位与视野、朝向原样保留**（注释原文：orientation is kept exactly as the game produced it）。因此陀螺仪复用的不是一套模块侧限位，而是既有的**输入通路**：它产出的增量与面板拖拽完全同源，下游的灵敏度、反转、俯仰夹取、播放期间忽略转向全部是原桌面代码路径。**这样做也意味着陀螺仪与触摸共用同一份视角状态**，不会出现文档 §3.1 警告的两套角度失配。当前该输入驱动的是**自由视角**；原生第一人称的 Look 输入注入点是后续独立课题，未在本次改动内。
+- **积分用传感器时钟，不用帧时钟**：传感器约 200 Hz 而游戏 60–120 FPS，一帧内有 3–4 个样本。若按帧 `deltaTime` 积分，既会丢掉读数之间的样本，又会让响应随帧率变化。每个样本按 `SensorEvent.timestamp` 积分，只把累计量交出去；单样本 `dt` 上限 50 ms，兜住挂起恢复后的时间戳跳变。
+- **亚像素累积**：200 Hz 下缓慢转动每样本不足一个像素，逐样本取整会把输入抹平。累计在浮点像素域，只输出整像素、小数留给下一次；超过 5 ms 的间隔不会让画面跳。
+- 坐标映射按**屏幕旋转**选择（横屏 `ROTATION_90`/`ROTATION_270` 各一套轴对应），并按文档要求提供**水平/垂直反转**作为设备差异的出口；另有**死区**（默认 0.002 rad/s）与**稳定处理**（一阶低通，默认 0.08，作用于角速度而非累计角度）。
+- **生命周期**：传感器只在**游戏进程**、且原生运行时已加载后才注册（此前没有相机模块可驱动、也没有中继承载增量）；关闭开关会 `unregisterListener` 并清零累计量与时间戳。设置页每次写相机配置（陀螺仪与相机同屏同事务提交）都会重新读取存档并**热启停**传感器，无需重启游戏。无陀螺仪的设备会写一行日志说明，而不是静默失效。
+- 启动配置补 `first_person_gyro_*` 七个键；`ModuleSettings.FirstPersonGyro` 单一记录类承载归一化与默认值，夹取范围与 `GyroscopeController` 接受的区间一一对应（灵敏度 0.2–5.0、死区 0–0.25、平滑 0–0.9）。陀螺仪**不**单独触发相机模块加载（它驱动的是已有相机模式的输入），页面据同一条件置灰。
+- Android `versionName=3.3.22-alpha.10`、`versionCode=30322`（与 alpha.1 ~ alpha.9 同值）；桌面端仍为 3.3.0。**构建与门禁通过，尚未实机验收**：陀螺仪轴符号、灵敏度手感、无设备降级路径均需实机确认。
+
 ## 3.3.22-alpha.9
 
 - **相机参数不再需要重启游戏才生效**（方案里原本列为「可选」的 P4，本轮立项并完成）。此前整份相机配置是**启动时读一次**的：设置应用把它写进 `BETTER_ENDFIELD_CAMERA_CONFIG` 环境变量，游戏进程在加载原生库之前读一次，之后改任何滑杆都要退出游戏重进。现在保存设置页的任何相机项都会**当场投递给正在运行的游戏进程**——运镜速度、视野、转向灵敏度这类需要看着画面调的参数终于能边看边调。

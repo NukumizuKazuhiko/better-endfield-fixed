@@ -236,6 +236,20 @@ set_target_properties(BetterEndfield.MusicProbe PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${BETTER_ENDFIELD_STAGE_DIR}/research"
 )
 
+# Read-only research probe that answers where the game's own first-person look
+# input lives, so a gyroscope source can feed that instead of writing
+# CameraState. Excluded from the default build and the release layout like the
+# other probes: it only enumerates metadata and logs.
+add_library(BetterEndfield.FpLookProbe SHARED EXCLUDE_FROM_ALL
+    research/fp_look_probe/module.cpp
+)
+better_endfield_target_defaults(BetterEndfield.FpLookProbe)
+set_target_properties(BetterEndfield.FpLookProbe PROPERTIES
+    OUTPUT_NAME "BetterEndfield.FpLookProbe"
+    RUNTIME_OUTPUT_DIRECTORY "${BETTER_ENDFIELD_STAGE_DIR}/research"
+    LIBRARY_OUTPUT_DIRECTORY "${BETTER_ENDFIELD_STAGE_DIR}/research"
+)
+
 # Standalone research probe for the mobile-UI input path. Also excluded from
 # the default build: it injects synthetic touch to answer whether the Unity
 # backend surfaces WM_POINTER as a Touchscreen device, and is not shipped.

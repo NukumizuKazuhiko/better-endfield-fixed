@@ -177,6 +177,82 @@ fun FirstPersonPage(state: SettingsState) {
                     enabled = state.firstPersonTransitionSecondsAvailable,
                 )
             }
+            GroupLabel(stringResource(R.string.fp_group_gyroscope))
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                SwitchRow(
+                    title = stringResource(R.string.camera_fp_gyroscope),
+                    description = stringResource(R.string.camera_fp_gyroscope_hint),
+                    checked = state.gyroscopeEnabled,
+                    onCheckedChange = state::updateGyroscopeEnabled,
+                    enabled = state.gyroscopeAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_gyroscope_horizontal),
+                    value = state.gyroscopeHorizontalSensitivity,
+                    onValueChange = state::updateGyroscopeHorizontalSensitivity,
+                    valueRange = ModuleSettings.FirstPersonGyro.SENSITIVITY_MINIMUM.toFloat()..
+                        ModuleSettings.FirstPersonGyro.SENSITIVITY_MAXIMUM.toFloat(),
+                    steps = 480,
+                    decimals = 2,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_gyroscope_vertical),
+                    value = state.gyroscopeVerticalSensitivity,
+                    onValueChange = state::updateGyroscopeVerticalSensitivity,
+                    valueRange = ModuleSettings.FirstPersonGyro.SENSITIVITY_MINIMUM.toFloat()..
+                        ModuleSettings.FirstPersonGyro.SENSITIVITY_MAXIMUM.toFloat(),
+                    steps = 480,
+                    decimals = 2,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+                SwitchRow(
+                    title = stringResource(R.string.camera_fp_gyroscope_invert_horizontal),
+                    description = stringResource(R.string.camera_fp_gyroscope_invert_horizontal_hint),
+                    checked = state.gyroscopeInvertHorizontal,
+                    onCheckedChange = state::updateGyroscopeInvertHorizontal,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+                SwitchRow(
+                    title = stringResource(R.string.camera_fp_gyroscope_invert_vertical),
+                    description = stringResource(R.string.camera_fp_gyroscope_invert_vertical_hint),
+                    checked = state.gyroscopeInvertVertical,
+                    onCheckedChange = state::updateGyroscopeInvertVertical,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_gyroscope_smoothing),
+                    value = state.gyroscopeSmoothing,
+                    onValueChange = state::updateGyroscopeSmoothing,
+                    valueRange = ModuleSettings.FirstPersonGyro.SMOOTHING_MINIMUM.toFloat()..
+                        ModuleSettings.FirstPersonGyro.SMOOTHING_MAXIMUM.toFloat(),
+                    steps = 900,
+                    decimals = 3,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_gyroscope_deadzone),
+                    value = state.gyroscopeDeadzone,
+                    onValueChange = state::updateGyroscopeDeadzone,
+                    valueRange = ModuleSettings.FirstPersonGyro.DEADZONE_MINIMUM.toFloat()..
+                        ModuleSettings.FirstPersonGyro.DEADZONE_MAXIMUM.toFloat(),
+                    steps = 250,
+                    decimals = 4,
+                    enabled = state.gyroscopeTuningAvailable,
+                )
+            }
+            GroupLabel(stringResource(R.string.fp_group_diagnostics))
+            Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
+                // A research switch, kept beside the feature it is researching so
+                // it is not mistaken for one. It logs the game's look entry
+                // points on the next launch and changes nothing else.
+                SwitchRow(
+                    title = stringResource(R.string.camera_fp_look_probe),
+                    description = stringResource(R.string.camera_fp_look_probe_hint),
+                    checked = state.firstPersonLookProbe,
+                    onCheckedChange = state::updateFirstPersonLookProbe,
+                )
+            }
         }
     }
 }

@@ -95,6 +95,7 @@ add_library(betterendfield_android SHARED
     modules/custom_model/android_mesh_builder.cpp
     "${BETTER_ENDFIELD_ROOT}/native/modules/custom_model/module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/modules/custom_model/native_mesh_layout_android.cpp"
+    modules/camera/first_person_look_probe.cpp
     modules/character_voice/character_voice_module.cpp
     modules/desktop/desktop_module.cpp
     modules/login_model/login_model_module.cpp

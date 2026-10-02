@@ -437,6 +437,59 @@ std::string Il2CppRuntime::DescribeMethod(const char* assembly, const char* name
     return result + " overloads=" + std::to_string(matches);
 }
 
+std::string Il2CppRuntime::DescribeClass(const char* assembly, const char* namespaze,
+        const char* klass) const {
+    auto target = ResolveClass(assembly, namespaze, klass);
+    if (!target.info) {
+        return std::string(assembly) + ":" + namespaze + "." + klass + " class unavailable";
+    }
+    auto type_name = [&](const Il2CppType* type) {
+        char* raw = type ? type_get_name_(type) : nullptr;
+        std::string text = raw ? raw : "?";
+        if (raw && free_) free_(raw);
+        return text;
+    };
+
+    std::string result = std::string(assembly) + ":" + namespaze + "." + klass;
+    result += " extends=";
+    const char* own_name = class_get_name_ ? class_get_name_(target.info) : nullptr;
+    result += own_name ? own_name : "?";
+
+    size_t methods = 0;
+    if (class_get_methods_ && method_get_name_) {
+        void* iterator = nullptr;
+        while (const MethodInfo* candidate = class_get_methods_(target.info, &iterator)) {
+            const char* name = method_get_name_(candidate);
+            if (!name) continue;
+            ++methods;
+            result += " | m " + std::string(name) + "(";
+            const uint32_t count = method_get_parameter_count_
+                ? method_get_parameter_count_(candidate) : 0;
+            for (uint32_t index = 0; index < count; ++index) {
+                if (index) result += ",";
+                result += type_name(method_get_parameter_
+                    ? method_get_parameter_(candidate, index) : nullptr);
+            }
+            result += ")->" + type_name(method_get_return_type_
+                ? method_get_return_type_(candidate) : nullptr);
+            void* entry = reinterpret_cast<const Il2CppMethodInfoPrefix*>(candidate)
+                ->method_pointer;
+            char state[64];
+            std::snprintf(state, sizeof(state), " entry=%p:%s", entry,
+                IsExecutableAddress(entry) ? "code" : "stub");
+            result += state;
+        }
+    }
+
+    // This runtime wires no field-name getter, so a class's field list cannot be
+    // named without the il2cpp_class_get_fields export. Listing anonymous
+    // offsets would be noise, so fields are reported by name only through
+    // DescribeField-style lookups at the call site; the count below is omitted
+    // for the same reason rather than printed as zero and read as "no fields".
+    result += " methods=" + std::to_string(methods);
+    return result;
+}
+
 bool Il2CppRuntime::IsInstanceOf(void* value, const ResolvedClass& type) const {
     if (!library_ || !value || !type.info) return false;
     auto object_class = ResolveExport<Il2CppClass*(*)(void*)>(library_, "il2cpp_object_get_class");

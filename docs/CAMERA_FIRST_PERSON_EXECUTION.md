@@ -12,6 +12,14 @@
 
 本机 VFS 离线解包见 `D:\CodexData\headwear-audit\README.md`：庄方仪 `cloth_01_lod0` 是单个子网格，既有头部骨骼主导的顶点/三角面，也有大量身体面，不能整 Renderer 隐藏。实机初始化报告 `Mesh::get_vertexBufferCount`、`GetVertexAttributeFormat/Dimension/Stream/Offset`、`GetVertexBufferStride`、`GetSubMesh_Injected`、`SetSubMesh_Injected`、`SetIndexBufferParams`、`InternalSetIndexBufferData` 等绑定缺失，最终为 `named GPU readback/clone bindings unavailable`。因此现有局部网格补丁未运行，组合头饰目标未通过；下一步必须先取得完整、可验证的 Android 顶点/索引读取与上传合同，再在真实角色和 LOD 中验证局部隐藏及阴影，不能扩大整块 `ShadowsOnly` 判定以掩盖失败。
 
+进一步读取庄方仪 `cloth_01_lod0` 序列化标志：`m_IsReadable=False`、`m_KeepVertices=False`、`m_KeepIndices=False`。该网格的 52,106 个三角面按头部骨骼权重分成 6,548 个纯头部面与 45,558 个纯身体面，边界没有混合面；这为局部裁剪提供了离线 fixture，但不能证明运行时 GPU 读取、所有 LOD 或其他角色。Unity 2021.3 的 `Mesh.AcquireReadOnlyMeshData` 要求可读网格，不能替代 GPU 路径。用户明确要求保留头部阴影，故不将 `first_person_external_head_scale` 自动启用，也不把缩头作为该目标的完成证明。
+
+用户提供的 `E:\Downloads\终末地EE9.28.zip` 内 Windows `.addon64` 已有定点静态逆向报告 `D:\CodexData\headwear-audit\EE-20260928-reverse-report.md`（样本 SHA-256 `3B552B839FE578DD6F1DF2ADE57FAE5086938B978C3C896C6DEAD1AAA4E2D22A`）。报告和关键指令复核显示：它通过 GPU buffer staging 读取不可读网格，在独立克隆的索引中退化选中的三角面，原网格留作 `shadowProxyMesh`，并对退出恢复做所有权检查。这与当前 Camera 的局部裁剪/阴影设计同向；报告没有 Android ARM64 的 icall 地址、ABI 或设备读回结果，不能仅凭 Windows RVA 改写 Android 生产网格。
+
+同日从 PJX110 已安装的游戏 1.5.3 拉取 `libunity.so`（SHA-256 `46D5658A71BD35580C9F5D91D41C39B5653201CF142F34542FDD8DA856A6B4C8`）做只读静态接口核对，详见 `D:\CodexData\headwear-audit\PJX110-android-mesh-api-gate.md`。明确登记了 `Mesh::GetVertexBufferImpl`，但未在明文或 256 种单字节 XOR 名称搜索中找到 EE 路径所需的 `Mesh::GetIndexBufferImpl` 与 `GraphicsBuffer::InternalGetData`；现有 Android 相机日志也报网格补丁绑定缺失。该证据不排除所有替代渲染方案，但足以继续阻止把 Windows 的同步 GPU 读回和索引写回直接移植到当前 Android 生产路径。
+
+同日找到可继续验证的 Android 资源路径，取证记录见 `D:\CodexData\headwear-audit\PJX110-android-asset-mesh-route.md`。设备 VFS 的 Android manifest 可解析，庄方仪世界/界面模型依赖闭包为 89/89 包、52,882,609 字节；只读提取后 `NativeAssetReader` 解析 49 个 Mesh 和 52 个 SkinnedMeshRenderer，后端错误为 0。与实机部件树同名的 `S_actor_zhuangfy_cloth_01_lod1` 可导出 21,689 顶点、67,080 索引、207 骨骼的源数据；按头骨子树权重大于 0.5 分类，22,360 个三角面中 3,300 个纯头部、19,060 个纯身体、0 个跨界，且只有一个子网格、无 BlendShape。这为“从当前 Android 资源离线生成独立可见网格，保留运行时原网格作阴影代理”的路线提供了样本证据；尚未实现原始顶点流/骨骼/材质的运行时一致性门禁、全角色与所有 LOD 覆盖或实机画面，因此组合头饰目标仍未通过。
+
 ## 2026-09-30：终结技与角色界面视角收回（用户侧验收通过）
 
 范围为手机 LSPosed 模块的第一人称自动让出与恢复。用户确认终结技动画和角色界面期间交还游戏原生视角，结束后自动恢复且不关闭第一人称开关；陀螺仪与头饰隐藏不在本轮。Android 与 Windows 继续编译同一份 Camera owner。

@@ -42,10 +42,36 @@ final class ModuleSettings {
     private static final String CAMERA_FP_EYE_HEIGHT = "camera_first_person_eye_height";
     private static final String CAMERA_FP_NEAR_CLIP = "camera_first_person_near_clip";
     private static final String CAMERA_FP_EXTEND_LOOK_RANGE = "camera_first_person_extend_look_range";
+    // The gyroscope look source. These live alongside the first-person keys
+    // because the sensor only ever feeds the look channel while the camera
+    // module is in the process; they are not part of the native configuration
+    // string's contract, only the settings screen's record of the user's choice.
+    private static final String CAMERA_FP_GYRO_ENABLED = "camera_first_person_gyro_enabled";
+    private static final String CAMERA_FP_GYRO_HORIZONTAL = "camera_first_person_gyro_horizontal";
+    private static final String CAMERA_FP_GYRO_VERTICAL = "camera_first_person_gyro_vertical";
+    private static final String CAMERA_FP_GYRO_INVERT_HORIZONTAL =
+            "camera_first_person_gyro_invert_horizontal";
+    private static final String CAMERA_FP_GYRO_INVERT_VERTICAL =
+            "camera_first_person_gyro_invert_vertical";
+    private static final String CAMERA_FP_GYRO_DEADZONE = "camera_first_person_gyro_deadzone";
+    private static final String CAMERA_FP_GYRO_SMOOTHING = "camera_first_person_gyro_smoothing";
     static final float FP_EYE_FORWARD_MINIMUM = 0f, FP_EYE_FORWARD_MAXIMUM = 0.5f;
     static final float FP_EYE_HEIGHT_MINIMUM = -0.5f, FP_EYE_HEIGHT_MAXIMUM = 0.5f;
     static final float FP_NEAR_CLIP_MINIMUM = 0.001f, FP_NEAR_CLIP_MAXIMUM = 1f;
     static final String CAMERA_CONFIGURATION = "camera_configuration";
+
+    /**
+     * Turns on the read-only first-person look probe for the next game launch.
+     *
+     * This is a research switch, not a feature: it exists only so the developer
+     * can ask the game what methods and fields its look path actually has. It is
+     * deliberately a preference rather than a system property or an environment
+     * variable, because the phone is not rooted and the settings app is the only
+     * thing that can reach the game process without root. It is read once at
+     * library load, so toggling it takes effect on the next launch, and it does
+     * nothing at all unless it is on.
+     */
+    static final String DEBUG_FP_LOOK_PROBE = "debug_first_person_look_probe";
 
     /**
      * Where the imported VMD camera motion lives once the game process has
@@ -257,6 +283,141 @@ final class ModuleSettings {
     }
 
     /**
+     * The gyroscope look source.
+     *
+     * Every number is clamped here to the range {@link GyroscopeController}
+     * accepts, so a value this screen allows can never be silently corrected on
+     * its way to the sensor loop. The record is also the one place the settings
+     * screen, the game-process bootstrap and the controller agree on defaults:
+     * {@link #disabled()} is what a fresh install and every "not configured"
+     * read produce, which is why the sensor is never armed by accident.
+     *
+     * <p>The two invert switches exist because the correct sign depends on how a
+     * device is held and how its sensor axes are laid out; the controller picks
+     * a sensible mapping from the screen rotation and these are the escape hatch
+     * for a device that disagrees. They are not a substitute for getting the
+     * default right.
+     */
+    record FirstPersonGyro(boolean enabled, double horizontalSensitivity,
+            double verticalSensitivity, boolean invertHorizontal, boolean invertVertical,
+            double deadzone, double smoothing) {
+        /** Matches the controller's own clamps: 0.2–5.0× either axis. */
+        static final double SENSITIVITY_MINIMUM = 0.2, SENSITIVITY_MAXIMUM = 5.0;
+        /** Below the sensor's noise floor is meaningless; above 0.25 swallows real input. */
+        static final double DEADZONE_MINIMUM = 0.0, DEADZONE_MAXIMUM = 0.25;
+        /** 0 is no filtering at all; the controller rejects anything heavier than this. */
+        static final double SMOOTHING_MINIMUM = 0.0, SMOOTHING_MAXIMUM = 0.9;
+
+        FirstPersonGyro {
+            horizontalSensitivity = bounded(horizontalSensitivity, 1.0,
+                    SENSITIVITY_MINIMUM, SENSITIVITY_MAXIMUM);
+            verticalSensitivity = bounded(verticalSensitivity, 1.0,
+                    SENSITIVITY_MINIMUM, SENSITIVITY_MAXIMUM);
+            deadzone = bounded(deadzone, GyroscopeController.defaultDeadzone(),
+                    DEADZONE_MINIMUM, DEADZONE_MAXIMUM);
+            smoothing = bounded(smoothing, GyroscopeController.defaultSmoothing(),
+                    SMOOTHING_MINIMUM, SMOOTHING_MAXIMUM);
+        }
+
+        /** The state every read starts from, and what "off" means everywhere. */
+        static FirstPersonGyro disabled() {
+            // Inversion matches the read defaults: off and default are the same
+            // pointing behaviour, so re-enabling never silently re-flips an axis.
+            return new FirstPersonGyro(false, 1.0, 1.0, true, true,
+                    GyroscopeController.defaultDeadzone(), GyroscopeController.defaultSmoothing());
+        }
+
+        /**
+         * The keys the native camera module parses.
+         *
+         * The sensor itself is armed on this side and the deltas reach the game
+         * through the input relay, so nothing here is what "turns the gyroscope
+         * on". What the native side does need is where those deltas should go:
+         * {@code first_person_gyro_look} is what selects the first-person
+         * consumer over the free camera's, and the two scales are what the game's
+         * RotateCamera* receive per relay pixel. Writing only the enabled flag
+         * (as an earlier revision did) left the native side unable to tell a
+         * gyroscope from a finger, so the switch turned on and nothing moved.
+         *
+         * <p>The scales are the gyroscope's own, not the free camera's
+         * {@code mouse_sensitivity}: that value is tuned for a drag across a
+         * screen, and it is also clobbered by the camera-motion screen.
+         */
+        String toIniLines() {
+            return "first_person_gyro_enabled=" + enabled + "\n"
+                    + "first_person_gyro_look=" + enabled + "\n"
+                    + "first_person_gyro_horizontal=" + number(horizontalSensitivity) + "\n"
+                    + "first_person_gyro_vertical=" + number(verticalSensitivity) + "\n"
+                    + "first_person_gyro_invert_horizontal=" + invertHorizontal + "\n"
+                    + "first_person_gyro_invert_vertical=" + invertVertical + "\n"
+                    + "first_person_gyro_deadzone=" + number(deadzone) + "\n"
+                    + "first_person_gyro_smoothing=" + number(smoothing) + "\n";
+        }
+
+        void store(SharedPreferences.Editor edit) {
+            edit.putBoolean(CAMERA_FP_GYRO_ENABLED, enabled)
+                    .putString(CAMERA_FP_GYRO_HORIZONTAL, number(horizontalSensitivity))
+                    .putString(CAMERA_FP_GYRO_VERTICAL, number(verticalSensitivity))
+                    .putBoolean(CAMERA_FP_GYRO_INVERT_HORIZONTAL, invertHorizontal)
+                    .putBoolean(CAMERA_FP_GYRO_INVERT_VERTICAL, invertVertical)
+                    .putString(CAMERA_FP_GYRO_DEADZONE, number(deadzone))
+                    .putString(CAMERA_FP_GYRO_SMOOTHING, number(smoothing));
+        }
+    }
+
+    static FirstPersonGyro getFirstPersonGyro(Context context) {
+        return readFirstPersonGyro(preferences(context));
+    }
+
+    /** The settings-process read of the look probe switch. */
+    static boolean readFirstPersonLookProbe(Context context) {
+        return preferences(context).getBoolean(DEBUG_FP_LOOK_PROBE, false);
+    }
+
+    /**
+     * Written from the settings process only. The value reaches the game through
+     * the framework's remote preferences, which is what makes this switch usable
+     * on a non-rooted device where neither `setprop` nor an exported environment
+     * variable can reach the game's process.
+     */
+    static void writeFirstPersonLookProbe(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean(DEBUG_FP_LOOK_PROBE, enabled).apply();
+    }
+
+    /**
+     * The same read, from a preferences snapshot the caller already holds.
+     *
+     * The game process must use this overload: {@link #preferences(Context)}
+     * opens the file that belongs to <em>the context's own package</em>, and the
+     * context there is the game's Application, so the file it would open is the
+     * game's own "module_settings" — which no settings screen ever writes. The
+     * module's values reach the game through the framework's remote
+     * preferences, and {@code getRemotePreferences("module_settings")} is what
+     * carries them.
+     */
+    static FirstPersonGyro readFirstPersonGyro(SharedPreferences prefs) {
+        return new FirstPersonGyro(
+                prefs.getBoolean(CAMERA_FP_GYRO_ENABLED, false),
+                parse(prefs.getString(CAMERA_FP_GYRO_HORIZONTAL, "1"), 1),
+                parse(prefs.getString(CAMERA_FP_GYRO_VERTICAL, "1"), 1),
+                // Both axes default to inverted. The raw sensor axes reach the
+                // camera looking right and looking down in the opposite sense to
+                // what the module expects, which the first device run confirmed
+                // as "both axes are backwards". Keeping that correction in the
+                // defaults rather than in the sensor mapping leaves the two
+                // switches meaningful: they still mean "flip this axis", and a
+                // user whose device differs can turn either one back off.
+                prefs.getBoolean(CAMERA_FP_GYRO_INVERT_HORIZONTAL, true),
+                prefs.getBoolean(CAMERA_FP_GYRO_INVERT_VERTICAL, true),
+                parse(prefs.getString(CAMERA_FP_GYRO_DEADZONE,
+                        String.valueOf(GyroscopeController.defaultDeadzone())),
+                        GyroscopeController.defaultDeadzone()),
+                parse(prefs.getString(CAMERA_FP_GYRO_SMOOTHING,
+                        String.valueOf(GyroscopeController.defaultSmoothing())),
+                        GyroscopeController.defaultSmoothing()));
+    }
+
+    /**
      * The free camera's motion, keyframe and VMD parameters.
      *
      * One normalized save/read contract, like {@link FirstPersonAdvanced}: every
@@ -456,6 +617,38 @@ final class ModuleSettings {
             boolean extendLookRange,
             FirstPersonAdvanced advanced,
             CameraMotion motion) {
+        return setCameraSettings(context, disableDither, freeCamera, worldPause, firstPerson,
+                hideHead, fillNeck, movementSpeed, fieldOfView, firstPersonFov, eyeForward,
+                eyeHeight, nearClip, extendLookRange, advanced, motion,
+                getFirstPersonGyro(context));
+    }
+
+    /**
+     * The camera configuration, with the gyroscope block passed explicitly.
+     *
+     * The gyroscope is a second entry point because it is edited by its own
+     * screen: the first-person page writes it, and every other camera write has
+     * to carry the stored value forward rather than reset it. Overloading keeps
+     * the many existing callers from having to know the sensor exists.
+     */
+    static CameraWrite setCameraSettings(
+            Context context,
+            boolean disableDither,
+            boolean freeCamera,
+            boolean worldPause,
+            boolean firstPerson,
+            boolean hideHead,
+            boolean fillNeck,
+            double movementSpeed,
+            double fieldOfView,
+            double firstPersonFov,
+            double eyeForward,
+            double eyeHeight,
+            double nearClip,
+            boolean extendLookRange,
+            FirstPersonAdvanced advanced,
+            CameraMotion motion,
+            FirstPersonGyro gyro) {
         eyeForward = bounded(eyeForward, 0.03, 0.0, 0.5);
         eyeHeight = bounded(eyeHeight, 0.05, -0.5, 0.5);
         nearClip = bounded(nearClip, 0.03, 0.001, 1.0);
@@ -473,7 +666,26 @@ final class ModuleSettings {
         // read while the free camera is armed, so offering it alone would be a
         // switch that does nothing.
         boolean pause = worldPause && freeCamera;
+        // The gyroscope does NOT force the free camera on.
+        //
+        // It used to: while the gyroscope's deltas had exactly one consumer -
+        // StepFreeCamera, which reads them only with the free camera armed -
+        // leaving the free camera off made the switch a lie, so turning the
+        // gyroscope on turned on the camera it could reach. That is no longer the
+        // arrangement. The native side now folds the same deltas into the game's
+        // own first-person rotation, so the gyroscope has a consumer with the
+        // free camera down (see ApplyFirstPersonLook in
+        // native/modules/camera/module.cpp). Forcing the free camera on would now
+        // be actively harmful: both consumers drain one accumulator, so the two
+        // cameras would each steal half of the other's motion.
+        //
+        // The module still has to be running for any of this to exist, and the
+        // first person is what the gyroscope is for, so it keeps the test.
         boolean any = disableDither || freeCamera || firstPerson;
+        if (gyro.enabled()) {
+            firstPerson = true;
+            any = true;
+        }
         String previous = preferences(context).getString(CAMERA_CONFIGURATION, "");
         if (previous == null) previous = "";
         String configuration = any
@@ -494,13 +706,20 @@ final class ModuleSettings {
                         + "first_person_near_clip=" + number(nearClip) + "\n"
                         + "first_person_extend_look_range=" + extendLookRange + "\n"
                         + advanced.toIniLines()
+                        + gyro.toIniLines()
                         + "toggle_hotkey=" + Hotkeys.FREE_CAMERA_NAME + "\n"
                         + "pause_hotkey=" + Hotkeys.WORLD_PAUSE_NAME + "\n"
                         + "first_person_hotkey=" + Hotkeys.FIRST_PERSON_NAME + "\n"
-                        // There is no cursor to hook on a phone; without this
-                        // the desktop default (true) would arm the low-level
-                        // mouse hook the moment the free camera comes up.
-                        + "free_camera_mouse_look=false\n"
+                        // "false" here would mean "ignore the look channel", not
+                        // "do not hook a cursor". The key gates two different
+                        // things: on Windows it arms the low-level mouse hook,
+                        // but StepFreeCamera also skips the panel's drag deltas
+                        // when it is off, because both feed g_mouse_dx/dy. There
+                        // is no cursor to hook on a phone, yet the on-screen look
+                        // pad and the gyroscope still have to steer the camera,
+                        // so the flag has to stay on and the pointer terms simply
+                        // stay zero.
+                        + "free_camera_mouse_look=true\n"
                         + "free_camera_smoothing=0.3\n"
                         + motion.toIniLines()
                         // The panel presses the exact codes the desktop module
@@ -535,6 +754,7 @@ final class ModuleSettings {
                 .putString(CAMERA_CONFIGURATION, configuration);
         advanced.store(edit);
         motion.store(edit);
+        gyro.store(edit);
         edit.commit();
         if (configuration.equals(previous)) return new CameraWrite(false, false, false);
         // The native module also reads this string once, from the environment

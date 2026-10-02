@@ -21,12 +21,23 @@ std::mutex g_log_mutex;
 std::string g_ring[kRingCapacity];
 std::size_t g_ring_next = 0;
 std::size_t g_ring_total = 0;
+// Highest serial the relay has already copied out. The relay drains the whole
+// ring roughly twice a second while modules initialize, but a single burst can
+// still overrun 512 lines between two drains, and the ring would then have
+// discarded lines the relay never saw. Dropping the oldest line is what a ring
+// must do; what is not acceptable is claiming it was delivered.
+std::size_t g_ring_read = 0;
 
 void Remember(const char* component, const char* message) {
     std::lock_guard<std::mutex> lock(g_log_mutex);
     g_ring[g_ring_next] = std::string("[") + component + "] " + message;
     g_ring_next = (g_ring_next + 1) % kRingCapacity;
     ++g_ring_total;
+    // Serial numbers are 1-based (CopyNativeLogSince prints index + 1), so the
+    // oldest line still resident after this write is g_ring_total - capacity.
+    const std::size_t oldest = g_ring_total > kRingCapacity
+        ? g_ring_total - kRingCapacity + 1 : 1;
+    if (g_ring_read + 1 < oldest) g_ring_read = oldest - 1;
 }
 
 void Write(int priority, const char* component, const char* message) {
@@ -55,7 +66,15 @@ void LogError(const char* component, const char* message) {
 
 std::string CopyNativeLogSince(std::size_t& cursor) {
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    if (cursor > g_ring_total) cursor = 0;  // stale reader from an old session
+    // A cursor from a previous session of the same process — the relay is
+    // restarted when the module library is reloaded — can be larger than what
+    // has been logged so far. Rewinding to 0 is wrong there: it re-delivers
+    // every line of the new session, and the relay's serial filter would then
+    // drop all of them as replays. Only a cursor that is behind the retained
+    // window is stale; one that is simply ahead is reset to the window start.
+    if (cursor + 1 < g_ring_read || cursor > g_ring_total) cursor = g_ring_read;
+    // Never fall further behind than the ring retains, or the surviving lines
+    // are silently skipped.
     if (g_ring_total - cursor > kRingCapacity) cursor = g_ring_total - kRingCapacity;
     std::string out;
     for (std::size_t i = cursor; i < g_ring_total; ++i) {

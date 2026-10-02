@@ -305,7 +305,7 @@ public final class XposedEntry extends XposedModule {
                         RuntimeBootstrap.prepare(application, context, loader, configs,
                                 settings.getLong(ModuleSettings.VMD_BYTES, 0L),
                                 name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
-                                this::installFrames, this::report);
+                                this::installFrames, this::report, settings);
                     },"BetterEndfield-InstalledModels").start();
                 } catch (Throwable error) { report("bootstrap failed: " + error); }
                 return result;
@@ -400,8 +400,26 @@ public final class XposedEntry extends XposedModule {
     private boolean prepareCommand(String payload) {
         String[] parts = splitCommand(payload);
         if (parts == null || !"camera_config".equals(parts[0])) return true;
-        if (!parts[1].contains(ModuleSettings.VMD_FILE_SLOT)) return true;
+        // Every camera configuration write is also the moment the gyroscope
+        // settings may have changed: they are edited on the same screen and
+        // committed in the same transaction. Re-arming here keeps the sensor in
+        // step with the configuration without a game restart, and without a
+        // second cross-process channel.
         Context game = gameContext;
+        if (game != null) {
+            // The snapshot is re-read here for the same reason the .vmd length
+            // below is: the service-backed proxy can be stale, and this is the
+            // moment the new values were just committed. An unavailable
+            // snapshot is not fatal to the reload - the sensor simply keeps its
+            // previous settings.
+            try {
+                RuntimeBootstrap.refreshGyroscope(game,
+                        getRemotePreferences("module_settings"), RuntimeLog::record);
+            } catch (RuntimeException unavailable) {
+                RuntimeLog.record("gyroscope refresh skipped: settings snapshot unavailable");
+            }
+        }
+        if (!parts[1].contains(ModuleSettings.VMD_FILE_SLOT)) return true;
         if (game == null) return true;
         long declared;
         try {
