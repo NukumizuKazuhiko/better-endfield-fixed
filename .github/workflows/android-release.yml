@@ -16,12 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.3.22-alpha.9)'
+        description: 'Version to tag and title; must match versionName in android/app/build.gradle.kts (e.g. 3.4.0)'
         required: true
         # Tracks versionName on the branch this runs against. A stale default is
         # harmless -- the run stops on the mismatch check rather than tagging a
         # version the source does not declare -- but a wrong one wastes a build.
-        default: '3.3.22-alpha.21'
+        default: '3.4.0'
       draft:
         description: 'Create the release as a draft instead of publishing it'
         type: boolean
@@ -106,9 +106,16 @@ jobs:
           sed -i '/add_subdirectory(example)/d' tools/android-toolchain/dobby-1.0.5/CMakeLists.txt
           test -f tools/android-toolchain/dobby-1.0.5/CMakeLists.txt
 
+      - name: Fetch verified headwear catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/Camera/fetch_android_headwear_catalog.py --output "$RUNNER_TEMP/headwear"
+          echo "HEADWEAR_CATALOG_DIR=$RUNNER_TEMP/headwear/catalog-bundled" >> "$GITHUB_ENV"
+
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleRelease -PheadwearCatalogDir="$HEADWEAR_CATALOG_DIR" --no-daemon --stacktrace
 
       - name: Assert the APK carries the release identity
         run: |

@@ -1,5 +1,11 @@
 # 第一人称 S0–S8 执行合同
 
+## 2026-10-02：Android 3.4.0 正式版与 CI 资源来源
+
+用户确认将已验收的 3.3.22-alpha.21 合成包递进为 Android 正式版 3.4.0（versionCode 30400），并允许公开 834 份头饰资源。完整 `catalog-bundled`（834 份 `.behw` 加 `coverage.json`）已作为 `headwear-catalog-v3-834.zip` 附在固定保留的 `v3.3.22-alpha.21` Release；归档 SHA-256 为 `BEAF2135063C962D382129098B65A3779D18ADF515EBDAC1FBD292E7B4644A78`。Android debug/release CI 共用 `tools/Camera/fetch_android_headwear_catalog.py` 下载、验摘要和限定解压，再将完整目录传给 Gradle `headwearCatalogDir`；Gradle 原有 834 份 coverage、摘要与已接受萤石 profile 校验继续是打包门禁。运行时仍只读 APK 内置资源，不访问 Release。用户明确后续 Release 保留；此前删除旧 Release 是为了移除未修复版本，不是通用清理规则。上游桌面版的本地同名 `v3.4.0` tag 已删除，以便本仓库 Android 正式版占用该 tag；上游仓库自身 tag 不在本次操作范围。
+
+本轮本地复核：从公开 Release 重新下载归档、SHA-256 校验与 835/835 文件比对通过；已有打包器生成资源 ID `1fb67e1585ec27b6013437d008a989c48fe18555dd3d6c1c02efa79b37471640`。以下载目录运行 Android `:app:assembleRelease :app:verifyReleaseEntryPoints` 与 `:app:assembleDebug` 均成功。Release APK 读回 `versionName=3.4.0`、`versionCode=30400`，834 份资源加 manifest 与 alpha.21 已验收 APK 835/835 逐字节一致，签名证书仍为 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。本机尚未对新 versionName/versionCode 组合进行设备安装和运行验证。Gradle 的 `ndk.dir` 废弃提示、Kotlin `srcDir` 废弃提示、既有 C++/Java 警告仍按非本轮资源/版本链路债务记录。
+
 ## 2026-10-02：陀螺仪与内置头饰资源合成包（本地主线）
 
 将隔离工作树 `D:/CodexData/bem-headwear-canary` 的头饰网格实现、834 份资源的生成/打包合同和游戏私有目录自动部署接入本地 `main`，同时保留 `2d87f57` 的陀螺仪实现、第一人称 look 探针和 `3.3.22-alpha.21` 版本。接线冲突只涉及 Android native include、`RuntimeBootstrap` 的加载参数和本文新增章节；合成后的 `load()` 同时接收头饰目录与陀螺仪设置快照。第三方 `.bem` 外观包仍走用户导入链路，不能与本节头饰 `.behw` 资源混称。

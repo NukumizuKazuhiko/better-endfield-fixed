@@ -1,18 +1,18 @@
 # Better Endfield Android
 
-## 内置头饰资源与陀螺仪合成包（2026-10-02）
+## 3.4.0：内置头饰资源与陀螺仪
 
-本地主线已将 834 份头饰资源与陀螺仪功能合入同一个 APK。安装并在 LSPosed 中启用模块后，完全退出并重启游戏；启用相机模块时，会在后台将内置资源校验并部署到游戏私有目录，无需复制 `headwear-v3`，不连接 GitHub 下载。首次部署需要额外磁盘空间，后续启动会核对缓存并复用；损坏文件会重新部署。
+Android 3.4.0（versionCode 30400）将 834 份头饰资源与陀螺仪功能合入同一个 APK。安装并在 LSPosed 中启用模块后，完全退出并重启游戏；启用相机模块时，会在后台将内置资源校验并部署到游戏私有目录，无需复制 `headwear-v3`，游戏运行时不连接 GitHub 下载。首次部署需要额外磁盘空间，后续启动会核对缓存并复用；损坏文件会重新部署。
 
 仅适用原生 Android 游戏 versionCode 50。萤石保留用户接受的小三角边；噗切娜、大潘暂缓修复；卡缪、利诺、伊冯尚未实机验收。旧外部资源目录不参与这一版加载，也不会自动删除。
 
-构建须先通过当前生成器生成完整目录，再提供输入：
+本地构建须先通过当前生成器生成完整目录，再提供输入：
 
 ```powershell
 .\gradlew.bat :app:assembleRelease :app:verifyReleaseEntryPoints -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon
 ```
 
-目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。该要求也适用于 CI 构建，尚未配置资源来源的旧 CI 任务不能直接发布这一版本。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对合成后的 alpha.21 APK 反馈“验收通过”；没有收到本次设备日志或逐角色画面，不扩大为全部角色和故障分支逐项通过。
+目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。CI 从公开的 `v3.3.22-alpha.21` Release 下载 `headwear-catalog-v3-834.zip`，先校验固定 SHA-256 `BEAF2135063C962D382129098B65A3779D18ADF515EBDAC1FBD292E7B4644A78`，再将解压目录传给 Gradle；下载失败或资源不符均拒绝构建。该 Release 是已验收资源的固定来源，后续 APK Release 不需要重复上传同一资源。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对合成后的 alpha.21 APK 反馈“验收通过”；没有收到本次设备日志或逐角色画面，不扩大为全部角色和故障分支逐项通过。3.4.0 尚未另行进行实机复核。
 
 Android ARM64 and LSPosed workspace for Better Endfield. The Android port keeps
 the desktop project's module boundary: a small runtime owns IL2CPP access and
@@ -20,21 +20,12 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.21 is an experimental prerelease: the in-game Compose handle
-appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
-still need device acceptance. The camera module's motion presets, keyframes and
-VMD parameters are configurable from the app, and a `.vmd` can be imported there
-and played back: the user's acceptance run of 3.3.22-alpha.6 passed end to end, so
-the motion stack's first device run on either platform - on Android, ahead of
-Windows - was a successful one. Since then the panel's three playback keys arm a
-take instead of firing on the tap, the overlay stands down completely while it
-runs, the free camera gained the steering input it never had on the phone, a
-camera parameter change stopped needing a restart, and the gyroscope became a
-look source that now reaches the first person as well as the free camera (see
-"Interface, camera and sustained dash" below). None of that has
-been through device acceptance yet, and the alpha.7 through alpha.16 builds are
-still sitting on the same `versionCode`, so the only way to tell them apart on a
-device is the `构建 3.3.22-alpha.N` line at the top of the runtime journal.
+Version 3.4.0 promotes the user-accepted alpha.21 Android feature set to a
+stable version and raises versionCode from 30322 to 30400. The camera module's
+motion presets, keyframes and VMD parameters are configurable from the app; a
+`.vmd` can be imported and played back. The first-person gyroscope and bundled
+headwear catalog are included. The earlier device acceptance does not replace a
+separate 3.4.0 device run or per-character visual verification.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
