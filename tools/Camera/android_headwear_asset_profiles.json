@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "scope": "Android game versionCode 50; bounda cloth01 only",
+  "acceptance": "2026-10-01 user accepts remaining small triangle edges; no angle limit",
+  "profiles": [
+    {
+      "mesh": "S_actor_bounda_cloth_01_lod1",
+      "mesh_id": "cab-d622afdf79b52b089f5608ad282c206d:-1007334356814472336",
+      "policy": "head_boundary_all_vertices",
+      "source_index_sha256": "a1553410161164dd2c70d9249c9fcbbdde12417f73538febaa93074292a3b553",
+      "source_stream_sha256": [
+        "cc5dfee4fd2e135475c2457bc13c9c81907e69a21f34b1c2347c662823a4ebbe",
+        "280ec760a54867ef346fcbde53c3dabd823ec9b39507d37a0b3387cfc062378d",
+        "052360d7738f6e368c0abadf1e574f1e72d7cc27d3e8c897295358e1573a6751"
+      ],
+      "accepted_hidden_triangles": 2200,
+      "accepted_fixture_sha256": "3794b6036fa45eed6ffb407295dc32ca1dee06b682a39fd9f058298f73c3682a"
+    },
+    {
+      "mesh": "S_actor_bounda_cloth_01_lod2",
+      "mesh_id": "cab-d622afdf79b52b089f5608ad282c206d:-1792272194853217424",
+      "policy": "head_boundary_all_vertices",
+      "source_index_sha256": "121d168b276c1173552d39875cdbcbd286babfbeb6922162a69c1f29f40a5e8a",
+      "source_stream_sha256": [
+        "8cc9629e50c47aae8d69002a20a0bc873de3df7bce19781134302ce7142d65e0",
+        "5be19c048b1b0e3dc415c081fb22fffa9bcf0e824e74d3525e3331969ce67215",
+        "b23f59e90858e7af3a957ca8184537f0762b27d7c1b9bebde0f8283b19ee923e"
+      ],
+      "accepted_hidden_triangles": 967,
+      "accepted_fixture_sha256": "32cca00dce464ce67b69943ed03954122c9b505301a4fe4815899543c3346e7d"
+    },
+    {
+      "mesh": "S_actor_bounda_cloth_01_lod3",
+      "mesh_id": "cab-d622afdf79b52b089f5608ad282c206d:-8638241248845833360",
+      "policy": "head_boundary_all_vertices",
+      "source_index_sha256": "9ed6a2dff15ecd1ce6349d34cf87e32dd918c6a6e5d59641d0916e6d388d99a5",
+      "source_stream_sha256": [
+        "50b294c283a38c5d3b0227a0622ecf4352bef6bfb78b74f6eebdba9f184c4786",
+        "f9efbbc896649d0021089ea1998d51022ee6eda1d57e48afe44ef05610fe6ef7",
+        "63824288bde44a41c7f6c1f2e7cc685a7ada062b9cef7a1b38b44e461a434f85"
+      ],
+      "accepted_hidden_triangles": 243,
+      "accepted_fixture_sha256": "80faafec5a74d22d6890ff25d82991b8e58800aeaa57ddbbee8d173985404814"
+    }
+  ]
+}

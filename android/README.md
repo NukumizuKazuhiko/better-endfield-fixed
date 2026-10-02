@@ -1,5 +1,19 @@
 # Better Endfield Android
 
+## 内置头饰资源与陀螺仪合成包（2026-10-02）
+
+本地主线已将 834 份头饰资源与陀螺仪功能合入同一个 APK。安装并在 LSPosed 中启用模块后，完全退出并重启游戏；启用相机模块时，会在后台将内置资源校验并部署到游戏私有目录，无需复制 `headwear-v3`，不连接 GitHub 下载。首次部署需要额外磁盘空间，后续启动会核对缓存并复用；损坏文件会重新部署。
+
+仅适用原生 Android 游戏 versionCode 50。萤石保留用户接受的小三角边；噗切娜、大潘暂缓修复；卡缪、利诺、伊冯尚未实机验收。旧外部资源目录不参与这一版加载，也不会自动删除。
+
+构建须先通过当前生成器生成完整目录，再提供输入：
+
+```powershell
+.\gradlew.bat :app:assembleRelease :app:verifyReleaseEntryPoints -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon
+```
+
+目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。该要求也适用于 CI 构建，尚未配置资源来源的旧 CI 任务不能直接发布这一版本。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对旧 alpha.9 内置资源 APK 实机反馈“通过”，合成后的 alpha.21 APK 尚待实机验收，不能沿用旧包的整包结论。
+
 Android ARM64 and LSPosed workspace for Better Endfield. The Android port keeps
 the desktop project's module boundary: a small runtime owns IL2CPP access and
 independent feature modules implement game behavior.

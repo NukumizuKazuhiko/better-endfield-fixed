@@ -93,6 +93,7 @@ add_library(betterendfield_android SHARED
     modules/custom_model/mesh_skin_metadata_adapter.cpp
     modules/custom_model/custom_model_module.cpp
     modules/custom_model/android_mesh_builder.cpp
+    modules/custom_model/android_headwear_canary.cpp
     "${BETTER_ENDFIELD_ROOT}/native/modules/custom_model/module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/modules/custom_model/native_mesh_layout_android.cpp"
     modules/camera/first_person_look_probe.cpp
@@ -111,6 +112,7 @@ set_source_files_properties(
 
 target_include_directories(betterendfield_android PRIVATE
     .
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera"
     "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat"
     "${BETTER_ENDFIELD_ROOT}/native/shared/include")
 

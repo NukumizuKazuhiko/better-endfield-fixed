@@ -71,6 +71,7 @@ final class RuntimeBootstrap {
                 new File(relayDir, "native.log"));
         Thread worker = new Thread(() -> {
             String poseRoot = "";
+            String headwearRoot = "";
             if (!configs.voice().isEmpty() || configs.needsActionPoses()) {
                 try {
                     Context module = context.createPackageContext(MODULE_PACKAGE,
@@ -88,7 +89,17 @@ final class RuntimeBootstrap {
                     log.accept("asset preparation failed: " + error);
                 }
             }
+            if (!configs.camera().isEmpty()) {
+                try {
+                    Context module = context.createPackageContext(MODULE_PACKAGE,
+                            Context.CONTEXT_IGNORE_SECURITY | Context.CONTEXT_INCLUDE_CODE);
+                    headwearRoot = HeadwearAssets.materialize(context, module, log);
+                } catch (Exception error) {
+                    log.accept("headwear asset preparation failed: " + error);
+                }
+            }
             String actionPoseRoot = poseRoot;
+            String preparedHeadwearRoot = headwearRoot;
             // The camera module takes a path, so the imported .vmd has to be a
             // real file inside the game's own data directory before the native
             // loader is handed the configuration that names it.
@@ -97,7 +108,8 @@ final class RuntimeBootstrap {
             }
             try {
                 trigger.install(loader,
-                        () -> load(application, context, configs, actionPoseRoot, settings, log));
+                        () -> load(application, context, configs, actionPoseRoot,
+                                preparedHeadwearRoot, settings, log));
                 log.accept("waiting for first successful Unity frame");
             } catch (Throwable error) {
                 log.accept("Unity frame trigger unavailable: " + error);
@@ -108,8 +120,8 @@ final class RuntimeBootstrap {
     }
 
     private static boolean load(Application application, Context context,
-            ModuleConfigurations configs, String actionPoseRoot, SharedPreferences settings,
-            Consumer<String> log) {
+            ModuleConfigurations configs, String actionPoseRoot, String headwearRoot,
+            SharedPreferences settings, Consumer<String> log) {
         if (loaded || ATTEMPTS.get() >= 3) return true;
         if (!LOADING.compareAndSet(false, true)) return false;
         try {
@@ -126,6 +138,12 @@ final class RuntimeBootstrap {
             Os.setenv("BETTER_ENDFIELD_MODEL_CONFIG", configs.model(), true);
             Os.setenv("BETTER_ENDFIELD_UI_CONFIG", configs.ui(), true);
             Os.setenv("BETTER_ENDFIELD_CAMERA_CONFIG", resolveFiles(configs.camera(), context), true);
+            if (!headwearRoot.isEmpty()) {
+                Os.setenv("BETTER_ENDFIELD_HEADWEAR_DIRECTORY", headwearRoot, true);
+                log.accept("bundled headwear catalog available");
+            } else {
+                Os.unsetenv("BETTER_ENDFIELD_HEADWEAR_DIRECTORY");
+            }
             Os.setenv("BETTER_ENDFIELD_ACTIONS_CONFIG", configs.actions(), true);
             Os.setenv("BETTER_ENDFIELD_ACTIONS_ASSET_ROOT", actionPoseRoot, true);
             Os.setenv("BETTER_ENDFIELD_CUSTOM_MODEL_PROBE", debugResourceProbe() ? "1" : "0", true);

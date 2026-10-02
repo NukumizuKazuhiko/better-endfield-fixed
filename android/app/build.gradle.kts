@@ -156,6 +156,8 @@ android {
     sourceSets {
         getByName("main").assets.srcDir(
             layout.buildDirectory.dir("generated/androidResourceAssets").get().asFile)
+        getByName("main").assets.srcDir(
+            layout.buildDirectory.dir("generated/headwearAssets").get().asFile)
     }
 }
 
@@ -216,6 +218,26 @@ val prepareAndroidResourceAssets by tasks.registering(Copy::class) {
     into(layout.buildDirectory.dir("generated/androidResourceAssets"))
 }
 
+// Every APK carries the complete verified catalog. Missing input is a build
+// failure, never an APK that silently depends on an earlier external directory.
+val prepareHeadwearAssets by tasks.registering(Exec::class) {
+    val catalog = providers.gradleProperty("headwearCatalogDir")
+    val script = rootProject.file("../tools/Camera/package_android_headwear_assets.py")
+    inputs.file(script)
+    inputs.file(rootProject.file("../tools/Camera/build_android_headwear_fixture.py"))
+    inputs.file(rootProject.file("../tools/Camera/android_headwear_asset_profiles.json"))
+    catalog.orNull?.let { inputs.dir(file(it)) }
+    outputs.dir(layout.buildDirectory.dir("generated/headwearAssets"))
+    doFirst {
+        check(catalog.isPresent) {
+            "Generate the v3 headwear catalog, then pass -PheadwearCatalogDir=<catalog directory>."
+        }
+        commandLine(providers.gradleProperty("headwearPython").orElse("python").get(),
+            script.absolutePath, "--catalog", file(catalog.get()).absolutePath,
+            "--output", layout.buildDirectory.dir("generated/headwearAssets").get().asFile.absolutePath)
+    }
+}
+
 val verifyDesktopModelHookParity by tasks.registering {
     val modelSource = rootProject.file("../native/modules/model/module.cpp")
     inputs.file(modelSource)
@@ -256,6 +278,7 @@ val verifyDesktopModelHookParity by tasks.registering {
 
 tasks.named("preBuild").configure {
     dependsOn(prepareAndroidResourceAssets)
+    dependsOn(prepareHeadwearAssets)
     dependsOn(verifyDesktopModelHookParity)
 }
 
@@ -396,6 +419,8 @@ val verifyReleaseEntryPoints by tasks.registering {
         val gameProcessClasses = listOf(
             "dev.betterendfield.android.XposedEntry",         // libxposed entry
             "dev.betterendfield.android.RuntimeBootstrap",    // module attach
+            "dev.betterendfield.android.HeadwearAssets",      // bundled resource adapter
+            "dev.betterendfield.android.HeadwearAssetStore",  // verified catalog owner
             "dev.betterendfield.android.RuntimeLog",          // journal
             "dev.betterendfield.android.GameOverlay",         // the in-game panel
             "dev.betterendfield.android.OverlaySurface",      // Compose view owner

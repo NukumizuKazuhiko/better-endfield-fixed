@@ -280,6 +280,29 @@ bool AndroidReadMeshStrides(void* mesh, std::vector<int32_t>& strides) {
     } catch (const std::exception& error) { LogError(kLog,error.what()); strides.clear(); return false; }
 }
 
+bool AndroidReadMeshSubmeshes(void* mesh, std::vector<std::array<int64_t,4>>& submeshes) {
+    submeshes.clear();
+    if (!mesh || !AndroidMeshBuilderReady()) return false;
+    try {
+        Calls calls;
+        MeshDataScope data{calls}; data.Init(mesh,true);
+        void* count_args[]{&data.data};
+        const int32_t count=calls.Value<int32_t>(api.sub_count,nullptr,count_args);
+        if (count<=0 || count>8) return false;
+        std::vector<std::array<int64_t,4>> result;
+        for (int32_t i=0;i<count;++i) {
+            SubMesh sub;
+            void* args[]{&data.data,&i,&sub};
+            calls.Call(api.sub,nullptr,args);
+            result.push_back({sub.topology,sub.start,sub.count,sub.base});
+        }
+        submeshes=std::move(result);
+        return true;
+    } catch (const std::exception& error) {
+        LogError(kLog,error.what()); return false;
+    }
+}
+
 bool AndroidSubmitMesh(void* mesh, const BetterEndfield::CustomModel::BemComponent& component) {
     if (!mesh || !AndroidMeshBuilderReady()) return false;
     try {

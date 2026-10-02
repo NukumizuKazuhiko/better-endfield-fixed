@@ -1,11 +1,183 @@
 # 第一人称 S0–S8 执行合同
 
+## 2026-10-02：陀螺仪与内置头饰资源合成包（本地主线）
+
+将隔离工作树 `D:/CodexData/bem-headwear-canary` 的头饰网格实现、834 份资源的生成/打包合同和游戏私有目录自动部署接入本地 `main`，同时保留 `2d87f57` 的陀螺仪实现、第一人称 look 探针和 `3.3.22-alpha.21` 版本。接线冲突只涉及 Android native include、`RuntimeBootstrap` 的加载参数和本文新增章节；合成后的 `load()` 同时接收头饰目录与陀螺仪设置快照。第三方 `.bem` 外观包仍走用户导入链路，不能与本节头饰 `.behw` 资源混称。
+
+本轮从已验收目录 `D:/CodexData/headwear-audit/all-characters/catalog-bundled` 构建 release APK，内含 `assets/headwear-v3/` 下 834 份 `.behw` 和 `manifest.tsv`。资源 ID 为 `1fb67e1585ec27b6013437d008a989c48fe18555dd3d6c1c02efa79b37471640`；与先前实机通过的内置资源 APK 逐份 SHA-256 比较，834/834 一致。直接从新 APK 运行部署 owner 的首次解压、缓存复用和 834 份字节比对通过。20 项 Python 测试、33 项 Java 部署检查、Windows Camera/HeadwearFixtureTests Release 构建及后者运行、Android `:app:assembleRelease :app:verifyReleaseEntryPoints --offline --no-daemon`、APK v2 签名验证均通过。完整 lint 的既有错误仍按下节记录，未将其写成通过。
+
+交付包为 `D:/CodexData/headwear-audit/betterendfield-3.3.22-alpha.21-gyro-headwear-bundled.apk`，49,164,659 字节，SHA-256 `0404ED0B049389ED5D2A784F6FD65A1644892B9DB3458F5B278EA1EC7671F7E4`；签名证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。旧 alpha.9 内置资源包的用户“通过”反馈仅证明其自身；合成包增加陀螺仪与版本变化，尚未取得新的游戏实机画面/日志。设备验收应覆盖冷启动自动部署、已接受角色的第一人称头饰/服装/阴影与退出恢复，以及陀螺仪低速连续转动、触摸共存和自由相机切换。萤石小三角边按用户已接受状态保留；噗切娜、大潘暂缓；卡缪、利诺、伊冯仍未逐项实机验收。
+
 ## 2026-10-02：陀螺仪分支并入本地主线
 
 `gyroscope` 从 `1897ffe` 分出，主线另有依赖修复。合并无文本冲突；Windows 定向构建发现 Android 专用 `ApplyFirstPersonLook()` 的调用缺少平台条件，已将调用限制在非 Windows 编译路径。相机仍由共享 `native/modules/camera/module.cpp` 负责；Android 传感器在游戏进程采样，经现有输入中继送到自由相机或第一人称。第一人称把像素增量除以实时屏幕宽高后调用 `CameraManager.OnInput`。历史 `CAMERA_FIRST_PERSON_GYRO_PLAN_20261001.md` 的 `SnapshotCameraController.RotateCamera*` 路线已被设备证据推翻，不作为当前合同。
 
 本轮离线门禁：VS CMake Release 的 `BetterEndfield.Camera`、`BetterEndfield.FirstPersonFacingTests` 构建成功；后者运行通过。Android `:app:assembleDebug :app:verifyReleaseEntryPoints --offline --no-daemon` 成功。Gradle 仍报既有的 `srcDir`、`ndk.dir` 废弃提示以及其他原生模块警告，本轮未扩大到这些模块。未运行 Android 游戏或连接设备验证本次合并包；陀螺仪低速连续转动、触摸共存、自由相机切换和关闭后停止仍需以本次构建 APK 的设备画面与日志验收，不能把旧 alpha 设备日志当作合并包通过。
 
+## 2026-10-02：资源内置 APK 与自动部署（当前）
+
+用户选择目前采用打包方式。当前主线为内置 APK，不增加 GitHub 下载运行面。本节替代历史“APK 与外置目录配套手动部署”的交付方式；此前接受的网格数据与裁剪规则不变。
+
+### Owner 与执行路径
+
+- `build_android_headwear_fixture.py` 继续拥有资源分类，coverage 新增每份 fixture_sha256。
+- `package_android_headwear_assets.py` 校验完整 834 份目录、全部 coverage 摘要以及萤石三份接受摘要，生成 APK assets/headwear-v3。固定版本 50；834 文件上界、单文件 16 MiB、总文件 96 MiB、manifest 256 KiB。Gradle preBuild 强制执行，输入通过 headwearCatalogDir 显式下传；源或摘要缺失会拒绝构建。
+- `HeadwearAssetStore` 是部署 owner；`HeadwearAssets` 只映射 Android AssetManager、游戏版本/私有 files 与日志，`RuntimeBootstrap` 在现有后台准备线程调用，然后把成功目录交给 native loader，Unity frame 内不解压。语音准备失败不阻断头饰准备。
+- manifest.tsv 用资源清单 SHA256 标识内容版本，逐文件包含名称、长度、SHA256；部署至游戏私有 `betterendfield/headwear-assets/<digest>`。先写临时目录并验证全部文件，再同文件系统原子 rename。缓存逐文件校验后复用；损坏自有目录重建；失败不启用旧版本，不写原源 Mesh。
+- 清理限定自有目录、拒绝符号链接和越界，目录树/缓存数量有上界；更新成功后清理旧 digest 目录，旧手动外部 headwear-v3 不读不删。失败原因带 stage；不伪造成功路径，native 环境变量在失败时清除。
+
+### 验收与未闭合边界
+
+- Python 生成/打包 20 项测试通过，包括 APK asset staging 逐字节一致以及缺失/损坏拒绝、旧输出不动；Java 17 独立部署测试 33 checks 通过（符号链接检查实际执行），含缓存复用、同长度损坏、manifest/资源缺失、路径/版本/尺寸拒绝、更新失败保留旧资源、旧外部目录不动。
+- 新增类没有 lint 告警；完整 lintRelease 仍因本轮未改动代码中的 5 个错误、35 个 warning、28 个 hint 失败。错误为 BemInstaller 两处 NewApi、NativeCommandBridge 一处 NewApi、ToolPages 两处 LocalContextGetResourceValueCall。这些记录为非本轮旧债务，未改全局 lint 规则或生成 baseline 掩盖。
+- APK 构建、入口与签名及全部资源/原生库核对通过。构建输入目录 `D:/CodexData/headwear-audit/all-characters/catalog-bundled`，资源内容 SHA manifest ID `1fb67e1585ec27b6013437d008a989c48fe18555dd3d6c1c02efa79b37471640`，834 份原始资源共 77859062 字节。
+- 直接用真实 APK 的 ZIP streams 运行部署 owner，首次解压和第二次缓存复用通过；834 份部署文件逐字节等于此前接受目录，三份 native 库也与 fix2 完全相同。该闭环发现并修正 Windows Path 默认大小写折叠排序与 Java ASCII 顺序不一致的问题；现在 manifest 按 filename 的明确 ASCII 顺序生成，并有真实资源排序回归。
+- 单文件交付 `D:/CodexData/headwear-audit/betterendfield-headwear-bundled-20261002.apk`，实际大小 49138907 字节（49.1 MB / 46.9 MiB）；SHA256 与最终构建产物摘要见 `headwear-bundled-verification.json`。安装步骤与新路径实机验收入口见 `headwear-bundled-README.md`。
+- 2026-10-02 用户对交付的内置资源 APK 实机反馈“通过”，新增 Android AssetManager/游戏后台自动部署链路按该次用户操作场景记为验收通过。对应 APK SHA256 `485644310EFBFF64A9459EF6CE13468DC7986FBE91903424C7A1C72985BD97CE`，文件未重新构建或变更。本轮未采集新的设备日志，反馈未逐项列出角色、二次启动或强制损坏缓存场景，不扩写为全角色/所有故障分支逐项实机通过。
+- 使用现有实验 alpha.9 工作树，未合入 F:/bem、未提交/发布；旧 CI 尚未提供资源输入时会显式失败，不声称 CI 发布已验收。
+
+## 萤石生成器整合与产物一致性（历史，手动资源交付已由上节替代）
+
+用户要求“整合进生成器，确保当前编译产物体验与我实际相同”。本轮已将接受的 boundary 集合整合到隔离工作树生成器；下方“未吸收生成器、需覆盖补丁”的记录为历史状态，已由本节替代。未合并至 `F:/bem` 主工作树，未提交或发布。
+
+### Owner 与合同
+
+- `tools/Camera/build_android_headwear_fixture.py` 是离线资源分类/编码 owner；`android_headwear_asset_profiles.json` 是已接受资产分类的登记源。Android runtime 的上传/绑定/阴影与恢复逻辑不变。
+- 只有 registry 中三份 bounda cloth01 LOD 启用 `head_boundary_all_vertices`：任一顶点 Head 权重超过 32767，或三个顶点 Head 权重均非零，则退化该三角。对应用户已经接受的 453/203/44 额外低权重面，保持独立中央颈块在本次接受集合中的原样处理，不擅自换成审计提出的更保守集合。
+- 每份 profile 同时约束 Mesh ID、原索引 SHA256、三个源 stream SHA256、接受的隐藏数和最终 fixture SHA256；不是全角色阈值调整。原顶点流与 draw、skin、bounds 合同沿用原路径。
+- 全目录生成强制三份登记源唯一存在，并在创建/写入/删除任何输出前完整预编译。已知资产身份/布局/骨板/文件/字节漂移导致 ProfileRejected，不能被普通 skipped 分支吞掉，保持旧产物。
+- coverage 中 pure_head/mixed/pure_body 仍描述源分类；hidden_triangles 是实际隐藏总数，profile_hidden_triangles 是额外隐藏数，retained_triangles 是实际保留数，不把边界面冒称纯头。
+
+### 本轮验收
+
+1. 增加真实源三 LOD 与手机接受 SHA 的回归，先运行看到三个 LOD 均失败（原 fix2 输出），整合后通过。
+2. `python -m unittest discover -s tools/Camera -p test_android_headwear_fixture.py -v`，配置当前 Android raw/database，18 项通过；包含权重字节漂移以及 catalog 身份/布局/缺流/缺源四种失败，确保旧输出字节和目录项不动。
+3. 当前生成器 `--catalog` 全量生成 included=834、skipped=413；三份萤石 SHA 与 `fluorite-probe-boundary` 和此前手机校验记录完全一致，另外 831 份与 fix2 catalog 完全一致，无文件增删。
+4. `:app:assembleRelease :app:verifyReleaseEntryPoints --offline --no-daemon` 成功；APK 签名验证通过。APK SHA256 `B4BF7C149492C31BE22FA0F51045D6D7287E9B687B677DF5EC758FA81C272074`，与用户实测 fix2 APK 逐字节相同。
+5. 独立只读审查发现早期 profile 错误被 catalog 跳过的问题，已闭合并二次复核无当前目标阻断。`git diff --check` 通过，换行转换提示为既有属性行为。
+6. 当前 ADB 无设备，未重新安装/重做视觉验收。本机独立 C++ 测试尝试因链接器不可执行未运行；不声明新增 native parser 验收。对应夹具此前已有手机 ARM64 校验，本轮精确字节复现它们，Android native 构建通过。
+
+### 交付与剩余边界
+
+完整配套包 `D:/CodexData/headwear-audit/headwear-all-generator-integrated.zip`，SHA256 `133FF3C2BA33580495124CCF5668AC660F74779AA6E5D61BCEBF004BC1922268`；包含 APK、重新生成的 headwear-v3 全目录、摘要、测试/构建与接受日志。APK 单独安装不会更新外部资源目录；部署时必须同时安装 APK 和 headwear-v3。
+
+当前生成命令：
+
+```powershell
+python tools/Camera/build_android_headwear_fixture.py --catalog --raw D:/CodexData/headwear-audit/all-characters/world-raw --database D:/CodexData/headwear-audit/all-characters/database.json --output D:/CodexData/headwear-audit/all-characters/catalog-integrated
+```
+
+不再需要萤石后置覆盖补丁。残留小三角边原样保留、角度限制未实现；噗切娜和大潘修复难度大暂缓；卡缪、利诺、伊冯仍未实机验收。真实字节一致性确保本轮生成/打包的代码与资源组合相同，不替代不同游戏设置/客户端版本下的新视觉验收。
+
+## 2026-10-01：萤石残留定位与实验资源接受（历史，已被上节整合替代）
+
+**当前结论覆盖本节的待验状态：** 用户对 boundary 资源反馈“基本上修复 残留一些小三角边 日后限制角度就看不到 故不改动”。遵照该指示冻结手机当前三份资源，不继续裁剪剩余三角，不实现角度限制。结论为当前场景基本接受、保留已知小边，不声明完全无残留；本轮衣物/阴影/退出恢复未获得逐项独立确认。下方是本轮诊断过程。
+
+当前原样归档为 `D:/CodexData/headwear-audit/all-characters/fluorite-accepted-20261001.zip`，含三份覆盖文件、三份测试前恢复文件、反馈/摘要及运行日志。生成生产目录的规则未改，此资产特定实验分类尚未集成生产生成器；重新生成目录会覆盖它，需重新应用覆盖包。不能把该规则推广至其他角色。噗切娜和大潘暂缓，卡缪/利诺/伊冯未实机验收的状态不变。本轮不提交/合并源码。
+
+- 用户授权截图后已保存 `D:/CodexData/headwear-audit/all-characters/fluorite-before.png`，画面存在较大灰色布料遮挡。`fluorite-live.log` 确认角色资源为 `bounda`，body01、cloth01、clothshadowless01 的三个 LOD 共九份裁剪 Mesh 均成功绑定，无绑定失败；不能把遮挡归因于目录未加载。
+- 离线审计 `fluorite-geometry-analysis.md` 证明 cloth02/04/05 不含帽顶部候选，cloth01 的纯头顶部已裁剪，但 Head/Neck 混合面仍按当前保守合同保留。clothshadowless01 三个 LOD 全部为纯头几何且已裁剪。当前证据尚未区分混合面残留、代理绘制或模拟几何路径，不确认根因。
+- 仅在审计目录准备了可重复生成的诊断资源：`compile_fluorite_probe.py mixed` 多裁 cloth01 的 123/84/27 个边界面；`all` 用于必要时隔离该 Renderer 的可见贡献。这两组均标记 diagnostic_only，顶点流与源完全一致、阴影仍沿用源 Mesh，手机 ARM64 fixture 校验退出码 0。未修改生产生成器、未部署至游戏资源目录。
+- 用户已明确允许临时混合面对照测试。已从手机备份 cloth01 的三份旧资源至 `fluorite-before-fixtures`，退出游戏后仅替换这三份资源；手机 SHA256 与 `fluorite-probe-mixed` 的三份文件一致。游戏已重启，限时 300 秒采集 `fluorite-mixed-live.log`，等待用户进入同一残留视角再截图。混合面诊断可能损伤局部领口，它不构成正式修复或服饰验收通过；目录 `coverage.json` 仍是正式 fix2 元数据，对照文件仅为暂时诊断覆盖。
+- 混合面对照用户反馈“还存在，但是少了一些”。日志证实 cloth01 三个 LOD 的 hidden_triangles 为 1747/764/199，与诊断编译器预期一致；已保存 `fluorite-mixed.png`，相机朝地面，画面两侧仍存在较大灰色布料。两次截图视角不完全一致，不按像素面积声称定量减少；用户反馈支持混合面参与遮挡，但不证明全部残留同源。
+- 用户已明确允许仅针对萤石 cloth01 的全可见网格隔离测试（上衣会暂时隐藏，阴影保留、退出恢复）。`fluorite-probe-all` 已编译并通过 ARM64 fixture 校验；仅覆盖手机 cloth01 三个 LOD，设备 SHA256 与本地三份诊断资源一致，游戏已重启并限时采集 `fluorite-all-live.log`。等待用户进入残留视角。生产资源分类、runtime 与其他角色不变；帽底与上衣的明确边界仍待证据确认。
+- 整体隐藏用户反馈“大面积人物与衣物消失”；`fluorite-all.png` 中两侧灰色布料不再出现，`fluorite-all-live.log` 确认 cloth01 三个 LOD 隐藏 20433/9570/3397 三角。该对照定位其可见贡献，不作为修复。随后先恢复测试前文件，三个设备 SHA256 与备份一致，重启游戏。
+- 更窄的 `boundary` 诊断已生成并通过手机 ARM64 fixture 校验，继承 mixed 集合，仅额外加入三个顶点都有非零 Head 权重的剩余面（453/203/44）；合计隐藏 2200/967/243 三角。顶点流不变、源 Mesh 保留阴影、三个顶点完全无 Head 权重的面不受影响。该规则仅在审计目录中的萤石诊断编译器，不能推广为生产全角色规则；微小 Head 权重与帽/上衣边界仍需核对。已部署并重启，限时采集 `fluorite-boundary-live.log`，等待视觉对照。
+
+## 2026-10-01：用户复核范围修订（当前）
+
+用户复核反馈萤石帽子仍有残留，本轮唯一修复目标为该残留，须以对应角色实际网格/日志和画面复测闭合。噗切娜与大潘用户反馈支持不好，并指出毛绒外表及非标准体型；两者标记为“已知支持问题，修复难度大，暂不修复”，不纳入本轮修复，也不算实机验收通过。具体技术原因未做本轮定位，不将用户提供的外观特征替代网格层面的根因证据。
+
+卡缪、利诺、伊冯用户明确无法测试，保持离线资产覆盖、实机未验收。此前“成功”仅对应当时操作场景，不能覆盖本次复核发现；全Characters资源目录覆盖不等于全角色视觉通过。当前手机为fix2，萤石新日志采集fluorite-live.log；修复与最终包尚待此轮定位和验收。
+
+## 2026-10-01：全角色回归定位与子网格元数据修复（当前，fix2本轮场景通过）
+
+fix2用户反馈“成功”，对应已请求的头饰/服饰/阴影/退出恢复检查。接受快照`D:/CodexData/headwear-audit/all-characters/fix2-accepted-device.log`记录35份不同Mesh的draw校验、GPU上传和绑定：aglina6、ardelia12、lizhiyan8、typhoea9，跨LOD1–3；binding failed与metadata format failure均0，且有切角色/退出逐字段恢复与副本销毁记录。镜像journal重复消息不重复计入35份Mesh；用户没有逐角色分别反馈，视觉通过限定本次操作场景，不扩为全部36模型通过。ardelia12份驻留LOD补丁也验证16租约能容纳当前审计最大12份需求。
+
+正式本轮交付修复包`D:/CodexData/headwear-audit/headwear-all-fix2-20261001.zip`，47,565,797字节，SHA-256 `3ECDF73DFBE4F168B1E3B24D2FA9734FCF55B23BA575C28083BC35C574F0758C`；APK仍为`B4BF7C149492C31BE22FA0F51045D6D7287E9B687B677DF5EC758FA81C272074`，手机已装，无需重复安装。包内有834夹具、逐模型覆盖、当前README、接受日志/JSON、构建与测试记录，zip完整性通过。初版zip及fix1是已失效历史证据，不再推荐；诊断版不作为交付。未提交、合并或发布。
+
+后续仍须确认UInt32双槽fur、rigid单骨衣物与几何全头网格的实机上传与画面，优先男管理员、tangtang及用户拥有的aurora/karin/purrche/bounda；没有的角色保留未验收。其余未操作角色、长期稳定性、外部同名Mod与正式主线集成仍未完成。
+
+fix1现场再次失败，记录fix1-live.log。随后临时诊断明确：typhoea source MeshData保留完整draw（如body_lod1 start0/count1956/topology0/base0），但GetIndexDataSize返回0；当前Mesh.get_indexFormat managed签名存在且engine_code=yes，MeshData.GetIndexFormat未保留。不能用源CPU缓冲长度校验GPU索引宽度。最终fix2仅读取MeshData draw描述，同时通过Mesh.get_indexFormat读取真实2/4字节格式；未知枚举值拒绝，源和Upload后副本分别校验。目标buffer的完整字节回读仍由AndroidSubmitMesh负责，未读取源CPU缓冲内容。该事实覆盖下文fix1“总字节数共同确认宽度”的中间判断。
+
+fix2新增回归覆盖无源CPU字节条件、未知格式与错误格式拒绝，最终ARM64门禁含全部834夹具再次实机执行返回0，Android assembleRelease/verifyReleaseEntryPoints及签名核验通过。DEBUG-hwmeta临时探针已全部从生产源码移除。只读复核确认元数据槽校验仍完整、没有源缓冲读取。APK `D:/CodexData/headwear-audit/betterendfield-headwear-all-fix2.apk` SHA-256 `B4BF7C149492C31BE22FA0F51045D6D7287E9B687B677DF5EC758FA81C272074`，adb install -r成功，lastUpdateTime 2026-10-01 18:24:08。新运行PID31389，启动日志versioned headwear catalog available；`all-characters/fix2-live.log`限时采集，实际绑定/恢复及用户画面反馈仍待取得。资源沿用原835文件已校验目录，不再重复安装。fix1与诊断APK仅为失败定位记录，不能当作修复成功交付。
+
+用户反馈全角色头饰仍在，包括三角色已验收范围。重新连接PJX110并采集后，庄方仪第一人称日志`D:/CodexData/headwear-audit/all-characters/failure-live.log`显示hide_head=true、头骨绑定正常、目录adapter确实执行，但每次绑定在`Mesh.GetIndexStart unavailable`退出，源网格保留。初版v3增加了未在当前Android客户端验证过的便捷managed Mesh getter，因此单槽已验收角色也被同一前置校验阻断。日志80条同名错误包含native journal镜像；这不是80份独立网格。初版全角色APK `E57D5CC6...E979858`已确认不能用于此设备头饰验收，不再推荐该包。
+
+修复统一复用已有AndroidMeshBuilder的`MeshDataScope::Init(mesh,true)`，仅读取GetSubMeshCount/GetSubMesh_Injected/GetIndexDataSize元数据；不读源vertex/index指针、不克隆不可读Mesh、不关闭draw校验。新增AndroidReadMeshSubmeshes是平台private adapter；共享MatchesDrawMetadata逐槽核对topology/start/count/base与完整索引字节数。fixture合同要求draw连续覆盖全部索引，故完整数量与总字节数共同校验2/4字节索引宽度。源及上传后副本使用同一入口校验，替代不可解析的Mesh.GetIndexStart/GetTopology/get_indexFormat便利接口。保留first_vertex/vertex_count/bounds由底层构建器重建的既有语义，不宣称源GPU索引CRC核验。
+
+修复前trace断言`assert failure_log.count('Mesh.GetIndexStart unavailable') == 0`实际失败；新增单槽/双槽metadata门禁测试覆盖索引宽度错误、start/base/topology错误及槽位交换。最终ARM64测试含全部834夹具在PJX110执行返回0；Android assembleRelease/verifyReleaseEntryPoints离线构建及签名核验通过。独立只读审查未发现阻断，无源CPU缓冲读取或公共ABI扩展。
+
+修复APK `D:/CodexData/headwear-audit/betterendfield-headwear-all-fix1.apk`，SHA-256 `6FF89FE97EE647FAC509767BC0FBF08561F40C8F97027FA633DCDCDA1EEFB75A`。已adb install -r返回Success，模块lastUpdateTime 2026-10-01 18:14:12，重启游戏PID20343；启动日志确认versioned headwear catalog available与hide_head=true。资源仍用已校验headwear-v3，无需再次推送。运行记录`all-characters/fix1-live.log`限时采集5分钟；新source MeshData draw PASS、绑定/恢复及用户头饰服饰阴影反馈尚待取得。未提交、合并或发布。
+
+## 2026-10-01：全 Characters v3 初始覆盖与门禁（历史，接口回归已确认）
+
+安装补充：用户随后明确要求“安装”。PJX110 b992bd53重新在线，游戏读回1.5.3/versionCode50；完全退出游戏后，`adb install -r`返回Success，模块读回3.3.22-alpha.9/versionCode30322、lastUpdateTime 2026-10-01 17:46:03。headwear-v3的834份夹具及coverage.json共835文件全部推送，设备端sha256sum逐项比对本地，835项一致、mismatches为空；证据`D:/CodexData/headwear-audit/all-characters/installation-verification.json`。安装后游戏无运行PID，尚未重新启动或取得新版本游戏内证据。下文“尚未部署”为初始交付时状态，本次补充覆盖该状态；全角色视觉验收仍待用户操作。
+
+用户在三角色通过后要求所有角色覆盖。当前 Android manifest `2954fa80-23c1-1579-2b22-4ecfd6d70418` 有70个世界模型prefab资产，其中Characters目录36、Npc目录34。本轮仅将Characters目录作为玩家第一人称资源范围，包含独立大招形态；36个模型根不等同于36名已实装可玩角色。目标闭包1104个bundle，全部manifest资产闭包1138个bundle共466,479,247字节，缓存复用后新增只读提取402,140,058字节。1555个Renderer、1247份唯一world Mesh已导出原始流，missing_raw和missing_references均为0。Reader有一个非Mesh未知ClassID对象，原始证据保留于all-characters/raw.json，不能将其抹去后宣称Reader无告警。
+
+唯一owner与恢复路径沿用三角色方案。生成器和运行时仅接纳模型直属Mesh_all子树，排除Shadow_Proxy与嵌套召唤骨架；Renderer与Mesh同名或Mesh只额外带一个纯数字尾段。共享同一Mesh的主Renderer实例只有骨板头部分类一致才可编译。真实实例说明原先“字符串同名、唯一Renderer”不足：大潘LOD4阴影代理同名，fur有数字后缀，坡葛兰尼包含12份嵌套召唤网格。源Mesh不克隆、不修改。已有匹配、dedicated_head或head_attached继续由原ShadowsOnly路径拥有，目录副本仍保留完整源Mesh作为shadowProxyMesh；退出、切角色/LOD按字段独立恢复。
+
+v3是当前单一协议，拒绝v2；Java只下传游戏versionCode 50的headwear-v3目录。固定84字节`<8s19I>`头，其后依次为顶点声明、12字节draw描述(firstIndex/indexCount/baseVertex)、mesh_name、三个流、索引。支持UInt16/UInt32和1..8个原材质槽次序的连续Triangles draw，仅baseVertex=0；源及上传后副本的indexFormat/subMeshCount/GetIndexStart/GetIndexCount/GetBaseVertex/GetTopology均精确核对。weighted布局stride[16,16或8,12]；rigid布局去掉weight声明、stride[16,16或8,4]，后3个骨索引字节必须0，源m_BonesPerVertex必须1。保留源bindposes、skin metadata、顶点流、材质槽；纯头三角退化，头身边界三角保守保留。几何全头但骨板有身体骨的副本继承源bounds，完整源Mesh继续投影。
+
+上界为262144顶点（UInt16最多65535）、1200000索引、256骨、16MiB单夹具、16份活跃租约和64MiB累计夹具。审计当前主角色最多12份待补丁Mesh横跨驻留LOD，原8份租约上限会漏掉部分LOD，所以仅增加租约数，总字节预算保留。当前最大真实夹具1,471,551字节、30773顶点。预算拒绝或恢复重试耗尽不能作为稳态通过；恢复失败最多3次并保留可能仍绑定的副本。
+
+审计1247份Mesh的路径：252份标准目录、590份已有整体阴影隐藏、384份无纯头三角保持、4份混合fur、4份实际几何全头、1份刚性衣物、12份嵌套召唤排除。9处新增缺口为aurora/karin/purrchena/tangtang的4份UInt32双draw fur、男管理员cloth_04_lod3、bounda clothshadowless的3个LOD及purrchena fur_03_lod1_11。261份目录必需Mesh均已生成，无缺失。最终目录834份v3夹具，共77,859,062字节，其中包含已由整体隐藏路径覆盖的冗余候选；夹具数量不等于实际绑定数量。purrchena混合fur保留605个头身边界三角，残留遮挡必须视觉验收。
+
+实际门禁：`python -m unittest discover -s tools/Camera -p test_android_headwear_fixture.py -v`在配置全量真实Android资产的环境中16项通过，覆盖9处特殊布局、三角色9份衣物、原始流/保留面/材质槽及scope。PJX110执行ARM64解析器异常输入与全834夹具返回0；随后收紧UInt16顶点界限并重新编译，所有真实夹具顶点数低于界限，手机断开后未重跑最终二进制。`:app:assembleRelease :app:verifyReleaseEntryPoints --offline --no-daemon`与apksigner核验通过；构建的Gradle提示沿用既有configuration-cache建议，不是本轮新增源码告警。新managed子网格接口、rigid及全头副本仍未在游戏内调用验证，不能将解析成功写成渲染通过。
+
+交付`D:/CodexData/headwear-audit/headwear-all-20261001.zip`（47,547,220字节），SHA-256 `9F57832497DA5B8F71A2C010E772D4BD2BC451ADD53815BE0977D0070537C359`。APK SHA-256 `E57D5CC6C7F2AE76344E95499D7A46FD76937744C91A731FA8F84E4F0E979858`，证书与此前实验包一致。包内包含headwear-v3、README手机Termux/电脑ADB安装与采集命令、逐模型coverage-summary、完整审计矩阵、构建和Python测试记录。设备在安装前断开，尚未部署；不重置旧headwear-v2。用户需优先验收特殊角色与大潘，随后验收其拥有的其他角色及三角色回归，逐项反馈头饰/服饰/阴影/退出恢复/闪退，未拥有的角色保持未验收。
+
+隔离worktree D:/CodexData/bem-headwear-canary、codex/headwear-android-assets分支；仍基于alpha.9，未吸收F:/bem alpha.16的陀螺仪等无关dirty改动。未提交、合并、发布；所有角色实机通过、UI/NPC模型、外部同名Mod和正式主线集成均未完成。本节覆盖此前v2实现合同；下列v2段落保留为历史验收证据。
+
+## 2026-10-01：三角色 v2 目录实机验收通过（历史）
+
+用户对三角色验收问题反馈“通过”。设备日志 headwear-catalog-device.log 记录庄方仪6、安洁莉娜6、佩丽卡4个不同混合Mesh的GPU上传校验与绑定，总16项，并有切角色/退出的逐项source/shadow/offscreen恢复和副本销毁。25个目录夹具均经过native解析；face/hair若属于独立头部继续交已有ShadowsOnly，因此目录数量不等于局部补丁数量。新增角色本次画面与运行记录相符；先前“待验收”段落为实现过程历史，不是当前状态。
+
+验收记录 D:/CodexData/headwear-audit/headwear-catalog-acceptance.md，日志快照 headwear-catalog-accepted-device.log、退出记录 headwear-catalog-accepted-exit-info.txt。本次通过限定为庄方仪、安洁莉娜、佩丽卡及用户操作的世界模型场景；其他角色、UI模型、外部同名Mod和长期稳定性仍未验证。复用路径已无角色名称硬编码，新角色仍须生成其当前Android资产夹具并经过相同门禁。保持隔离分支，未合入F:/bem当前alpha.16主线。
+## 2026-10-01：三角色 v2 资源目录复用（历史实现过程）
+
+Camera 仍为第一人称隐藏与恢复的唯一 owner，Android adapter 仅构建与提交本目录里的独立网格。移除庄方仪名称、顶点数量和单副本的特殊分支；按实际 source Mesh 名在游戏外部目录 headwear-v2 匹配，只有 game versionCode 50 开启。RuntimeBootstrap 只下传目录位置，目录不遍历加载；单个夹具最多8 MiB，至多8份活跃Renderer租约。名字仅允许ASCII字母、数字、下划线，最多160字节。多个Renderer分别保留source/copy/prior_shadow/prior_offscreen与GC roots，切角色、LOD替换及退出按实际持有值逐字段恢复；失败最多3次并保留仍可能绑定的副本，预算耗尽不再发布新副本。现有独立头部ShadowsOnly路径保留owner，catalog只用于混合头身网格，其他pipeline跳过本adapter已拥有的Renderer。源网格不克隆、不改流。
+
+v2为单一格式BEHWMESH/version2，76字节header + 5或6个16字节顶点声明 + 精确mesh_name + 3流与16位索引。限制顶点1..65535、索引6..600000且整三角面、骨骼1..256、头部面>0且小于总面数；流/总长度、CRC、几何索引和骨骼索引均校验。支持六属性stride[16,16,12]和实际安洁莉娜的五属性stride[16,8,12]；旧v1夹具不兼容。运行时源与夹具的name/counts/layout/stride/骨板数量匹配，禁止有BlendShape或多submesh网格；上传后校验bindpose矩阵与bounds再发布。源码名称/结构门禁不等于GPU原流摘要验证，外部同名同结构Mod不在验收覆盖。
+
+离线生成器 tools/Camera/build_android_headwear_fixture.py 按真实Android prefab骨板编译；mixed三角面保守保留并报告，全头网格交给原ShadowsOnly路径。raw导出源码 tools/Camera/export_android_headwear_raw.cs。三角色目录 D:/CodexData/headwear-audit/headwear-catalog-v2 共25夹具，4,242,242字节（庄方仪6、安洁莉娜12、佩丽卡7），每项在coverage.json登记资产ID、路径、角色、布局、纯头/身体/混合面。face/hair条目若运行时属于独立头部，不启用局部补丁。89个世界候选跳过64项：33无头骨、17全头、12布局不符、2多submesh或BlendShape。世界LOD0未出现在这些角色的资源中，UI模型不进入本路线。新增安洁莉娜、佩丽卡Android目标闭包约42.5MB/43.4MB，共享已有包不重复下载。
+
+实际验收：11个Python生成器测试通过，包括三角色7个真实衣物网格原始字节回归及目录所有权；ARM64解析器的畸形输入/两布局及全部25实际夹具，在PJX110执行返回0。Android assembleRelease/verifyReleaseEntryPoints通过，apksigner证书匹配。测试APK SHA-256 5D731DBB88CCF8FE77CEE94B547C83D85D7B26C2ED80E32B0CB7ABFAF107DA13，已adb install -r成功；资源已推送到游戏外部headwear-v2，游戏已重启，日志采集限时5分钟。用户测试问题已发出，新增角色画面结果未到，不能宣称三角色视觉或所有角色通过。
+
+后续门禁：庄方仪回归、安洁莉娜和佩丽卡头饰/衣物/阴影、反复进出与切角色/LOD恢复。若失败以对应mesh日志定位；不扩大整cloth ShadowsOnly，不再次克隆不可读源，不进入未知布局。F:/bem当前alpha.16主线未修改，隔离alpha.9实验未提交/合并/发布。
+## 2026-10-01：庄方仪 LOD1 上传版验收通过
+
+用户在本轮明确反馈“都正常”，对应已请求的服饰完整、头饰消失、头部阴影保留、退出恢复和无闪退五项。设备日志 `D:/CodexData/headwear-audit/headwear-upload-accepted-device.log` 同时记录 16:50:53.800、16:51:55.801 的 `UploadMeshData(false) returned; post-upload skin/counts PASS` 与 `LOD1 patch assigned`，16:51:16.625 记录源 Mesh、阴影代理和 offscreen 状态恢复以及副本销毁。可见重新进入第一人称后重新绑定，用户反馈与运行日志相符。
+
+本轮验证支持：独立 Mesh 完成构建后，在发布前显式 GPU 上传可解决此次庄方仪 LOD1 服饰不可见；禁止克隆不可读源 Mesh，仍保留来源版本、夹具和结构门禁。设备日志 bounds 为 center=(0,0.361516,0.938786)，extents=(0.534921,0.522247,0.938335)，后上传骨骼矩阵/布局门禁通过。本次退出记录未出现新的游戏原生崩溃，但不据此推论长时间稳定性。
+
+验收范围只有游戏 1.5.3、庄方仪世界模型 LOD1。所有角色、其他 LOD、游戏更新及新版主线整合仍未完成。源码保留在隔离工作树；未修改 F:/bem 当前主线，未提交、合并或发布。用户自行换回正式版，本轮不执行回退安装。原“画面待验收”段落为历史过程，以上状态为当前结论。
+## 2026-10-01：独立 Mesh 上传实验（历史过程，现已通过上述范围验收）
+
+源码对照发现头饰 canary 缺少通用 CustomModel builder 发布前的 `UploadMeshData(false)`。本轮在隔离工作树移除 `Internal_CloneSingle`，恢复独立 Mesh 构造和提交前蒙皮字段初始化，新增 managed GPU 上传；上传后验证蒙皮字段、HasBoneWeights、顶点/索引数量、顶点声明、步长、207 个 bindpose 的全部矩阵内容和 bounds，再绑定 Renderer。没有在源 Mesh 上补 CPU 数据或改写源流。
+
+离线运行 `:app:assembleRelease :app:verifyReleaseEntryPoints --offline --no-daemon` 通过；签名核验通过。APK SHA-256 `0693B0BAAC58B572EE231134C9AFEBE3A85ADBE171E4C11D44F67E8A8A3F0F40`。主工作树 F:/bem 已到 alpha.16，手机测试前为 alpha.15；用户明确允许暂装隔离 alpha.9 实验并自行换回正式版。先从设备备份 alpha.15（SHA-256 `0150DFF9894BCFD0D238526A68D09C4522958926A2A7E08CB35CFFC4438557E5`），`adb install -r` 返回 Success，重启游戏并开始日志 `D:/CodexData/headwear-audit/headwear-upload-device.log`。尚未取得第一人称视觉结果，不宣称服饰恢复或功能完成。
+
+包 `D:/CodexData/headwear-audit/headwear-upload-experiment-20261001.zip`，SHA-256 `3513C30493295FFF56369D6412431EB29AF1E29195C04AE14DAA1B16CE48E872`。若完整 upload PASS 后服饰仍缺失，该假设不足以解释问题，下一步按源/副本 bounds 与 shadowProxy 派生状态区分，不能再次直接克隆不可读源网格。仅庄方仪 LOD1，不覆盖全部角色。原 F:/bem 未修改；未提交、推送或合并。
+## 2026-10-01 10:48：克隆实验实机崩溃，停止使用
+
+用户提供的 `E:/Downloads/seek.zip` 已捕获 UnityMain 原生 SIGSEGV。模块 Build ID 与本地 Release ELF 一致，首个模块栈帧准确落在 `android_headwear_canary.cpp:207` 的 `clone(source)`，尚未提交裁剪数据或绑定 Renderer。Unity 故障指令 `ldr h2, [x1]` 的 x1=0xA9720（694048），与原网格蒙皮 stream2 偏移一致，强烈指向克隆时读取缺失 CPU 数据。该克隆实验实机失败，下面的“尚未安装或运行”仅记录此前交付时状态，不能当作当前状态。
+
+恢复使用测试前备份 `D:/CodexData/headwear-audit/headwear-clone-experiment-20261001/rollback-original-installed.apk`；SHA-256 `FBD2C4B42F885E504365366BE4EFB35FC9D0C5A8CCA87F989B2ABC2B916D4723` 已重新核对。也可先重命名游戏外部目录中的 `headwear-zhuangfy-lod1.behw`，完全结束并重启游戏，停用夹具实验。原新建 Mesh 方案服饰不可见仍未定位；两个失败实验均不能宣称组合头饰目标完成。本轮未修改源码或生成新包，设备恢复待用户操作验证。
+
+详细证据、符号化命令和后续边界：`D:/CodexData/headwear-audit/seek-crash-20261001/analysis.md`。
+## 2026-10-01：庄方仪 Android LOD1 资源夹具探针
+
+本轮在隔离工作树 `D:\CodexData\bem-headwear-canary` 验证资源预处理路线。夹具生成器 `tools/Camera/build_android_headwear_fixture.py` 只接受游戏 1.5.3 的 `S_actor_zhuangfy_cloth_01_lod1` 精确网格布局，保留全部三个原始顶点流，把 3300 个纯头部三角形的索引退化，19060 个纯身体三角形保持原样；混合头身三角形数量为零。运行时加载上限为 2 MiB，并检查版本、网格名称、顶点/索引/骨骼数量、顶点声明、流步长和 CRC。外部文件路径由游戏外部文件目录取得，仅在游戏 versionCode 50 时传入原生侧。
+
+PJX110 探针已验证独立 Mesh 创建、数据提交与回读。随后可视绑定版在 2026-10-01 的用户验收中显示：头饰消失、头部阴影保留、退出后恢复，但 `cloth_01` 服饰也消失，仅有其他 Renderer 的丝带可见，因此该版本失败，不能交付为修复。设备日志记录 `LOD1 patch assigned` 和 `source mesh, shadow proxy and offscreen state restored`，证明生命周期调用成功，但不能证明克隆体的渲染属性完整。
+
+下一轮实验改为从游戏原始 Mesh 克隆独立对象，再提交裁剪后的三个流和索引；保持源 Mesh 作为阴影代理，退出时只恢复自己持有的引用。克隆前后验证原生蒙皮信息和回读数据，任何失败都不绑定 Renderer。这针对“新建 Mesh 丢失服饰渲染所需原生属性”的假设，尚需设备画面证伪。此专用夹具不能推论为“所有角色”已覆盖；其他角色必须先以相同资源和运行时证据建立夹具或形成通用且有上界的生成合同。
+
+克隆实验交付包为 `D:\CodexData\headwear-audit\headwear-clone-experiment-20261001.zip`，SHA-256 `2693E7B5BC4163127ECDA44F5C616198391AF26BDA0FA3DDBD0B5150F7EB1FD8`，内含 APK、夹具、测试前从设备备份的回退 APK 和验收说明。该包通过 Android Release 构建、入口检查与签名校验；设备此时已从 ADB 断开，克隆实验尚未安装或运行。先前失败绑定版仍可能留在 PJX110，重启游戏前应安装新实验包或回退 APK。
+
+离线门禁：Android `:app:assembleDebug`、`:app:assembleRelease` 和 `:app:verifyReleaseEntryPoints` 曾通过；PJX110 上运行了 ARM64 夹具格式测试，包括实际 `.behw` 文件解析。原始新建 Mesh 的可视门禁明确失败，克隆实验另行构建和验收。构建现有 Kotlin 冗余 cast、Gradle `srcDir` 和 NDK `ndk.dir` 弃用告警属于基线，本轮新增的原生文件未出现编译告警。
 ## 2026-09-30：第一人称自动隐藏头部配件（设备部分验证，组合件仍失败）
 
 范围为所有角色模型中附着于头骨的配件。现有 `first_person_hide_head` 默认开启；进入第一人称时，Camera owner 继续按已有名称处理头发与面部部件，并对名称未命中的 Renderer 增加纯 CPU 头骨附着判定：蒙皮 Renderer 的骨骼必须全部位于当前角色头骨或其子层级，非蒙皮 Renderer 的 Transform 必须位于该层级。空骨板、混合头部/躯干骨板、读取失败及超过层级深度上界均不按整块头饰隐藏，防止误隐藏身体。命中后沿用 `ShadowsOnly` 租约保留阴影，退出第一人称或游戏接管相机时沿用现有读回与有界恢复流程；LOD 和角色重建仍由原有 30 帧重扫覆盖。GPU 网格读取不可用不阻断此判定。没有新增设置或 UI 状态，陀螺仪仍不在本轮。

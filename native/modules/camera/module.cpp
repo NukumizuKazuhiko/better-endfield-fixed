@@ -32,6 +32,16 @@
 #include <utility>
 #include <vector>
 
+#if defined(__ANDROID__)
+namespace betterendfield {
+bool AndroidProbeHeadwearFixture(void* renderer, void* source_mesh);
+bool AndroidHeadwearFixtureAvailable(void* renderer, void* source_mesh);
+void AndroidPruneHeadwearFixtures(void* const* renderers, size_t count);
+bool AndroidHeadwearFixtureOwns(void* renderer, void* mesh);
+bool AndroidRestoreHeadwearFixture();
+}
+#endif
+
 namespace BetterEndfield::CameraModule {
 namespace {
 
@@ -1640,6 +1650,9 @@ void PumpFirstPerson() {
     // visual transition has released the head; Release owns the retry budget.
     if (!g_first_person_active.load(std::memory_order_acquire) &&
         !g_fp_perspective.visual_exit_deadline && !g_fp_perspective.transition.blending) {
+#if defined(__ANDROID__)
+        betterendfield::AndroidRestoreHeadwearFixture();
+#endif
         if (g_fp_external_scale.lease.owned) g_fp_external_scale.Release();
         if (std::any_of(g_fp_mesh_session.patches.begin(),g_fp_mesh_session.patches.end(),
                 [](const FpPatch& patch){return patch.restore_failures<3;})) ReleaseNeckCap();

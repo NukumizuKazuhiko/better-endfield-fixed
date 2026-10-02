@@ -8,6 +8,7 @@
 #include "modules/custom_model/resource_probe.h"
 #include "modules/custom_model/custom_model_module.h"
 #include "modules/camera/first_person_look_probe.h"
+#include "modules/custom_model/android_mesh_builder.h"
 
 #include "android_virtual_keys.h"
 
@@ -106,6 +107,8 @@ void RunModules() {
             "same-source desktop UI module active (hide UID/watermark, all-HUD toggle)"));
     }
     if (Configured("BETTER_ENDFIELD_CAMERA_CONFIG") != nullptr) {
+        ConfigureAndroidMeshBuilder(runtime);
+        ConfigureHeadwearCanary(runtime);
         g_modules.emplace_back(std::make_unique<DesktopModule>(
             "betterendfield.camera",
             "BETTER_ENDFIELD_CAMERA_CONFIG",
