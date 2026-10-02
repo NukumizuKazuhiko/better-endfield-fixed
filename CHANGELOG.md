@@ -10,6 +10,8 @@
 
 ## 3.3.22-alpha.21：修「第一人称陀螺仪像方向键一样跳固定角度」——输入单位错了
 
+2026-10-02 本地发行整合：将陀螺仪修复与第一人称头饰网格资源合入同一 Android APK。包内含 834 份 `.behw` 头饰资源和校验清单；首次启动时在游戏私有目录原子部署，后续逐文件核验缓存。资源内容与先前实机接受的内置资源包逐份一致。合成包的 Android Release 构建、入口检查、签名、资源解压/缓存/834 份字节比对和 Windows Camera 定向测试通过；用户反馈本合成包实机“验收通过”。本轮未收到新的设备日志或逐角色画面，不扩大为所有角色及失败分支均通过。萤石保留已接受的小三角边；噗切娜、大潘暂缓，卡缪、利诺、伊冯尚未逐项验收。构建必须显式提供已验证的头饰资源目录；缺少目录时拒绝生成 APK。
+
 alpha.20 把注入点改对了（`CameraManager.OnInput`），实机**有反应了**，但转动是**离散跳变**：用户描述「像上下左右的按钮，点一下转向固定角度，没有平滑移动」。这不是限位，是输入被量化成了固定步长。
 
 **根因：`OnInput(inputX, inputY)` 的参数是「屏幕百分比增量」，不是像素；而且前一版把像素量级压得太低，落进了控制器的最小速度阈值量化区。** 决定性证据来自 IL2CPP 反编译（`legacy/.../IL2CPP_Dump_Normal/Gameplay.Beyond.dll.cs`）：`CustomFreeLookCameraController.DragCameraHorizontal(System.Single deltaScreenPercentageX)` / `DragCameraVertical(System.Single deltaScreenPercentageY)` 的参数名明示单位是**屏幕百分比**；同一控制器的 `CameraInputCtrlConfig` 里有 `_xDragSpeed` / `_yDragSpeed` 与 `_xAccelerationConfig` / `_yAccelerationConfig`（后者含 `_speedMinThreshold` 最小速度阈值）。玩家手指在屏幕上滑动的像素被换算成「滑动距离 ÷ 屏幕尺寸」的百分比后喂进这条链，再由 DragSpeed 缩放成角度。前一版做错了两处：
@@ -24,7 +26,7 @@ n12.log 实测证据：55 条 `applied` 行里 `dx`/`dy` 全部只有 0/±1，�
 - **单位换算**：新增 `unity.screen.width.get` / `unity.screen.height.get` 合同（`UnityEngine.Screen` 静态属性），在 `ApplyFirstPersonLook()` 里把像素增量 ÷ 实时渲染分辨率 → 屏幕百分比，再喂 `OnInput`。屏幕分辨率拿不到时**丢弃增量**而非按像素误喂（宁可慢一拍也不重新引入吸附）。方向符号不变：`look_x = dx / screen_w`、`look_y = -dy / screen_h`。
 - **量级校准**：Java 侧 `GyroscopeController.PIXELS_PER_RADIAN` 从 30 调到 **1100**——锚点是「1 弧度转动 ≈ 1 屏幕宽拖拽」。约 1080–1440px 的横屏下，1 rad/s 转动产出约 1.0 屏幕百分比/秒，与手指快速拖拽（约 0.8 百分比/秒）同量级，灵敏度滑杆（0.2–5.0）在此范围内微调；同时让增量远离阈值量化区。
 
-`versionName=3.3.22-alpha.21`、`versionCode=30322`。**构建与门禁通过，待实机验收**：百分比→角度的精确系数（DragSpeed 数值）与「最小速度阈值」是否仍会在极慢转动时量化，仍需实机标定，预期 1 轮。
+`versionName=3.3.22-alpha.21`、`versionCode=30322`。用户已反馈合成 APK 实机验收通过；百分比→角度的精确系数（DragSpeed 数值）与极慢转动下的最小速度阈值没有独立设备日志，仍作为后续标定边界。
 
 ## 3.3.22-alpha.20：修「陀螺仪在第一人称下依旧无动作」——注入对象用错了
 

@@ -12,7 +12,7 @@
 .\gradlew.bat :app:assembleRelease :app:verifyReleaseEntryPoints -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon
 ```
 
-目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。该要求也适用于 CI 构建，尚未配置资源来源的旧 CI 任务不能直接发布这一版本。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对旧 alpha.9 内置资源 APK 实机反馈“通过”，合成后的 alpha.21 APK 尚待实机验收，不能沿用旧包的整包结论。
+目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。该要求也适用于 CI 构建，尚未配置资源来源的旧 CI 任务不能直接发布这一版本。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对合成后的 alpha.21 APK 反馈“验收通过”；没有收到本次设备日志或逐角色画面，不扩大为全部角色和故障分支逐项通过。
 
 Android ARM64 and LSPosed workspace for Better Endfield. The Android port keeps
 the desktop project's module boundary: a small runtime owns IL2CPP access and

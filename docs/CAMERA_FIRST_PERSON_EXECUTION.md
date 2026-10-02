@@ -6,7 +6,7 @@
 
 本轮从已验收目录 `D:/CodexData/headwear-audit/all-characters/catalog-bundled` 构建 release APK，内含 `assets/headwear-v3/` 下 834 份 `.behw` 和 `manifest.tsv`。资源 ID 为 `1fb67e1585ec27b6013437d008a989c48fe18555dd3d6c1c02efa79b37471640`；与先前实机通过的内置资源 APK 逐份 SHA-256 比较，834/834 一致。直接从新 APK 运行部署 owner 的首次解压、缓存复用和 834 份字节比对通过。20 项 Python 测试、33 项 Java 部署检查、Windows Camera/HeadwearFixtureTests Release 构建及后者运行、Android `:app:assembleRelease :app:verifyReleaseEntryPoints --offline --no-daemon`、APK v2 签名验证均通过。完整 lint 的既有错误仍按下节记录，未将其写成通过。
 
-交付包为 `D:/CodexData/headwear-audit/betterendfield-3.3.22-alpha.21-gyro-headwear-bundled.apk`，49,164,659 字节，SHA-256 `0404ED0B049389ED5D2A784F6FD65A1644892B9DB3458F5B278EA1EC7671F7E4`；签名证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。旧 alpha.9 内置资源包的用户“通过”反馈仅证明其自身；合成包增加陀螺仪与版本变化，尚未取得新的游戏实机画面/日志。设备验收应覆盖冷启动自动部署、已接受角色的第一人称头饰/服装/阴影与退出恢复，以及陀螺仪低速连续转动、触摸共存和自由相机切换。萤石小三角边按用户已接受状态保留；噗切娜、大潘暂缓；卡缪、利诺、伊冯仍未逐项实机验收。
+交付包为 `D:/CodexData/headwear-audit/betterendfield-3.3.22-alpha.21-gyro-headwear-bundled.apk`，49,164,659 字节，SHA-256 `0404ED0B049389ED5D2A784F6FD65A1644892B9DB3458F5B278EA1EC7671F7E4`；签名证书 SHA-256 `8CD6FDC15038530E101668AB4B3CCD0030AE88AE37153E6D66AA45930C7B8EFD`。2026-10-02 用户反馈该合成包“验收通过”，按本次操作场景记为用户侧实机通过；本轮未收到设备日志或逐角色画面，不能独立复核冷启动自动部署、头饰/服装/阴影与退出恢复、陀螺仪低速转动和触摸共存的各子路径，也不扩大为全部角色及故障分支均通过。萤石小三角边按用户已接受状态保留；噗切娜、大潘暂缓；卡缪、利诺、伊冯仍未逐项实机验收。
 
 ## 2026-10-02：陀螺仪分支并入本地主线
 
