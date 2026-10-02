@@ -597,6 +597,40 @@ class SettingsState(private val context: Context) {
         private set
 
     /*
+     * The gyroscope look source, stored as one record by ModuleSettings. None of
+     * it reaches the native configuration's behaviour - the sensor steers the
+     * camera through the panel's own input relay - so these fields exist to
+     * drive the sensor loop in the game process and to show the user what it is
+     * doing.
+     */
+    var gyroscopeEnabled by mutableStateOf(false)
+        private set
+    var gyroscopeHorizontalSensitivity by mutableStateOf(1f)
+        private set
+    var gyroscopeVerticalSensitivity by mutableStateOf(1f)
+        private set
+    // Initial values mirror the stored defaults (both axes inverted); apply()
+    // overwrites them with whatever the saved configuration holds.
+    var gyroscopeInvertHorizontal by mutableStateOf(true)
+        private set
+    var gyroscopeInvertVertical by mutableStateOf(true)
+        private set
+    var gyroscopeDeadzone by mutableStateOf(0.002f)
+        private set
+    var gyroscopeSmoothing by mutableStateOf(0.08f)
+        private set
+
+    /**
+     * Research switch: asks the game to enumerate its first-person look entry
+     * points on the next launch. It is here, and not on a system property or an
+     * environment variable, because the phone is not rooted and this settings
+     * screen is the only thing that can reach the game process without root.
+     * Off by default, read once at library load, and it only ever logs.
+     */
+    var firstPersonLookProbe by mutableStateOf(false)
+        private set
+
+    /*
      * The free camera's motion/keyframe/VMD block, stored as one record by
      * ModuleSettings. mouseInvertY and mouseSensitivity travel with it because
      * the configuration has always carried them, and since the panel grew a look
@@ -685,6 +719,15 @@ class SettingsState(private val context: Context) {
         firstPersonThirdPersonInCombat = advanced.thirdPersonInCombat()
         firstPersonTransitionSeconds = advanced.transitionSeconds().toFloat()
         firstPersonExternalHeadScale = advanced.externalHeadScale()
+        val gyro = ModuleSettings.getFirstPersonGyro(context)
+        gyroscopeEnabled = gyro.enabled()
+        gyroscopeHorizontalSensitivity = gyro.horizontalSensitivity().toFloat()
+        gyroscopeVerticalSensitivity = gyro.verticalSensitivity().toFloat()
+        gyroscopeInvertHorizontal = gyro.invertHorizontal()
+        gyroscopeInvertVertical = gyro.invertVertical()
+        gyroscopeDeadzone = gyro.deadzone().toFloat()
+        gyroscopeSmoothing = gyro.smoothing().toFloat()
+        firstPersonLookProbe = ModuleSettings.readFirstPersonLookProbe(context)
         val motion = ModuleSettings.getCameraMotion(context)
         mouseInvertY = motion.invertY()
         mouseSensitivity = motion.sensitivity().toFloat()
@@ -828,6 +871,46 @@ class SettingsState(private val context: Context) {
 
     fun updateFirstPersonExternalHeadScale(value: Boolean) {
         firstPersonExternalHeadScale = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeEnabled(value: Boolean) {
+        gyroscopeEnabled = value
+        saveCameraSettings()
+    }
+
+    fun updateFirstPersonLookProbe(value: Boolean) {
+        firstPersonLookProbe = value
+        ModuleSettings.writeFirstPersonLookProbe(context, value)
+    }
+
+    fun updateGyroscopeHorizontalSensitivity(value: Float) {
+        gyroscopeHorizontalSensitivity = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeVerticalSensitivity(value: Float) {
+        gyroscopeVerticalSensitivity = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeInvertHorizontal(value: Boolean) {
+        gyroscopeInvertHorizontal = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeInvertVertical(value: Boolean) {
+        gyroscopeInvertVertical = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeDeadzone(value: Float) {
+        gyroscopeDeadzone = value
+        saveCameraSettings()
+    }
+
+    fun updateGyroscopeSmoothing(value: Float) {
+        gyroscopeSmoothing = value
         saveCameraSettings()
     }
 
@@ -1110,6 +1193,15 @@ class SettingsState(private val context: Context) {
                 vmdFovBias.toDouble(),
                 vmdLoop,
             ),
+            ModuleSettings.FirstPersonGyro(
+                gyroscopeEnabled,
+                gyroscopeHorizontalSensitivity.toDouble(),
+                gyroscopeVerticalSensitivity.toDouble(),
+                gyroscopeInvertHorizontal,
+                gyroscopeInvertVertical,
+                gyroscopeDeadzone.toDouble(),
+                gyroscopeSmoothing.toDouble(),
+            ),
         )
         afterCameraChange(write)
     }
@@ -1186,6 +1278,18 @@ class SettingsState(private val context: Context) {
      * the same reason "camera speed" is dimmed whenever the camera is off.
      */
     val cameraMotionAvailable get() = freeCamera
+
+    /**
+     * Gyroscope deltas reach the camera through the free camera's look term, so
+     * the source is offered whenever the module could run at all: enabling the
+     * switch turns the free camera on in the same write, which is what gives the
+     * deltas something to steer. Gating this row on the free camera being
+     * already on would hide the switch behind the setting it is supposed to
+     * enable. The tunables below are dimmed until the switch is on, so the page
+     * shows what the source will do rather than hiding it.
+     */
+    val gyroscopeAvailable get() = freeCamera || firstPerson || gyroscopeEnabled
+    val gyroscopeTuningAvailable get() = gyroscopeAvailable && gyroscopeEnabled
 
     /**
      * What the import row says about the slot right now. The page needs the name

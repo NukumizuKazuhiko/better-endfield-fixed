@@ -7,6 +7,7 @@
 #include "modules/login_model/login_model_module.h"
 #include "modules/custom_model/resource_probe.h"
 #include "modules/custom_model/custom_model_module.h"
+#include "modules/camera/first_person_look_probe.h"
 
 #include "android_virtual_keys.h"
 
@@ -82,6 +83,13 @@ void RunModules() {
     if (custom_probe != nullptr && std::string(custom_probe) == "1") {
         g_modules.emplace_back(std::make_unique<CustomModelResourceProbe>());
     }
+    // Read-only metadata probe for the first-person look entry point. Gated the
+    // same way as the resource probe: a debug system property, so a release
+    // install never runs it.
+    const char* look_probe = std::getenv("BETTER_ENDFIELD_FP_LOOK_PROBE");
+    if (look_probe != nullptr && std::string(look_probe) == "1") {
+        g_modules.emplace_back(std::make_unique<FirstPersonLookProbe>());
+    }
     if (Configured("BETTER_ENDFIELD_VOICE_RULES") != nullptr) {
         g_modules.emplace_back(std::make_unique<CharacterVoiceModule>());
     }
@@ -117,6 +125,16 @@ void RunModules() {
         const ModuleResult result = module->Start(runtime);
         LogInfo(module->Id(), result.message.c_str());
     }
+    // Name what ran. Without this a probe that was compiled in but never
+    // registered looks exactly like one that ran and found nothing, and the
+    // two need opposite fixes.
+    std::string selected;
+    for (const auto& module : g_modules) {
+        selected += " ";
+        selected += module->Id();
+    }
+    LogInfo("runtime", (std::string("modules started:") +
+        (selected.empty() ? " (none)" : selected)).c_str());
 }
 
 bool AnyModuleRequested() {
@@ -132,7 +150,12 @@ bool AnyModuleRequested() {
         if (Configured(variable) != nullptr) return true;
     }
     const char* custom_probe = std::getenv("BETTER_ENDFIELD_CUSTOM_MODEL_PROBE");
-    return custom_probe != nullptr && std::string(custom_probe) == "1";
+    if (custom_probe != nullptr && std::string(custom_probe) == "1") return true;
+    // The look probe has to count as a request on its own: with no configuration
+    // for any real module, JNI_OnLoad would otherwise skip the IL2CPP worker and
+    // the probe would never get a runtime to enumerate against.
+    const char* look_probe = std::getenv("BETTER_ENDFIELD_FP_LOOK_PROBE");
+    return look_probe != nullptr && std::string(look_probe) == "1";
 }
 
 }  // namespace

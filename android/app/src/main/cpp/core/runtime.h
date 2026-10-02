@@ -57,6 +57,13 @@ public:
         int parameter_count) const;
     std::string DescribeMethod(const char* assembly, const char* namespaze,
         const char* klass, const char* method) const;
+    // Lists every method and field a class declares. DescribeMethod answers
+    // "does this exact member exist"; this answers "what members are there",
+    // which is what locating an unrecorded entry point needs. Fields are listed
+    // with their offsets so a caller can tell a layout field from a property
+    // backing store without reading a live object.
+    std::string DescribeClass(const char* assembly, const char* namespaze,
+        const char* klass) const;
     ResolvedClass ResolveClass(
         const char* assembly,
         const char* namespaze,

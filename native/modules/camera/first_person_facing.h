@@ -76,13 +76,42 @@ inline FacingResult StepFacing(FacingState& state, const FacingInput& input) {
         return {FacingMode::Visual, state.held_yaw};
     }
     const float limit = std::clamp(input.side_limit, 0.f, 90.f);
-    state.held_yaw = input.view_yaw - std::clamp(
-        std::remainder(input.view_yaw - state.held_yaw, 360.f), -limit, limit);
-    state.attached = true;
-    state.lateral_yaw = std::remainder(state.held_yaw - input.view_yaw, 360.f);
+    // Standing still is the one state where the body must not outlive the
+    // strafe that produced its offset.
+    //
+    // The walk branch writes held_yaw = view_yaw + lateral_yaw, so lateral_yaw
+    // is measured from the view. This branch used to clamp that offset against
+    // view_yaw but never write the clamped value back into lateral_yaw; it only
+    // derived lateral_yaw from held_yaw and reset target to 0. The offset then
+    // sat still in the state while the view kept moving, so on a device the body
+    // froze on the absolute world yaw the walk happened to end on and stopped
+    // following the view at all -- the character turned to a fixed direction and
+    // stayed there. Restoring target = 0 on the next walk then eased the body
+    // back from that frozen yaw, which is the visible snap.
+    //
+    // Keeping the offset view-relative and easing it out closes both: the body
+    // holds the pose the walk ended in and then unwinds to the view over the
+    // same 0.35s the walk used, so the next step starts from zero and has
+    // nothing to snap away from.
+    //
+    // The rate is 1/0.35 to match the walk's own turn_time. Reusing the walk
+    // branch's 16/s steady-state tail was wrong here: at 60Hz that removes
+    // 34.8 of a 45 degree offset in the first 16ms frame, which is a snap in
+    // the opposite direction from the one being fixed.
+    //
+    // The release starts from lateral_yaw itself. state.target still holds the
+    // strafe target the walk branch was easing toward (45 for a strafe), so
+    // treating it as this branch's origin would subtract the offset away
+    // instead of decaying it.
+    constexpr float kReleaseSeconds = .35f;
+    state.lateral_yaw = std::remainder(state.lateral_yaw, 360.f);
+    state.lateral_yaw = std::clamp(state.lateral_yaw, -limit, limit);
+    state.lateral_yaw *= 1.f - -std::expm1(-elapsed / kReleaseSeconds);
+    state.velocity = state.start_velocity = 0;
     state.target = 0;
     state.turn_time = .35f;
-    state.velocity = state.start_velocity = 0;
+    state.held_yaw = input.view_yaw + state.lateral_yaw;
+    state.attached = true;
     return {FacingMode::Entity, state.held_yaw};
 }
 } // namespace BetterEndfield::FirstPerson

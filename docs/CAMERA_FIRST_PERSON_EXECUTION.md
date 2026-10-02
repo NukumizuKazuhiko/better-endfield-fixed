@@ -1,5 +1,11 @@
 # 第一人称 S0–S8 执行合同
 
+## 2026-10-02：陀螺仪分支并入本地主线
+
+`gyroscope` 从 `1897ffe` 分出，主线另有依赖修复。合并无文本冲突；Windows 定向构建发现 Android 专用 `ApplyFirstPersonLook()` 的调用缺少平台条件，已将调用限制在非 Windows 编译路径。相机仍由共享 `native/modules/camera/module.cpp` 负责；Android 传感器在游戏进程采样，经现有输入中继送到自由相机或第一人称。第一人称把像素增量除以实时屏幕宽高后调用 `CameraManager.OnInput`。历史 `CAMERA_FIRST_PERSON_GYRO_PLAN_20261001.md` 的 `SnapshotCameraController.RotateCamera*` 路线已被设备证据推翻，不作为当前合同。
+
+本轮离线门禁：VS CMake Release 的 `BetterEndfield.Camera`、`BetterEndfield.FirstPersonFacingTests` 构建成功；后者运行通过。Android `:app:assembleDebug :app:verifyReleaseEntryPoints --offline --no-daemon` 成功。Gradle 仍报既有的 `srcDir`、`ndk.dir` 废弃提示以及其他原生模块警告，本轮未扩大到这些模块。未运行 Android 游戏或连接设备验证本次合并包；陀螺仪低速连续转动、触摸共存、自由相机切换和关闭后停止仍需以本次构建 APK 的设备画面与日志验收，不能把旧 alpha 设备日志当作合并包通过。
+
 ## 2026-09-30：第一人称自动隐藏头部配件（设备部分验证，组合件仍失败）
 
 范围为所有角色模型中附着于头骨的配件。现有 `first_person_hide_head` 默认开启；进入第一人称时，Camera owner 继续按已有名称处理头发与面部部件，并对名称未命中的 Renderer 增加纯 CPU 头骨附着判定：蒙皮 Renderer 的骨骼必须全部位于当前角色头骨或其子层级，非蒙皮 Renderer 的 Transform 必须位于该层级。空骨板、混合头部/躯干骨板、读取失败及超过层级深度上界均不按整块头饰隐藏，防止误隐藏身体。命中后沿用 `ShadowsOnly` 租约保留阴影，退出第一人称或游戏接管相机时沿用现有读回与有界恢复流程；LOD 和角色重建仍由原有 30 帧重扫覆盖。GPU 网格读取不可用不阻断此判定。没有新增设置或 UI 状态，陀螺仪仍不在本轮。
@@ -11,6 +17,14 @@
 2026-10-01 实机复核：PJX110 `b992bd53` 已安装的模块 APK 从设备拉取后 SHA-256 与上列验收包相同。启动游戏前开启 `adb logcat -v time -s BetterEndfield.Runtime:I '*:S'`，日志保存到 `D:\CodexData\headwear-audit\device-first-person-20261001.log`。用户进入庄方仪第一人称并退出，反馈“仍有遮挡，退出后恢复正常”。日志记录头骨 `Bip001_Head`、第一人称启用、239 个相机补丁帧和退出；`vfxpart_01/02/03_lod1` 与面部、头发等 Renderer 成功设置为 `ShadowsOnly`。同一部件树里的 `S_actor_zhuangfy_cloth_01_lod1` 没有隐藏记录。此日志无法仅凭名称断定剩余遮挡的每一个三角面归属，也未独立证明角色切换及所有角色恢复。
 
 本机 VFS 离线解包见 `D:\CodexData\headwear-audit\README.md`：庄方仪 `cloth_01_lod0` 是单个子网格，既有头部骨骼主导的顶点/三角面，也有大量身体面，不能整 Renderer 隐藏。实机初始化报告 `Mesh::get_vertexBufferCount`、`GetVertexAttributeFormat/Dimension/Stream/Offset`、`GetVertexBufferStride`、`GetSubMesh_Injected`、`SetSubMesh_Injected`、`SetIndexBufferParams`、`InternalSetIndexBufferData` 等绑定缺失，最终为 `named GPU readback/clone bindings unavailable`。因此现有局部网格补丁未运行，组合头饰目标未通过；下一步必须先取得完整、可验证的 Android 顶点/索引读取与上传合同，再在真实角色和 LOD 中验证局部隐藏及阴影，不能扩大整块 `ShadowsOnly` 判定以掩盖失败。
+
+进一步读取庄方仪 `cloth_01_lod0` 序列化标志：`m_IsReadable=False`、`m_KeepVertices=False`、`m_KeepIndices=False`。该网格的 52,106 个三角面按头部骨骼权重分成 6,548 个纯头部面与 45,558 个纯身体面，边界没有混合面；这为局部裁剪提供了离线 fixture，但不能证明运行时 GPU 读取、所有 LOD 或其他角色。Unity 2021.3 的 `Mesh.AcquireReadOnlyMeshData` 要求可读网格，不能替代 GPU 路径。用户明确要求保留头部阴影，故不将 `first_person_external_head_scale` 自动启用，也不把缩头作为该目标的完成证明。
+
+用户提供的 `E:\Downloads\终末地EE9.28.zip` 内 Windows `.addon64` 已有定点静态逆向报告 `D:\CodexData\headwear-audit\EE-20260928-reverse-report.md`（样本 SHA-256 `3B552B839FE578DD6F1DF2ADE57FAE5086938B978C3C896C6DEAD1AAA4E2D22A`）。报告和关键指令复核显示：它通过 GPU buffer staging 读取不可读网格，在独立克隆的索引中退化选中的三角面，原网格留作 `shadowProxyMesh`，并对退出恢复做所有权检查。这与当前 Camera 的局部裁剪/阴影设计同向；报告没有 Android ARM64 的 icall 地址、ABI 或设备读回结果，不能仅凭 Windows RVA 改写 Android 生产网格。
+
+同日从 PJX110 已安装的游戏 1.5.3 拉取 `libunity.so`（SHA-256 `46D5658A71BD35580C9F5D91D41C39B5653201CF142F34542FDD8DA856A6B4C8`）做只读静态接口核对，详见 `D:\CodexData\headwear-audit\PJX110-android-mesh-api-gate.md`。明确登记了 `Mesh::GetVertexBufferImpl`，但未在明文或 256 种单字节 XOR 名称搜索中找到 EE 路径所需的 `Mesh::GetIndexBufferImpl` 与 `GraphicsBuffer::InternalGetData`；现有 Android 相机日志也报网格补丁绑定缺失。该证据不排除所有替代渲染方案，但足以继续阻止把 Windows 的同步 GPU 读回和索引写回直接移植到当前 Android 生产路径。
+
+同日找到可继续验证的 Android 资源路径，取证记录见 `D:\CodexData\headwear-audit\PJX110-android-asset-mesh-route.md`。设备 VFS 的 Android manifest 可解析，庄方仪世界/界面模型依赖闭包为 89/89 包、52,882,609 字节；只读提取后 `NativeAssetReader` 解析 49 个 Mesh 和 52 个 SkinnedMeshRenderer，后端错误为 0。与实机部件树同名的 `S_actor_zhuangfy_cloth_01_lod1` 可导出 21,689 顶点、67,080 索引、207 骨骼的源数据；按头骨子树权重大于 0.5 分类，22,360 个三角面中 3,300 个纯头部、19,060 个纯身体、0 个跨界，且只有一个子网格、无 BlendShape。这为“从当前 Android 资源离线生成独立可见网格，保留运行时原网格作阴影代理”的路线提供了样本证据；尚未实现原始顶点流/骨骼/材质的运行时一致性门禁、全角色与所有 LOD 覆盖或实机画面，因此组合头饰目标仍未通过。
 
 ## 2026-09-30：终结技与角色界面视角收回（用户侧验收通过）
 

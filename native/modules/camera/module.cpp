@@ -85,6 +85,20 @@ struct CameraConfiguration {
     bool mouse_look = true;
     bool mouse_invert_y = false;
     float mouse_sensitivity = 0.1f;
+    // First-person gyroscope consumption. The gyroscope never originates in
+    // native code: it arrives as relay look deltas (the same channel a finger
+    // drives) and is normally folded into the free camera's target. These
+    // tunables let those deltas also drive the *game's own* first-person
+    // rotation instead, so the gyroscope works with the free camera off.
+    // The scale is applied to raw relay pixels; the game's RotateCamera*
+    // parameter units are not knowable statically, hence the on-device
+    // calibration loop described in docs/CAMERA_FIRST_PERSON_GYRO_PLAN_20261001.md.
+    bool first_person_gyro_look = false;
+    float first_person_gyro_horizontal = 1.0f;
+    float first_person_gyro_vertical = 1.0f;
+    bool first_person_gyro_invert_horizontal = false;
+    bool first_person_gyro_invert_vertical = false;
+    float first_person_gyro_deadzone = 0.0f;
     float smoothing = 0.3f;
     int motion_preset = 0;
     float motion_speed = 1.0f;
@@ -172,6 +186,11 @@ std::atomic_int g_first_person_key{VK_OEM_MINUS};
 std::atomic_bool g_mouse_look_enabled{true};
 std::atomic_bool g_mouse_invert_y{false};
 std::atomic<float> g_mouse_sensitivity{0.1f};
+std::atomic_bool g_first_person_gyro_look{false};
+std::atomic<float> g_first_person_gyro_horizontal{1.0f};
+std::atomic<float> g_first_person_gyro_vertical{1.0f};
+std::atomic_bool g_first_person_gyro_invert_horizontal{false};
+std::atomic_bool g_first_person_gyro_invert_vertical{false};
 std::atomic<float> g_free_smoothing{0.3f};
 std::atomic_int g_motion_preset{0};
 std::atomic<float> g_motion_speed{1.0f};
@@ -227,6 +246,7 @@ bool g_free_camera_contract_ready = false;
 bool g_dither_contract_ready = false;
 bool g_time_heartbeat_contract_ready = false;
 bool g_first_person_contract_ready = false;
+bool g_first_person_gyro_contract_ready = false;
 bool g_render_loop_hook_ready = false;
 
 bool g_free_camera_active = false;
@@ -332,6 +352,12 @@ struct FirstPersonSession {
     uint32_t neck_handle = 0;
     void* snapshot_controller = nullptr;
     uint32_t snapshot_handle = 0;
+    // The main camera manager. Unlike the snapshot controller, this one exists
+    // for the whole of ordinary play: the module already hooks its TailLateTick,
+    // so the instance is captured there and held here for the first-person look
+    // path, which must drive the game's own aim rather than the snapshot camera.
+    void* camera_manager = nullptr;
+    uint32_t camera_manager_handle = 0;
     bool head_hide_applied = false;
     Vector3 last_eye{};
     bool last_eye_valid = false;
@@ -372,6 +398,9 @@ MethodContract g_contracts[]{
     {"snapshot.show_char",
         {"Gameplay.Beyond.dll", "Beyond.Gameplay.View", "SnapshotCameraController",
             "_ShowChar", nullptr, "System.Void", 0}},
+    {"camera_manager.on_input",
+        {"Gameplay.Beyond.dll", "Beyond.Gameplay.View", "CameraManager",
+            "OnInput", "System.Single|System.Single", "System.Void", 2}},
     {"unity.camera.main",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Camera", "get_main",
             nullptr, "UnityEngine.Camera", 0}},
@@ -381,6 +410,12 @@ MethodContract g_contracts[]{
     {"unity.camera.fov.set",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Camera", "set_fieldOfView",
             "System.Single", "System.Void", 1}},
+    {"unity.screen.width.get",
+        {"UnityEngine.CoreModule.dll", "UnityEngine", "Screen", "get_width",
+            nullptr, "System.Int32", 0}},
+    {"unity.screen.height.get",
+        {"UnityEngine.CoreModule.dll", "UnityEngine", "Screen", "get_height",
+            nullptr, "System.Int32", 0}},
     {"unity.component.transform",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Component", "get_transform",
             nullptr, "UnityEngine.Transform", 0}},
@@ -1527,6 +1562,14 @@ bool EnterFirstPerson() {
     g_first_person.last_eye_valid = false;
     g_first_person_reassert_frames = 0;
     g_first_person_health_warned = false;
+    // The look accumulator is shared with the free camera, and while the first
+    // person is down the gyroscope keeps folding deltas into it (the relay drains
+    // on every tick regardless of which camera is armed). EnterFreeCamera clears
+    // it for the same reason; without the same here, the first active frame would
+    // dump every delta that piled up while the first person was off as one jump -
+    // exactly the "camera throws itself sideways the moment first person starts"
+    // seen on device.
+    ClearMouseInput();
     g_first_person_active.store(true, std::memory_order_release);
     char buffer[256];
     std::snprintf(buffer, sizeof(buffer),
@@ -1664,6 +1707,122 @@ void FoldPanelLookInput() {
     g_mouse_dy.fetch_add(dy, std::memory_order_relaxed);
 }
 
+// The gyroscope drives the module's own first-person rotation.
+//
+// It never originates here: the phone's gyroscope is folded into look deltas by
+// the settings app and arrives over the same relay channel as a finger drag, so
+// by the time these deltas exist nothing distinguishes "gyroscope" from "touch".
+// That is by design - it is what lets the gyroscope steer a camera this module
+// does not own the orientation of. The consequence, however, is that the deltas
+// have exactly one consumer below: the free camera's target, which StepFreeCamera
+// reads only while the free camera is armed. So today a gyroscope with the free
+// camera off has nowhere to go.
+//
+// This adds the missing consumer. It does not reroute or reinterpret the free
+// camera path - that path is left exactly as it was, and the two are mutually
+// exclusive because they would otherwise both drain the same accumulator and
+// would each steal half of the other's motion.
+//
+// The injection point is CameraManager::OnInput(float, float) - the game's own
+// main-camera look entry. Two earlier candidates were tried and both proved
+// wrong on device:
+//   * SnapshotCameraController.RotateCamera* - the snapshot controller is a
+//     photography mode. It only exists while ActivateSnapshotCamera() has run,
+//     so during ordinary play (including the module's first person) there is no
+//     instance to call and the deltas were silently dropped.
+//   * snapshot.is_first_person - the game's native first-person flag. It is the
+//     right flag for the game's *own* first person, but the module's first
+//     person does not set it; it rewrites the pushed Cinemachine CameraState and
+//     keeps the game's orientation authoritative. Gating on that flag therefore
+//     shut the door during the module's first person too.
+//
+// CameraManager is the object that owns that authoritative orientation: the
+// module already hooks its TailLateTick, so the instance is captured there and
+// held in g_first_person.camera_manager. Feeding OnInput the gyroscope's deltas
+// is exactly what the player's own touch does, so body follow, pitch clamping
+// and camera blend keep working and touch adds to the gyroscope instead of being
+// overwritten.
+void ApplyFirstPersonLook() {
+    if (!g_first_person_gyro_look.load(std::memory_order_acquire) ||
+        !g_first_person_gyro_contract_ready) {
+        return;
+    }
+    // The free camera takes precedence and is asked first, exactly as the pump
+    // orders these two consumers: while it is armed the accumulator is its and
+    // this must not touch it.
+    if (g_free_camera_active) {
+        return;
+    }
+    // The module's own first person is the camera this gyroscope exists for. It
+    // is entered with the module's first-person hotkey, and while it is active
+    // the game's main camera orientation is authoritative (the module only moves
+    // the position). The deltas therefore go to the game's own look input, not
+    // to the snapshot camera - the snapshot controller is a photography mode and
+    // is not even present during ordinary play, which is why the earlier
+    // RotateCamera* approach found no instance to call.
+    const bool module_first_person = g_first_person_active.load(std::memory_order_acquire);
+    if (!module_first_person) {
+        // No camera claims the deltas, so they stay put for the free camera to
+        // find when it arms.
+        return;
+    }
+    const int dx = g_mouse_dx.exchange(0, std::memory_order_relaxed);
+    const int dy = g_mouse_dy.exchange(0, std::memory_order_relaxed);
+    if (dx == 0 && dy == 0) {
+        return;
+    }
+    const MethodContract* on_input = Contract("camera_manager.on_input");
+    if (!on_input || !on_input->resolved) {
+        return;
+    }
+    void* manager = g_first_person.camera_manager;
+    if (!manager || !IsObjectAlive(manager)) {
+        return;
+    }
+    // The relay deltas are screen-space pixel deltas produced by the app-side
+    // GyroscopeController (sensor rate scaled into pixels, per-axis inversion
+    // already applied there). CameraManager::OnInput does not consume pixels,
+    // though: its two floats are the same screen-percentage deltas a finger
+    // drag produces (the free-look controller names them deltaScreenPercentageX
+    // / deltaScreenPercentageY), and its per-axis DragSpeed + acceleration
+    // config then turns that percentage into rotation. Feeding raw pixels was
+    // therefore two wrongs at once - the unit (pixel vs percentage) and the
+    // scale (a slow turn quantized to +-1 pixel lands on the controller's
+    // speedMinThreshold and is snap-quantized into the "turns in fixed steps
+    // like a d-pad" seen on device). The pixels are divided by the live Unity
+    // render resolution here so a drag of the full screen width is one full
+    // unit of input, matching what the touch path hands the same method. The
+    // only remaining transform is the sign the game's look convention expects:
+    // positive dy (drag down) maps to negative pitch (look up).
+    int screen_w = 0;
+    int screen_h = 0;
+    const MethodContract* width_get = Contract("unity.screen.width.get");
+    const MethodContract* height_get = Contract("unity.screen.height.get");
+    if (width_get && width_get->resolved) {
+        GetValue(width_get, nullptr, screen_w);
+    }
+    if (height_get && height_get->resolved) {
+        GetValue(height_get, nullptr, screen_h);
+    }
+    if (screen_w <= 0 || screen_h <= 0) {
+        // No live resolution yet (or the Screen contracts are missing). Feeding
+        // OnInput a raw pixel would re-introduce the snap-quantization, so drop
+        // the delta rather than mis-scale it. Rate-limited: an idle frame is not
+        // a finding.
+        static uint64_t s_screen_log = 0;
+        if (s_screen_log++ % 120 == 0) {
+            Log("First person gyro: screen resolution unavailable, delta dropped.");
+        }
+        return;
+    }
+    const float look_x = static_cast<float>(dx) / static_cast<float>(screen_w);
+    const float look_y = static_cast<float>(-dy) / static_cast<float>(screen_h);
+    if (look_x != 0.0f || look_y != 0.0f) {
+        void* arguments[2]{const_cast<float*>(&look_x), const_cast<float*>(&look_y)};
+        InvokeVoid(on_input, manager, arguments);
+    }
+}
+
 // The camera configuration used to be read once, from the environment the host
 // set before loading this library, so every parameter change cost a game
 // restart. It is now also delivered through the runtime command pump: the
@@ -1718,6 +1877,32 @@ void PumpFromEngineTick(const char* source) {
     PumpFreeCameraControl();
     if (g_free_camera_active) {
         ApplyFreeCameraHeartbeat();
+    }
+    // Runs after the free camera has had its chance at the accumulator, so the
+    // two consumers can never both take the same deltas.
+#if !defined(_WIN32)
+    ApplyFirstPersonLook();
+#endif
+    // Unconditional, rate-limited heartbeat. Every other candidate in this
+    // function is gated on something ("first person is active", "the gyroscope
+    // is on") and a journal of gates that never opened cannot distinguish "the
+    // feature is broken" from "the pump stopped being called at all". This line
+    // answers that one question and nothing else.
+    {
+        static std::atomic<uint64_t> s_pump_ticks{0};
+        const uint64_t tick = s_pump_ticks.fetch_add(1, std::memory_order_relaxed);
+        if (tick % 900 == 0) {
+            char line[192];
+            std::snprintf(line, sizeof(line),
+                "Camera tick heartbeat: source=%s ticks=%llu module_fp=%d fp_enabled=%d "
+                "free=%d gyro_look=%d",
+                source, static_cast<unsigned long long>(tick),
+                g_first_person_active.load(std::memory_order_relaxed) ? 1 : 0,
+                g_first_person_camera_enabled.load(std::memory_order_relaxed) ? 1 : 0,
+                g_free_camera_active ? 1 : 0,
+                g_first_person_gyro_look.load(std::memory_order_relaxed) ? 1 : 0);
+            Log(line);
+        }
     }
     t_in_engine_tick = false;
     // Which tick drained a request is the one fact a device journal needs when a
@@ -1774,10 +1959,23 @@ void __fastcall DetourTailLateTick(void* instance, float deltaTime, void* method
     if (g_original_tail_late_tick) {
         g_original_tail_late_tick(instance, deltaTime, method);
     }
+    // The hook is on CameraManager::TailLateTick, so `instance` is the game's
+    // main camera manager - the object that owns the look input the first-person
+    // gyroscope must feed. Captured here (with a gchandle to keep it pinned)
+    // rather than looked up by FindObjectOfType, because the module already
+    // receives it on every frame for free.
+    if (instance && instance != g_first_person.camera_manager) {
+        if (g_first_person.camera_manager_handle && g_host && g_host->gchandle_free) {
+            g_host->gchandle_free(g_host->context, g_first_person.camera_manager_handle);
+        }
+        g_first_person.camera_manager = instance;
+        g_first_person.camera_manager_handle = g_host && g_host->gchandle_new
+            ? g_host->gchandle_new(g_host->context, instance, 0)
+            : 0;
+    }
     // TailLateTick runs at the very tail of the frame. The first-person pose is
     // applied inside the Cinemachine push itself, so this only drives the toggle,
     // the eye anchor bookkeeping and the free camera.
-    (void)instance;
     PumpFreeCameraControl();
     PumpFirstPerson();
     if (g_free_camera_active) {
@@ -1939,6 +2137,15 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "free_camera_mouse_look") config.mouse_look = ParseBoolean(value, config.mouse_look);
         else if (key == "mouse_invert_y") config.mouse_invert_y = ParseBoolean(value, config.mouse_invert_y);
         else if (key == "mouse_sensitivity") config.mouse_sensitivity = ParseFloat(value, config.mouse_sensitivity);
+        // First-person gyroscope. These are informational unless the gyroscope
+        // is on, and the gyroscope itself is armed on the app side - native only
+        // decides what happens to the deltas once they arrive.
+        else if (key == "first_person_gyro_look") config.first_person_gyro_look = ParseBoolean(value, config.first_person_gyro_look);
+        else if (key == "first_person_gyro_horizontal") config.first_person_gyro_horizontal = ParseFloat(value, config.first_person_gyro_horizontal);
+        else if (key == "first_person_gyro_vertical") config.first_person_gyro_vertical = ParseFloat(value, config.first_person_gyro_vertical);
+        else if (key == "first_person_gyro_invert_horizontal") config.first_person_gyro_invert_horizontal = ParseBoolean(value, config.first_person_gyro_invert_horizontal);
+        else if (key == "first_person_gyro_invert_vertical") config.first_person_gyro_invert_vertical = ParseBoolean(value, config.first_person_gyro_invert_vertical);
+        else if (key == "first_person_gyro_deadzone") config.first_person_gyro_deadzone = ParseFloat(value, config.first_person_gyro_deadzone);
         else if (key == "free_camera_smoothing") config.smoothing = ParseFloat(value, config.smoothing);
         else if (key == "motion_preset") config.motion_preset = ParseMotionPreset(value, config.motion_preset);
         else if (key == "motion_speed") config.motion_speed = ParseFloat(value, config.motion_speed);
@@ -1977,6 +2184,12 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
     config.first_person_animation_strength = std::clamp(config.first_person_animation_strength, 0.f, 1.f);
     config.first_person_transition_seconds = std::clamp(config.first_person_transition_seconds, 0.f, 1.f);
     config.mouse_sensitivity = std::clamp(config.mouse_sensitivity, 0.01f, 2.0f);
+    // The upper bound is deliberately wide: the game's RotateCamera* units are
+    // not knowable without a device, and a bound tight enough to be "sane" would
+    // block the calibration. The app-side clamp is the real one.
+    config.first_person_gyro_horizontal = std::clamp(config.first_person_gyro_horizontal, -1000.0f, 1000.0f);
+    config.first_person_gyro_vertical = std::clamp(config.first_person_gyro_vertical, -1000.0f, 1000.0f);
+    config.first_person_gyro_deadzone = std::clamp(config.first_person_gyro_deadzone, 0.0f, 0.25f);
     config.smoothing = std::clamp(config.smoothing, 0.0f, 0.95f);
     config.motion_speed = std::clamp(config.motion_speed, -20.0f, 20.0f);
     config.orbit_speed = std::clamp(config.orbit_speed, -180.0f, 180.0f);
@@ -2115,13 +2328,6 @@ bool ResolveContracts() {
         ready("unity.camera.fov.get") &&
         g_state_layout.ready;
 
-    Log(std::string("Camera feature contracts: free_camera=") +
-        (g_free_camera_contract_ready ? "ready" : "unavailable") +
-        ", first_person=" + (g_first_person_contract_ready ? "ready" : "unavailable") +
-        ", anti_dither=" + (g_dither_contract_ready ? "ready" : "unavailable") +
-        ", time_heartbeat=" +
-        (g_time_heartbeat_contract_ready ? "ready" : "unavailable") +
-        ", render_loop=" + (ready("unity.render_loop") ? "ready" : "unavailable"));
     const FieldContract* first_person_flag = Field("snapshot.is_first_person");
     const bool photo_mode_exit_ready = ready("snapshot.set_first_person") &&
         ready("snapshot.show_char") && ready("unity.object.find_object_of_type") &&
@@ -2131,6 +2337,28 @@ bool ResolveContracts() {
         ready("unity.skinned_mesh_renderer.shared_mesh.get") &&
         ready("unity.mesh.vertex_count.get") &&
         g_skinned_mesh_renderer_class.type_object;
+    // Whether the gyroscope can drive the first-person camera at all. Kept
+    // separate from the first-person contract: the camera itself works without
+    // this method, and a build that lacks it must fail the gyroscope silently
+    // rather than take the first-person camera down with it. It needs the main
+    // camera manager's look entry (CameraManager::OnInput) and the tail-late
+    // tick hook that captures the manager's instance.
+    //
+    // Assigned before the summary log below. It used to sit after it, which made
+    // the journal print "first_person_gyro=unavailable" on every launch while the
+    // path itself was armed - a log that lied about the exact fact an operator
+    // would read to decide whether the feature was even present.
+    g_first_person_gyro_contract_ready = ready("camera_manager.on_input") &&
+        ready("camera_manager.tail_late_tick");
+
+    Log(std::string("Camera feature contracts: free_camera=") +
+        (g_free_camera_contract_ready ? "ready" : "unavailable") +
+        ", first_person=" + (g_first_person_contract_ready ? "ready" : "unavailable") +
+        ", first_person_gyro=" + (g_first_person_gyro_contract_ready ? "ready" : "unavailable") +
+        ", anti_dither=" + (g_dither_contract_ready ? "ready" : "unavailable") +
+        ", time_heartbeat=" +
+        (g_time_heartbeat_contract_ready ? "ready" : "unavailable") +
+        ", render_loop=" + (ready("unity.render_loop") ? "ready" : "unavailable"));
     const bool neck_cap_ready = ready("unity.skinned_mesh_renderer.bones.get") &&
         ready("unity.mesh.bindposes.get") && ready("unity.object.destroy");
     Log(std::string("First person optional contracts: photo_mode_exit=") +
@@ -2279,6 +2507,11 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     g_mouse_look_enabled.store(config.mouse_look, std::memory_order_release);
     g_mouse_invert_y.store(config.mouse_invert_y, std::memory_order_release);
     g_mouse_sensitivity.store(config.mouse_sensitivity, std::memory_order_release);
+    g_first_person_gyro_look.store(config.first_person_gyro_look, std::memory_order_release);
+    g_first_person_gyro_horizontal.store(config.first_person_gyro_horizontal, std::memory_order_release);
+    g_first_person_gyro_vertical.store(config.first_person_gyro_vertical, std::memory_order_release);
+    g_first_person_gyro_invert_horizontal.store(config.first_person_gyro_invert_horizontal, std::memory_order_release);
+    g_first_person_gyro_invert_vertical.store(config.first_person_gyro_invert_vertical, std::memory_order_release);
     g_free_smoothing.store(config.smoothing, std::memory_order_release);
     g_motion_preset.store(config.motion_preset, std::memory_order_release);
     g_motion_speed.store(config.motion_speed, std::memory_order_release);

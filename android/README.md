@@ -6,7 +6,7 @@ independent feature modules implement game behavior.
 
 The packaged Android release is an LSPosed module and requires a working
 LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
-Version 3.3.22-alpha.9 is an experimental prerelease: the in-game Compose handle
+Version 3.3.22-alpha.21 is an experimental prerelease: the in-game Compose handle
 appeared on a PJX110 cold launch, while gameplay controls and touch pass-through
 still need device acceptance. The camera module's motion presets, keyframes and
 VMD parameters are configurable from the app, and a `.vmd` can be imported there
@@ -14,12 +14,13 @@ and played back: the user's acceptance run of 3.3.22-alpha.6 passed end to end, 
 the motion stack's first device run on either platform - on Android, ahead of
 Windows - was a successful one. Since then the panel's three playback keys arm a
 take instead of firing on the tap, the overlay stands down completely while it
-runs, the free camera gained the steering input it never had on the phone, and a
-camera parameter change stopped needing a restart (see "Interface, camera and
-sustained dash" below). None of that has been through device acceptance yet,
-and the alpha.7, alpha.8 and alpha.9 builds are still sitting on the same
-`versionCode`, so the only way to tell them apart on a device is the
-`构建 3.3.22-alpha.N` line at the top of the runtime journal.
+runs, the free camera gained the steering input it never had on the phone, a
+camera parameter change stopped needing a restart, and the gyroscope became a
+look source that now reaches the first person as well as the free camera (see
+"Interface, camera and sustained dash" below). None of that has
+been through device acceptance yet, and the alpha.7 through alpha.16 builds are
+still sitting on the same `versionCode`, so the only way to tell them apart on a
+device is the `构建 3.3.22-alpha.N` line at the top of the runtime journal.
 
 The first feature module is `voice.character`. It combines two desktop routes:
 resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
@@ -182,7 +183,7 @@ else is on the settings screen.
 | VMD replay | `Numpad6` | button on the panel, shown only once a `.vmd` has been imported, deferred (see below) |
 | Escape from the hidden overlay / stop a running take | none | volume up / down / mute (relayed, never consumed) |
 | Runtime journal | none | read-only list on the panel, plus "save log to file" |
-| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters, look sensitivity and Y-invert, and the `.vmd` import | ini values | sliders, switches and a document picker on the page and its sub-pages |
+| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters, look sensitivity and Y-invert, the `.vmd` import, and the gyroscope look source | ini values | sliders, switches and a document picker on the page and its sub-pages |
 | Sustained special dash | none | Enhancements page only |
 
 The panel only offers a control whose module was actually configured to load. A
@@ -258,6 +259,411 @@ Each reload logs `Camera configuration reloaded from the settings app: N bytes,
 applied without restarting the game.` followed by the module's own
 `Camera configuration applied: ...` and `Free camera extras: ...` lines, so the
 journal shows whether it happened.
+
+### The gyroscope look source (3.3.22-alpha.10)
+
+`GyroscopeController` registers `SensorManager.TYPE_GYROSCOPE` at about 200 Hz
+(`maxReceiveLatencyUs = 0`, so samples are not batched) **inside the game
+process**, and converts rotation into the same screen-space deltas the panel's
+look pad produces. The channel is the one alpha.8 already built: the controller
+calls `NativeCommandBridge.look(dx, dy)`, which writes the `m dx dy` relay line
+`input_relay.cpp` turns into `AddVirtualMouseDelta`, which the camera module folds
+into `g_mouse_dx/g_mouse_dy` on every tick. Nothing downstream of the relay was
+touched, so sensitivity, inversion, the pitch clamp and ignoring look input during
+a playback are the original desktop code paths - and Windows behaviour is
+unchanged.
+
+It lives in the game process for the same reason the relay does: the deltas have
+to reach a native camera module that only exists there, and a settings-app
+listener would need a second cross-process channel for a stream the settings app
+has no use for. Registration is deferred until the native runtime has loaded, so
+a session that never loads the camera module never opens the sensor; the settings
+app's own process never registers it at all.
+
+**It is an input source, not a second camera controller.** This matters more than
+it sounds. The first-person camera's orientation is produced by **the game**, and
+`ApplyFirstPersonState` deliberately preserves it - its comment reads "the
+orientation is kept exactly as the game produced it (so aim offsets and look
+input stay authoritative)". There is no `localYaw`, no soft/hard limit and no
+body-follow code in this repository (a search for all of those finds nothing);
+the body-follow a user can observe is the game's own. Had the gyroscope written
+its own angle into `CameraState`, it would have forked the game's look state -
+touch clamped while the gyroscope ran past the limit, a desynchronised reticle,
+and a jump on every re-entry. Feeding the same channel the look pad uses is what
+avoids all three, and it is why the two inputs cannot disagree.
+
+Three details of the integration are not optional:
+
+- **Samples integrate against `SensorEvent.timestamp`, not the frame clock.** The
+  sensor runs near 200 Hz while the game renders at 60-120 FPS, so a frame sees
+  three or four samples. Integrating a frame's worth of `deltaTime` would drop the
+  samples between reads and scale the response with the frame rate. A single
+  interval is capped at 50 ms, which is what a resumed-from-suspend timestamp gap
+  would otherwise arrive as - one enormous `dt` that throws the camera.
+- **The accumulator is kept in float pixels and only whole pixels are sent.** At
+  200 Hz a slow turn moves well under one pixel per sample, so rounding each one
+  would mute the input entirely; the fraction carries forward.
+- **The axis mapping depends on the screen rotation** (`ROTATION_90` and
+  `ROTATION_270` are opposite). The unrotated case uses the sensor's own axes. The
+  horizontal and vertical invert switches on the page exist because a device can
+  disagree with all of this; they are an escape hatch, not a substitute for a
+  correct default.
+
+The `first_person_gyro_*` keys are written into the camera configuration both so an
+operator reading the string sees what the session was set to, and because the
+native side needs two of them. The sensor is still armed on the app side and the
+deltas still reach the game through the relay, not through a configuration value;
+what the native module cannot infer is *where the deltas should go*. A relay delta
+carries no provenance - by the time it exists, a gyroscope and a finger are the
+same bytes - so `first_person_gyro_look` is what picks the first-person consumer
+over the free camera's, and `first_person_gyro_horizontal` /
+`first_person_gyro_vertical` are the scale the game's `RotateCamera*` receive per
+relay pixel.
+`ModuleSettings.FirstPersonGyro` is the single normalised record (sensitivity
+0.2-5.0 per axis, dead zone 0-0.25 rad/s, smoothing 0-0.9), and its clamps match
+what `GyroscopeController` accepts, so a value the page allows can never be
+silently corrected on its way in.
+
+Switching the gyroscope on or off restarts the sensor immediately, because the
+settings page commits its change in the same transaction as the rest of the
+camera block and the game process's poller re-arms the sensor on every
+`camera_config` reload.
+
+The input drives **both** cameras, one at a time. With the free camera armed it
+reaches that camera's target, exactly as before. With the first person on and the
+free camera down it is handed to the game's own `RotateCameraHorizontal` /
+`RotateCameraVertical`, so the gyroscope steers the camera the game itself owns
+and any body-follow or clamping downstream of those methods still applies. The two
+are mutually exclusive because they drain one accumulator: `ApplyFirstPersonLook`
+runs after the free camera has had its chance at it, and does nothing while the
+free camera is armed.
+
+The first-person route is armed by `first_person_gyro_look`, and a relay delta
+carries no provenance: by the time one exists, a gyroscope and a finger are the
+same bytes, so the native side has to be told which consumer to feed. The path is
+gated on its own readiness flag, `g_first_person_gyro_contract_ready`, because
+`RotateCamera*` may be absent from a build while the first-person camera itself is
+fine - a missing method must disable the gyroscope, not the camera. Switching the
+gyroscope on also switches the first person on, since that is the camera it is
+for, but it deliberately does **not** switch the free camera on as well; an
+earlier revision did, back when the free camera was the only consumer, and that
+would now have both cameras stealing from each other's motion.
+
+### Which first person counts (3.3.22-alpha.20)
+
+alpha.16 wired the consumer up and the device still showed no gyroscope action.
+The gate it used was `g_first_person_active`, and that variable means "this module
+switched the game into its first-person camera" - it is set only in
+`EnterFirstPerson()`, which only the module's own first-person hotkey
+(`VK_OEM_MINUS`) reaches. The player's actual first person is the game's own
+camera mode, entered with the game's own controls, and the module hotkey is never
+pressed. So the gate was shut during the exact state the feature exists for.
+
+The device journal from alpha.18 is the proof, and it is worth keeping because it
+shows how narrow the failure was:
+
+```
+Camera tick heartbeat: source=render loop ticks=900 game_fp=0 module_fp=0 fp_enabled=1 free=0 gyro_look=1 pending=-1,-1
+First person gyro: deltas present but gated by camera state active=0 free=0 pending=-53,-324 seq=840
+```
+
+The pump was running (`source=render loop`, `ticks=900`), the switch was on
+(`gyro_look=1`), the first-person feature switch was on (`fp_enabled=1`), the free
+camera was not holding the accumulator (`free=0`), and the relay deltas were
+really there and growing with the phone's motion (`pending=-53,-324`). Four gates
+open, one closed - and the closed one was reading a state the player was never in.
+No `First person camera enabled` line appeared anywhere in the journal, which
+confirms the module's own `EnterFirstPerson()` was never called.
+
+The gate now reads the **game's** flag instead (`snapshot.is_first_person`, the
+`<isFirstPerson>k__BackingField` of `SnapshotCameraController`, a field contract
+that already existed and was previously used only for the photo-mode availability
+check). The module's own state is kept as a second accepted condition, because the
+module hotkey is still a legitimate way in.
+
+`FirstPersonLookAvailable()` returns **false** when the controller instance has
+not been found or the field cannot be read. That is the correct answer rather than
+a fallback: with no instance there is also no rotation method to call, so nothing
+could be applied, and the deltas must stay in the accumulator for the free camera.
+This is what makes the change risk-free for the free camera - it never loses
+visibility of a delta it had before, and while the free camera is armed the
+first-person consumer returns immediately without touching the accumulator, in the
+same order the pump already defines.
+
+### Why the first-person gyroscope turned in fixed steps (3.3.22-alpha.21)
+
+alpha.20 fixed the injection target and the device finally moved, but the turn was
+quantized: the user described it as "like a d-pad - one tap turns a fixed angle,
+no smooth motion". It was not a pitch limit; it was the input being discretized.
+
+The unit was wrong. `CameraManager::OnInput(inputX, inputY)` does not consume
+pixels. Its two floats are **screen-percentage deltas** - the IL2CPP decompile
+names the free-look controller's arguments `deltaScreenPercentageX` /
+`deltaScreenPercentageY` on `DragCameraHorizontal` / `DragCameraVertical`, and the
+same controller's `CameraInputCtrlConfig` carries `_xDragSpeed` / `_yDragSpeed`
+plus an `_xAccelerationConfig` / `_yAccelerationConfig` whose
+`_speedMinThreshold` snap-quantizes anything below it. A finger drag reaches this
+chain as "pixels moved divided by the screen size". alpha.20 fed raw pixels and
+had lowered `PIXELS_PER_RADIAN` to 30, so a slow turn was truncated to +-1 pixel
+by the app's `(int) residualX` and landed right on that threshold - which is
+exactly the d-pad-like fixed steps. The device journal is the proof: all 55
+`applied` lines carried `dx`/`dy` of 0 or +-1, never more.
+
+Two fixes, neither touching the free-camera path:
+
+- **Unit conversion**: new `unity.screen.width.get` / `unity.screen.height.get`
+  contracts (`UnityEngine.Screen` static properties), and `ApplyFirstPersonLook()`
+  now divides the pixel deltas by the live render resolution before feeding
+  `OnInput`. If the resolution cannot be read the delta is dropped rather than
+  fed as pixels. The sign convention is unchanged (`look_x = dx / width`,
+  `look_y = -dy / height`).
+- **Scale re-anchoring**: `GyroscopeController.PIXELS_PER_RADIAN` goes from 30 to
+  1100 - "one radian of rotation ~ one screen width of drag". On a ~1080-1440 px
+  landscape screen that is about 1.0 percentage/s per radian/s, the same ballpark
+  as a fast finger drag, and clear of the threshold quantization.
+
+The precise percentage-to-angle coefficient (the DragSpeed values) and whether
+the `_speedMinThreshold` still quantizes a very slow turn are the two things that
+still need device calibration.
+
+### Why alpha.10's gyroscope did nothing (3.3.22-alpha.11)
+
+The first device run of the gyroscope produced a journal with `Free camera
+enabled` in it and no camera movement. The deltas were arriving: the controller
+sampled the sensor, called `look`, wrote the `m dx dy` line, and the compat
+accumulator held them. They were dropped one step later.
+
+`ModuleSettings` wrote `free_camera_mouse_look=false` into the camera
+configuration. That key gates two unrelated things, and only one of them was
+meant. On Windows it arms the low-level mouse hook; in `StepFreeCamera` it also
+selects whether `g_mouse_dx/g_mouse_dy` are folded into the aim at all:
+
+```cpp
+case FreePlayback::None: break;
+// ... reached only when the flag is set:
+control.yaw += static_cast<float>(dx) * sensitivity;
+```
+
+So the comment above the key - "there is no cursor to hook on a phone" - was
+correct about the hook and wrong about the consequence. Turning the flag off did
+not leave an unused pointer term at zero; it deleted the only consumer the look
+pad and the gyroscope share. The flag is now written as `true`, which installs no
+hook at all on Android: `FreeCameraMouseHook` and the whole capture branch sit
+behind `#if defined(_WIN32)`, so the pointer term really is zero there and the
+relay deltas are the only thing that ever reaches `g_mouse_dx/dy`.
+
+The second half of the defect would have survived that fix on its own. The deltas
+are consumed inside `StepFreeCamera`, which runs only while the free camera is
+armed (`ApplyFreeCamera` is guarded by `g_free_camera_active` in both
+`CameraManager::TailLateTick` and the unscaled-time heartbeat). A session with the
+gyroscope on and the free camera off therefore sampled, relayed and steered
+nothing - and because the settings write treats "gyroscope" as not counting
+toward `any`, that configuration was not even reaching disk. Turning the gyroscope
+on now sets `freeCamera = true` in the same write, so the flag and the machine it
+depends on can no longer disagree, and the switch's availability is no longer
+gated on the setting it is supposed to enable.
+
+### Why alpha.11's gyroscope still did nothing (3.3.22-alpha.12)
+
+The alpha.11 fix did reach the device - the next journal carries
+`Free camera extras: mouse_look=true` - and the gyroscope still produced no line
+at all. That absence is the evidence: `startGyroscope` logs on every path it can
+take *except* the `!gyro.enabled()` early return, so the settings were being read
+as disabled.
+
+They were read from the wrong file. `ModuleSettings.getFirstPersonGyro(context)`
+went through `preferences(context)` to `FrameworkSettings.open(context)`, which is
+`context.getSharedPreferences("module_settings", MODE_PRIVATE)`. `MODE_PRIVATE`
+resolves against **the context's own package**, and the context here is the game's
+`Application`, so the read opened the game's own `module_settings` - a file no
+settings screen in this project ever writes. Every one of the seven keys fell back
+to its default, `enabled` was `false`, and the function returned silently before
+it could log.
+
+The only channel settings have into the game process is the framework's remote
+preferences (`XposedService.getRemotePreferences("module_settings")`), which
+`FrameworkSettings.publish()` already mirrors the local snapshot into. Reading a
+private file across the two processes cannot work by construction: they run under
+different UIDs and `/data/user/0/<pkg>` is `0700`. `ModuleSettings` now has a
+`readFirstPersonGyro(SharedPreferences)` overload, and `XposedEntry` threads the
+snapshot it has already resolved through `prepare` -> `load` ->
+`startGyroscope`/`refreshGyroscope`. The `Context` overload is kept for the
+settings process, where its semantics are correct.
+
+### Why the body turned to a fixed direction after stopping (3.3.22-alpha.12)
+
+First person had a second, independent defect: after moving and then stopping, the
+character turned to a fixed direction and stayed there. The standing branch of
+`StepFacing` read
+
+```cpp
+state.held_yaw = input.view_yaw - std::clamp(
+    std::remainder(input.view_yaw - state.held_yaw, 360.f), -limit, limit);
+state.lateral_yaw = std::remainder(state.held_yaw - input.view_yaw, 360.f);
+state.target = 0;
+```
+
+and never wrote the clamped value back into `lateral_yaw` - it only derived
+`lateral_yaw` from `held_yaw` afterwards. The walk branch, by contrast, writes
+`held_yaw = view_yaw + lateral_yaw`, so `lateral_yaw` is the body's offset *from
+the view*. With the offset left frozen in place while the view kept turning, the
+clamp's reference point walked away with the view until the offset saturated, at
+which point `held_yaw` was pinned to the absolute world yaw of the moment the
+player stopped. Compiling the header with the MSVC toolchain in `F:/code` and
+stepping the sequence reproduces it exactly - `yaw` never moves off `125.000`
+while `view` goes 85 -> 110:
+
+```
+walk end   view= 80.0  yaw=125.000
+stop f0    view= 85.0  yaw=125.000
+stop f5    view=110.0  yaw=125.000
+```
+
+Resetting `target = 0` is what then made the *next* walk ease from that frozen
+value, so the same defect also showed up as a snap as the player started moving
+again. The branch now keeps the offset relative to the view and releases it to
+zero on a 0.35s time constant, which is the walk's own `turn_time`: a stop holds
+the pose the walk ended in and then settles onto the view, leaving nothing for the
+next step to snap away from.
+
+The release rate is `1/0.35`, not the walk branch's 16/s steady-state tail. At
+60Hz the latter removes 34.8 degrees of a 45 degree offset in the first 16ms
+frame, which is the same snap pointing the other way.
+
+Two existing assertions in `native/tests/first_person_facing_tests.cpp` were
+pinning the defect rather than the intent - they asserted an absolute `yaw` of 0
+and a delta measured from `179`, both of which only hold while the body is frozen
+in world space. They now assert the body's offset from the *current* view, and a
+walk -> stop -> keep-looking regression sequence has been added.
+
+### Deploying the first-person look probe (3.3.22-alpha.13)
+
+The probe exists because the design document's assumed first-person look
+controller (`localYaw`, `soft_limit`, `hard_limit`) **does not exist in this
+repository**, and `ApplyFirstPersonState` explicitly keeps the orientation the
+game produced. Before any gyroscope code can be written there has to be a
+recorded entry point to feed, and the runtime only knows how to look up members
+by name - so step one is asking the game what it actually declares.
+
+The probe is an Android module, not a desktop one. This matters, because the
+desktop host's deployment story (**drop a `.dll` plus a `.module.ini` into a
+`modules/` directory**) does not apply here at all: the Android build does not
+compile `native/shared/host/`, has no module-directory scanner, and links its
+modules statically into `libbetterendfield_android.so`, selecting them from
+environment variables at load time.
+
+To run it:
+
+1. Install an alpha.15-or-later release APK, then force-stop the game so the next
+   launch is a cold start. The module set is decided inside `JNI_OnLoad`, so a
+   game already running will not pick the probe up.
+2. Open the settings app, go to **第一人称 (First person) -> 诊断 (diagnostics)**
+   and turn on **接口探针 (interface probe)**. The value reaches the game through
+   the framework's remote preferences on the next launch.
+
+   This is the only route that works on the reference device, and it is worth
+   recording why the two obvious alternatives do not. The phone is **not rooted**,
+   so the game cannot be started with a variable in its environment
+   (`su -c 'VAR=1 am start ...'` fails: there is no `su`). And a system property
+   is useless twice over: `setprop` cannot influence a process that is already
+   running while the module set is decided during library load, and
+   `debug.betterendfield.fp_look_probe` does not even exist in a release build —
+   it is read behind `if (!BuildConfig.DEBUG)`, which R8 folds away along with
+   the string itself. The preferences file is the one channel that already
+   crosses from the settings app into the game without root.
+
+   For completeness, `BETTER_ENDFIELD_FP_LOOK_PROBE=1` in the process environment
+   still works as a fallback on a rooted or debuggable device. Either source
+   being true enables the probe.
+3. Launch the game and let it reach the main world. The worker starts one second
+   after `JNI_OnLoad`, then polls for `libil2cpp.so`.
+4. Read the log. With the probe on and no path supplied, it is written to the
+   game's own cache directory: `/data/data/com.hypergryph.endfield/cache/betterendfield-fp-look-probe.log`.
+   `adb logcat -s BetterEndfield` carries the same lines if the device is not
+   suppressing injected native output, but do not rely on it — that suppression
+   is the reason the file exists. A path set through
+   `BETTER_ENDFIELD_DIAGNOSTICS_PATH` before launch is honoured instead, which is
+   the option for a device where you would rather collect from `/data/local/tmp`.
+5. Turn the switch off and cold-start again to go back to a normal session. The
+   probe is read-only, but there is no reason to carry the extra enumeration.
+
+Two lines tell you whether the probe even ran before you read its output:
+
+- `[runtime] modules started: ...` lists every module that was registered. If
+  `betterendfield.fp_look_probe` is not in that list, the switch did not reach the
+  process — a deployment problem, not a probe result.
+- `[fp_look_probe] probing the game's own first-person look entry point` marks
+  the start of the actual enumeration.
+
+What to look for after that is a pair of `fields <class> present:` / `absent:`
+lines and a `DescribeClass` dump per class. The `absent` list is as informative
+as the present one: it is what rules candidates out rather than leaving them
+unresolved. If `entry=...:stub` appears on a method that looks like look input,
+that method is a metadata-only declaration with no compiled body on this build,
+and hooking it would not do anything.
+
+### Why the probe needed a settings switch, not a property (3.3.22-alpha.15)
+
+The first two gate designs did not survive contact with the reference device.
+It is a PJX110 on Android 16, and it is **not rooted**: `adb shell` runs as
+`uid=2000` and there is no `su`. That removes the environment-variable route
+outright — the game cannot be started with a variable already in its environment
+unless something with root does the starting.
+
+The system-property route looked like it should work, because `adb shell setprop`
+on a `debug.*` key succeeds. It cannot work, for two independent reasons. The
+property has to be read by the module inside the game process, and the module set
+is decided during library load — so a property set after the game is running is
+read too late, and one set before the launch is not seen because the game does not
+re-read system properties. More decisively, the read sits behind
+`if (!BuildConfig.DEBUG) return false;`. `BuildConfig.DEBUG` is a compile-time
+constant, so R8 folds the whole branch away and takes the property-name string
+with it: the release dex contains zero occurrences of
+`debug.betterendfield.fp_look_probe`. A gate that does not exist in the shipped
+artifact cannot be turned on.
+
+The third design is the one that works, and it is not new infrastructure: the
+probe switch is an ordinary `module_settings` preference. The settings app already
+mirrors that file into the framework's remote preferences, and the game process
+already reads that snapshot — it is the same channel alpha.12 established when it
+fixed the gyroscope reading the wrong package's preferences file. It needs no
+root, it survives R8 (the key string is present in the release dex), and it takes
+effect on the next launch, which is exactly when the module set is decided anyway.
+
+### Why alpha.13's probe wrote nothing anywhere (3.3.22-alpha.14)
+
+The alpha.13 device run showed the runtime starting and all three real modules
+reporting in, but not a single `fp_look_probe` line. Two separate defects were
+behind that, and neither is specific to the probe.
+
+**The diagnostics path was overwritten, not defaulted.** The native log has three
+destinations: logcat, the in-memory ring that feeds the on-device journal, and
+the file named by `BETTER_ENDFIELD_DIAGNOSTICS_PATH`. The third is the only sink
+a release build can rely on, because logcat is frequently suppressed for an
+injected process. The loader set it inside `if (BuildConfig.DEBUG)` — so a release
+build had no diagnostics file at all — and it assigned unconditionally, so a path
+supplied through the process environment was discarded before the native side
+could read it. Both halves had to be fixed: the default is now applied only when
+the variable is unset, which is what lets a caller choose where the probe writes.
+
+**The log ring dropped lines without admitting it.** `CopyNativeLogSince` treated
+any cursor larger than the total as stale and rewound it to zero. That is only
+sound while the counter moves in one direction; a module-library reload inside the
+same process restarts the counter, so the previous session's cursor looked
+impossibly large, every line was re-delivered, and the journal's monotonic serial
+filter discarded the lot as replays — a first screen that is always empty. The
+second half is sharper: `Remember()` overwrote ring slots without moving the
+delivery cursor back, so lines evicted before the relay's next drain were skipped
+forever. Module init is a 305-line burst and the relay drains about twice a
+second, so a burst can exceed the 512-line capacity, and the evicted lines are
+exactly the early ones. A ring is entitled to discard the oldest entry; it is not
+entitled to report it as delivered.
+
+Also added: a `modules started:` line listing every registered module, so "the
+probe was never registered" and "the probe ran and found nothing" stop looking
+identical — they need opposite fixes. The probe's component name is now
+`fp_look_probe` rather than `betterendfield.camera`, so its short report cannot be
+buried by the camera module's own high-volume runtime output.
 
 ### Panel input relay and runtime journal (3.3.20)
 
@@ -759,7 +1165,17 @@ The 3.3.22 app also exposes `first_person_movement=false`,
 `first_person_animation_strength=0.35` (0–1),
 `first_person_yield_dialogue=false`, `first_person_third_person_in_combat=false`,
 `first_person_transition_seconds=0`
-(0–1), and `first_person_external_head_scale=false`. Saving applies to a running
+(0–1), and `first_person_external_head_scale=false`. The 3.3.22-alpha.10 app onward also
+writes `first_person_gyro_enabled=false`, `first_person_gyro_look=false`,
+`first_person_gyro_horizontal=1`, `first_person_gyro_vertical=1`,
+`first_person_gyro_invert_horizontal=true`,
+`first_person_gyro_invert_vertical=true`, `first_person_gyro_deadzone=0.002`
+and `first_person_gyro_smoothing=0.08` (see "The gyroscope look source" above for
+what they do, and "Why alpha.10's gyroscope did nothing" for the two settings
+outside that block that the feature also depends on). `first_person_gyro_look` and
+the two scales were added in 3.3.22-alpha.20, when the relay deltas gained a
+first-person consumer; before that the keys were informational and the gyroscope
+reached only the free camera. Saving applies to a running
 game as of 3.3.22-alpha.9 (see "Reloading the camera configuration" above),
 except the first time the camera is switched on at all, which still needs a
 restart because the module would not have been loaded into the process. The

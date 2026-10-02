@@ -250,6 +250,21 @@
     <string name="fp_group_control">操控</string>
     <string name="fp_group_animation">动画</string>
     <string name="fp_group_scene">场景行为</string>
+    <string name="fp_group_gyroscope">陀螺仪</string>
+    <string name="camera_fp_gyroscope">启用陀螺仪视角</string>
+    <string name="camera_fp_gyroscope_hint">在游戏进程内读取设备陀螺仪，把转动手机变成视角输入。陀螺仪只是新的输入来源，最终视角、限位与身体跟随仍由同一套相机逻辑统一处理。本机若无陀螺仪，开启后日志会给出提示。目前该输入驱动的是自由视角。</string>
+    <string name="camera_fp_gyroscope_horizontal">水平灵敏度</string>
+    <string name="camera_fp_gyroscope_vertical">垂直灵敏度</string>
+    <string name="camera_fp_gyroscope_invert_horizontal">水平反转</string>
+    <string name="camera_fp_gyroscope_invert_horizontal_hint">左右转头方向相反时开启。</string>
+    <string name="camera_fp_gyroscope_invert_vertical">垂直反转</string>
+    <string name="camera_fp_gyroscope_invert_vertical_hint">上下观看方向相反时开启。</string>
+    <string name="camera_fp_gyroscope_smoothing">稳定处理</string>
+    <string name="camera_fp_gyroscope_deadzone">死区</string>
+
+    <string name="fp_group_diagnostics">诊断</string>
+    <string name="camera_fp_look_probe">接口探针</string>
+    <string name="camera_fp_look_probe_hint">研究开关，不是功能。开启后下次启动游戏时，模块只读地枚举游戏的视角入口（类、方法、字段）并写进日志，不改任何状态、不影响游戏。用于确认原生第一人称的视角输入该接在哪里。改动需重启游戏才生效。</string>
 
     <!-- 运行日志 -->
     <string name="log_eyebrow">RUNTIME JOURNAL</string>
