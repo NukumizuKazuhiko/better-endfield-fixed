@@ -1,0 +1,1372 @@
+# Android 开发记录归档
+
+此文为 2026-10-02 前 Android README 的历史快照，保留逐版本日志、实测记录和当时的技术推导。它不代表当前版本的安装步骤或验收状态；请先阅读 [Android 快速开始](../android/README.md)、[当前技术参考](TECHNICAL_DETAILS.md)与 [更新日志](../CHANGELOG.md)。
+
+---
+
+# Better Endfield Android
+
+## 3.4.0：内置头饰资源与陀螺仪
+
+Android 3.4.0（versionCode 30400）将 834 份头饰资源与陀螺仪功能合入同一个 APK。安装并在 LSPosed 中启用模块后，完全退出并重启游戏；启用相机模块时，会在后台将内置资源校验并部署到游戏私有目录，无需复制 `headwear-v3`，游戏运行时不连接 GitHub 下载。首次部署需要额外磁盘空间，后续启动会核对缓存并复用；损坏文件会重新部署。
+
+仅适用原生 Android 游戏 versionCode 50。萤石保留用户接受的小三角边；噗切娜、大潘暂缓修复；卡缪、利诺、伊冯尚未实机验收。旧外部资源目录不参与这一版加载，也不会自动删除。
+
+本地构建须先通过当前生成器生成完整目录，再提供输入：
+
+```powershell
+.\gradlew.bat :app:assembleRelease :app:verifyReleaseEntryPoints -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon
+```
+
+目录内每份文件摘要必须与生成器 coverage 相符；缺少完整目录时构建失败。CI 从公开的 `v3.3.22-alpha.21` Release 下载 `headwear-catalog-v3-834.zip`，先校验固定 SHA-256 `BEAF2135063C962D382129098B65A3779D18ADF515EBDAC1FBD292E7B4644A78`，再将解压目录传给 Gradle；下载失败或资源不符均拒绝构建。该 Release 是已验收资源的固定来源，后续 APK Release 不需要重复上传同一资源。合成包的 834 份资源与先前实机接受的内置资源 APK 逐字节一致，且新 APK 的离线自动部署已验收；新原生库因陀螺仪代码加入而不同。2026-10-02 用户对合成后的 alpha.21 APK 反馈“验收通过”；没有收到本次设备日志或逐角色画面，不扩大为全部角色和故障分支逐项通过。3.4.0 尚未另行进行实机复核。
+
+Android ARM64 and LSPosed workspace for Better Endfield. The Android port keeps
+the desktop project's module boundary: a small runtime owns IL2CPP access and
+independent feature modules implement game behavior.
+
+The packaged Android release is an LSPosed module and requires a working
+LSPosed/LSP framework. Installing the APK alone does not inject it into the game.
+Version 3.4.0 promotes the user-accepted alpha.21 Android feature set to a
+stable version and raises versionCode from 30322 to 30400. The camera module's
+motion presets, keyframes and VMD parameters are configurable from the app; a
+`.vmd` can be imported and played back. The first-person gyroscope and bundled
+headwear catalog are included. The earlier device acceptance does not replace a
+separate 3.4.0 device run or per-character visual verification.
+
+The first feature module is `voice.character`. It combines two desktop routes:
+resident `BEVCAT01` Media-ID replacement through Wwise `CSharp_SetMedia`, and
+external-source replacement through `AudioAdapter.PostEventExternal`. External
+paths such as `voice/chinese/.../chr_0013_aglina/...wem` are changed to the
+selected character's Chinese, English, Japanese, or Korean path after mounting
+the corresponding PCK. Unselected characters continue using the game's global
+voice language.
+
+## Runtime lifecycle
+
+Loading the native runtime during `Application.attach()` is too early for this
+client: `libil2cpp.so` may be mapped while its domain is still unsafe to enter.
+The Xposed entry therefore hooks `UnityPlayer.nativeRender()` and loads the
+runtime only after the first successful Unity frame. The one-shot render hook is
+removed immediately after loading.
+
+On the tested Android 1.4.3 client, all native targets are resolved from IL2CPP
+by assembly, namespace, class, method name, and parameter count. Dobby then
+patches the resolved ARM64 entry addresses; no game-version offsets are stored.
+Aglina and Liino Japanese catalogs generated from the device PCK passed Media
+validation and Wwise accepted all 436 routes (188 + 248). Device verification
+also confirmed Japanese PCK mounting and successful external-path replacement
+for both `chr_0013_aglina` and `chr_0035_liino` while the global language stayed
+Chinese. The per-character duration route is active as well: device logs showed
+`chr_0013_aglina_sim_talk_lv01_01` changing from 7.939479 seconds (Chinese) to
+9.828813 seconds (Japanese), and `chr_0035_liino_sim_talk_lv01_01` from
+11.639063 to 12.834063 seconds.
+
+Version 3.0.1 mirrors all 15 desktop voice Hook points. In addition to the core
+Media, external-source, package, duration, language, and lip-track hooks, it
+includes the four context routes `VoicePlayer._PlayVoice`,
+`VoiceSpeakChannelProcessor._PlayVoice`, `VoicePlayer._PlayEvent`, and
+`VoiceManager._SpeakNarrative`. `VoiceContext.voiceData` and
+`RuntimeVoiceData.speakerChannel` are resolved through IL2CPP metadata rather
+than fixed offsets. Per request, this parity update is build-verified but was
+not launched for another device test.
+
+Version 3.1.1 keeps the Android voice module unchanged and only aligns the
+version with desktop. The desktop 3.1.1 duration fix (hooking
+`VoiceUtils._GetVoDurationFromVoData` instead of the `TryGetVoiceDuration`
+entry) addresses an x64 IL2CPP delegate-invoke inlining path that the ARM64
+build does not exhibit; the `TryGetVoiceDuration` entry hook above is still
+observed working on device.
+
+## Login model module parity
+
+Version 3.0.1 also ports `betterendfield.model`. Android does not maintain a
+second rewritten implementation: CMake compiles the desktop source file
+`native/modules/model/module.cpp` directly into the Android ARM64 library. An
+Android Host adapter supplies exact IL2CPP method/field/class resolution,
+managed invocation and object helpers, GC handles, Dobby hooks, configuration,
+and logging. Model method resolution checks assembly, namespace, class, method
+name, parameter types, return type, and parameter count; no fixed game offsets
+are introduced.
+
+The complete desktop Hook set is therefore present in the Android binary:
+
+| Group | Managed Hook point |
+| --- | --- |
+| Model lifecycle | `LoginSceneRoot.OnBindToManager` |
+| Resource lifecycle | `StringPathHashBinary.InitMain` |
+| Resource lifecycle | `StringPathHashBinary.InitInit` |
+| Animation | `LoginSceneAnimCtrl.Tick` |
+| Animation | `LoginSceneAnimCtrl.OnRelease` |
+| Animation | `LoginSceneAnimCtrl._ChangeToState` |
+| Animation | `LoginSceneAnimCtrl._ResetToA1` |
+| Animation | `LoginSceneAnimCtrl._PlayA1sAndTriggerNext` |
+| Animation | `LoginSceneAnimCtrl._PlayA1A2Impl` |
+| Actor capture | `UnityEngine.Object.Internal_CloneSingleWithParent` |
+| Logo | `LoginDecorateUI.Tick` |
+| Logo | `LoginDecorateUI.OnRelease` |
+| Login band | `LoginEnterGamePanel.OnValueChanged` |
+| Login band | `UIMaterialAnimation.LateTick` |
+| Login band | `CanvasUpdateRegistry.PerformUpdate` |
+
+This is 10 model/animation Hooks, 2 Logo Hooks, and 3 login-band Hooks. The
+local Android metadata snapshot contains every declaring class and method name.
+The same-source native code and its Android Host adapter compile successfully.
+Device testing then confirmed that all three contracts are ready, the original
+14 Hooks install, and their runtime paths execute. The `PerformUpdate` prefix
+and the neutralized sprite/texture copies (see `docs/GAME_INTERFACES.md`) were
+added later for the baked-yellow login assets and are verified on desktop.
+
+On the tested client, `chr_0013_aglina_postmodel(Clone)` loaded and replaced
+`SK_actor_female(Clone)`. All four configured animation clips became resident,
+the replacement PlayableGraph reached the final looping action, and the
+original 11 renderers were hidden while the replacement was active. The Logo
+route applied its theme to 9 Graphics, and the login-band route captured 28
+Graphics and themed all 27 intended targets without a material-remap failure.
+The game process remained alive without a fatal signal, and the replacement
+was visually confirmed on the device.
+
+Version 3.0.2 compiles the current desktop model source instead of the 2.3.1
+baseline that 3.0.1 shipped. The desktop 3.0.1 "Main path hash recovery" in
+`LoadConfiguredAssets` was removed on both platforms after an Android A/B test
+on the same game client: with the recovery present, the prefab was loaded
+before `InitMainPathHash`, and the clone's Animator reported `avatar=null`,
+`human=false`; with the original gate restored, the replacement was verified
+working again. The 3.0.1 improvements that remain (Animator enumeration, avatar
+copy fallback, full rollback on failure, no actor capture during login scene
+release) were verified in the same run.
+
+## Interface, camera and sustained dash
+
+Version 3.3.0 ports `BetterEndfield.UI`, `BetterEndfield.Camera` and
+`BetterEndfield.Actions` the same way the login-model module was ported: CMake
+compiles the desktop sources
+(`native/modules/{ui,camera,actions}/module.cpp`) straight into the Android
+ARM64 library. There is no second Android implementation of any of them, and no
+game offsets are introduced - every method is still resolved by assembly,
+namespace, class, name, parameter types, return type and parameter count.
+
+`native/shared/android_compat` holds everything platform specific:
+
+- `include/Windows.h` -> `android_win32.h`, the Win32 surface those three
+  sources use. Most of it is a direct POSIX equivalent (`GetTickCount64`,
+  `GetCurrentThreadId`, `GetModuleHandleW`/`GetProcAddress` over
+  `libil2cpp.so`, `QueryPerformanceCounter`). `GetForegroundWindow` reports this
+  process, because the library is only ever mapped inside the running game, and
+  `CaptureStackBackTrace` reports no frames rather than inventing addresses that
+  would be read as real GameAssembly offsets.
+- `android_virtual_keys.h`, the latch behind `GetAsyncKeyState`. The desktop UI
+  and camera modules decide what to do by polling virtual keys; rather than fork
+  those code paths for a device with no keyboard, the in-game panel presses the
+  keys. `Pulse` auto-releases after 180 ms so one tap is exactly one rising
+  edge; `Press`/`Release` back the free-camera movement pad.
+- `touch_input_android.cpp`, the stand-in for the desktop mouse-to-touch
+  injector. An Android client already has a real Touchscreen device.
+
+Three desktop-only facilities could not be represented honestly and carry an
+explicit `#if defined(_WIN32)` at their call site instead: structured exception
+handling (`__try`/`__except`, which clang/AArch64 has no equivalent for, so
+those calls run unguarded here), the module's own DLL directory (Android reads
+the bone-pose directory from the configuration), and the v11 AssetBundle trace
+file. The desktop build of all three modules was rebuilt and is unaffected.
+
+`DesktopModule` (`modules/desktop/desktop_module.*`) is the shared
+`BE_HostApiV1` adapter all three use, so the login-model adapter's boilerplate
+is not copied per module.
+
+### What is wired where
+
+Anything that needs a keypress on desktop is on the in-game panel; everything
+else is on the settings screen.
+
+| Feature | Desktop hotkey | Android |
+| --- | --- | --- |
+| Hide UID watermark | none | Enhancements page |
+| Hide all HUD | `0` | switch on the page, button on the panel |
+| Remove near-camera dither | none | Enhancements page |
+| Free camera | `9` | switch on the page, button on the panel |
+| Time freeze | `8` | switch on the page, button on the panel |
+| First person | `-` | switch on the page, button on the panel |
+| Free-camera movement | arrows, PageUp/PageDown | press-and-hold pad on the panel |
+| Camera steering (look) | the mouse | look pad on the panel: drag to aim, with sensitivity and Y-invert on the page |
+| Camera roll / FOV in-out / view reset | `Numpad7`, `Numpad9`, `Numpad1`, `Numpad3`, `Numpad5` | roll and FOV are press-and-hold, view reset is a tap |
+| Motion preset play/stop | `Numpad8` | button on the panel, deferred (see below) |
+| Keyframe record/play/clear | `Numpad0`, `Numpad2`, `Numpad4` | record and clear are taps, play is deferred (see below) |
+| VMD replay | `Numpad6` | button on the panel, shown only once a `.vmd` has been imported, deferred (see below) |
+| Escape from the hidden overlay / stop a running take | none | volume up / down / mute (relayed, never consumed) |
+| Runtime journal | none | read-only list on the panel, plus "save log to file" |
+| Movement speed, both FOVs, head/neck options, motion presets, keyframe/VMD parameters, look sensitivity and Y-invert, the `.vmd` import, and the gyroscope look source | ini values | sliders, switches and a document picker on the page and its sub-pages |
+| Sustained special dash | none | Enhancements page only |
+
+The panel only offers a control whose module was actually configured to load. A
+button that presses a key nothing reads is worse than a button that is not
+there.
+
+Each module has its own configuration string and its own environment variable
+(`BETTER_ENDFIELD_UI_CONFIG`, `BETTER_ENDFIELD_CAMERA_CONFIG`,
+`BETTER_ENDFIELD_ACTIONS_CONFIG`). An empty string keeps that module out of the
+game process entirely, which is also what the diagnostics page reports.
+
+The Android-only `betterendfield.enhancement` module that 3.0.2 through 3.2.2
+shipped is gone: its two switches (hide UID, disable dither) are now served by
+the shared desktop sources, and keeping both would have installed two hooks on
+`GameObject.SetActive` from two different brokers. The old preference keys are
+read once on upgrade so the user's choice carries over.
+
+### Reloading the camera configuration (3.3.22-alpha.9)
+
+The camera configuration used to be read once, from the environment the game
+process sets before loading the library, which is why every parameter change
+needed a force-stop. It is now also delivered through the runtime command pump:
+`ModuleSettings.setCameraSettings` writes the same string the boot path would
+have carried, `ModuleCommandRouter.issue` puts it into the framework's remote
+file space as a `camera_config` command, the game process's poller relays it, and
+the camera module drains it on its engine tick and hands it back to
+`ConfigurationChanged` - the very entry point the host calls at start-up.
+
+Replaying through the boot entry point instead of inventing per-key commands is
+the whole design. That function already stores every key as one idempotent block
+under its own mutex, and it already knows the two transitions assignment cannot
+express: the free camera and the first-person camera being switched off, which
+request an exit rather than a `false`. A reload therefore cannot leave a
+half-applied configuration behind, and it cannot miss a key that a hand-written
+command forgot.
+
+What it cannot do is add the module to a process that never loaded it: whether a
+launch runs the camera module at all is decided by the configuration that launch
+started with. The first time the camera is switched on still needs a restart;
+everything after that within the same session is live, including switching it off
+and on again. The switches that belong to other modules - hide UID/HUD, sustained
+dash, the voice catalog, model replacement - keep their start-up semantics.
+
+Four things had to be fixed for the channel to carry a configuration at all:
+
+- The command payload ceiling was 512 characters and a camera configuration is
+  about 1.3 KB. `ModuleCommandRouter` now checks the whole payload against the
+  native pump's own limit, 4096 bytes.
+- The framework's remote file is opened read/write without truncating, so a
+  shorter payload left the tail of the previous one behind. For a plain command
+  that tail is invisible; for a configuration it is not - stale `key=value` lines
+  would be parsed as part of the new one and, being later, would win.
+- `movement_speed`, `field_of_view` and `first_person_fov` were written without
+  clamping while every key inside the two records was clamped. `NaN` survives
+  `%.4f` as the literal `NaN`, which the native parser hands to the float that
+  drives the camera position. They are now clamped to the native ranges: 0.5-100
+  and 20-120.
+- The pump holds a single slot shared by every module in the process, and the
+  custom-model module used to take whatever was in it and answer "unsupported"
+  for anything that was not its own command. With two modules loaded, whichever
+  hooked function ran first would swallow the other's command. Consumers now
+  acquire by command name (`AcquireRuntimeCommand`) and leave another module's
+  command untouched.
+
+An imported `.vmd` rides the same path. The configuration names a file inside the
+game's own files directory and that copy is normally made once, at start-up, so a
+reload right after an import would point the module at a file that does not exist
+yet. The poller therefore materializes the slot from the remote space before
+forwarding the command, and holds the configuration back - keeping the previous
+working one - when it cannot.
+
+Each reload logs `Camera configuration reloaded from the settings app: N bytes,
+applied without restarting the game.` followed by the module's own
+`Camera configuration applied: ...` and `Free camera extras: ...` lines, so the
+journal shows whether it happened.
+
+### The gyroscope look source (3.3.22-alpha.10)
+
+`GyroscopeController` registers `SensorManager.TYPE_GYROSCOPE` at about 200 Hz
+(`maxReceiveLatencyUs = 0`, so samples are not batched) **inside the game
+process**, and converts rotation into the same screen-space deltas the panel's
+look pad produces. The channel is the one alpha.8 already built: the controller
+calls `NativeCommandBridge.look(dx, dy)`, which writes the `m dx dy` relay line
+`input_relay.cpp` turns into `AddVirtualMouseDelta`, which the camera module folds
+into `g_mouse_dx/g_mouse_dy` on every tick. Nothing downstream of the relay was
+touched, so sensitivity, inversion, the pitch clamp and ignoring look input during
+a playback are the original desktop code paths - and Windows behaviour is
+unchanged.
+
+It lives in the game process for the same reason the relay does: the deltas have
+to reach a native camera module that only exists there, and a settings-app
+listener would need a second cross-process channel for a stream the settings app
+has no use for. Registration is deferred until the native runtime has loaded, so
+a session that never loads the camera module never opens the sensor; the settings
+app's own process never registers it at all.
+
+**It is an input source, not a second camera controller.** This matters more than
+it sounds. The first-person camera's orientation is produced by **the game**, and
+`ApplyFirstPersonState` deliberately preserves it - its comment reads "the
+orientation is kept exactly as the game produced it (so aim offsets and look
+input stay authoritative)". There is no `localYaw`, no soft/hard limit and no
+body-follow code in this repository (a search for all of those finds nothing);
+the body-follow a user can observe is the game's own. Had the gyroscope written
+its own angle into `CameraState`, it would have forked the game's look state -
+touch clamped while the gyroscope ran past the limit, a desynchronised reticle,
+and a jump on every re-entry. Feeding the same channel the look pad uses is what
+avoids all three, and it is why the two inputs cannot disagree.
+
+Three details of the integration are not optional:
+
+- **Samples integrate against `SensorEvent.timestamp`, not the frame clock.** The
+  sensor runs near 200 Hz while the game renders at 60-120 FPS, so a frame sees
+  three or four samples. Integrating a frame's worth of `deltaTime` would drop the
+  samples between reads and scale the response with the frame rate. A single
+  interval is capped at 50 ms, which is what a resumed-from-suspend timestamp gap
+  would otherwise arrive as - one enormous `dt` that throws the camera.
+- **The accumulator is kept in float pixels and only whole pixels are sent.** At
+  200 Hz a slow turn moves well under one pixel per sample, so rounding each one
+  would mute the input entirely; the fraction carries forward.
+- **The axis mapping depends on the screen rotation** (`ROTATION_90` and
+  `ROTATION_270` are opposite). The unrotated case uses the sensor's own axes. The
+  horizontal and vertical invert switches on the page exist because a device can
+  disagree with all of this; they are an escape hatch, not a substitute for a
+  correct default.
+
+The `first_person_gyro_*` keys are written into the camera configuration both so an
+operator reading the string sees what the session was set to, and because the
+native side needs two of them. The sensor is still armed on the app side and the
+deltas still reach the game through the relay, not through a configuration value;
+what the native module cannot infer is *where the deltas should go*. A relay delta
+carries no provenance - by the time it exists, a gyroscope and a finger are the
+same bytes - so `first_person_gyro_look` is what picks the first-person consumer
+over the free camera's, and `first_person_gyro_horizontal` /
+`first_person_gyro_vertical` are the scale the game's `RotateCamera*` receive per
+relay pixel.
+`ModuleSettings.FirstPersonGyro` is the single normalised record (sensitivity
+0.2-5.0 per axis, dead zone 0-0.25 rad/s, smoothing 0-0.9), and its clamps match
+what `GyroscopeController` accepts, so a value the page allows can never be
+silently corrected on its way in.
+
+Switching the gyroscope on or off restarts the sensor immediately, because the
+settings page commits its change in the same transaction as the rest of the
+camera block and the game process's poller re-arms the sensor on every
+`camera_config` reload.
+
+The input drives **both** cameras, one at a time. With the free camera armed it
+reaches that camera's target, exactly as before. With the first person on and the
+free camera down it is handed to the game's own `RotateCameraHorizontal` /
+`RotateCameraVertical`, so the gyroscope steers the camera the game itself owns
+and any body-follow or clamping downstream of those methods still applies. The two
+are mutually exclusive because they drain one accumulator: `ApplyFirstPersonLook`
+runs after the free camera has had its chance at it, and does nothing while the
+free camera is armed.
+
+The first-person route is armed by `first_person_gyro_look`, and a relay delta
+carries no provenance: by the time one exists, a gyroscope and a finger are the
+same bytes, so the native side has to be told which consumer to feed. The path is
+gated on its own readiness flag, `g_first_person_gyro_contract_ready`, because
+`RotateCamera*` may be absent from a build while the first-person camera itself is
+fine - a missing method must disable the gyroscope, not the camera. Switching the
+gyroscope on also switches the first person on, since that is the camera it is
+for, but it deliberately does **not** switch the free camera on as well; an
+earlier revision did, back when the free camera was the only consumer, and that
+would now have both cameras stealing from each other's motion.
+
+### Which first person counts (3.3.22-alpha.20)
+
+alpha.16 wired the consumer up and the device still showed no gyroscope action.
+The gate it used was `g_first_person_active`, and that variable means "this module
+switched the game into its first-person camera" - it is set only in
+`EnterFirstPerson()`, which only the module's own first-person hotkey
+(`VK_OEM_MINUS`) reaches. The player's actual first person is the game's own
+camera mode, entered with the game's own controls, and the module hotkey is never
+pressed. So the gate was shut during the exact state the feature exists for.
+
+The device journal from alpha.18 is the proof, and it is worth keeping because it
+shows how narrow the failure was:
+
+```
+Camera tick heartbeat: source=render loop ticks=900 game_fp=0 module_fp=0 fp_enabled=1 free=0 gyro_look=1 pending=-1,-1
+First person gyro: deltas present but gated by camera state active=0 free=0 pending=-53,-324 seq=840
+```
+
+The pump was running (`source=render loop`, `ticks=900`), the switch was on
+(`gyro_look=1`), the first-person feature switch was on (`fp_enabled=1`), the free
+camera was not holding the accumulator (`free=0`), and the relay deltas were
+really there and growing with the phone's motion (`pending=-53,-324`). Four gates
+open, one closed - and the closed one was reading a state the player was never in.
+No `First person camera enabled` line appeared anywhere in the journal, which
+confirms the module's own `EnterFirstPerson()` was never called.
+
+The gate now reads the **game's** flag instead (`snapshot.is_first_person`, the
+`<isFirstPerson>k__BackingField` of `SnapshotCameraController`, a field contract
+that already existed and was previously used only for the photo-mode availability
+check). The module's own state is kept as a second accepted condition, because the
+module hotkey is still a legitimate way in.
+
+`FirstPersonLookAvailable()` returns **false** when the controller instance has
+not been found or the field cannot be read. That is the correct answer rather than
+a fallback: with no instance there is also no rotation method to call, so nothing
+could be applied, and the deltas must stay in the accumulator for the free camera.
+This is what makes the change risk-free for the free camera - it never loses
+visibility of a delta it had before, and while the free camera is armed the
+first-person consumer returns immediately without touching the accumulator, in the
+same order the pump already defines.
+
+### Why the first-person gyroscope turned in fixed steps (3.3.22-alpha.21)
+
+alpha.20 fixed the injection target and the device finally moved, but the turn was
+quantized: the user described it as "like a d-pad - one tap turns a fixed angle,
+no smooth motion". It was not a pitch limit; it was the input being discretized.
+
+The unit was wrong. `CameraManager::OnInput(inputX, inputY)` does not consume
+pixels. Its two floats are **screen-percentage deltas** - the IL2CPP decompile
+names the free-look controller's arguments `deltaScreenPercentageX` /
+`deltaScreenPercentageY` on `DragCameraHorizontal` / `DragCameraVertical`, and the
+same controller's `CameraInputCtrlConfig` carries `_xDragSpeed` / `_yDragSpeed`
+plus an `_xAccelerationConfig` / `_yAccelerationConfig` whose
+`_speedMinThreshold` snap-quantizes anything below it. A finger drag reaches this
+chain as "pixels moved divided by the screen size". alpha.20 fed raw pixels and
+had lowered `PIXELS_PER_RADIAN` to 30, so a slow turn was truncated to +-1 pixel
+by the app's `(int) residualX` and landed right on that threshold - which is
+exactly the d-pad-like fixed steps. The device journal is the proof: all 55
+`applied` lines carried `dx`/`dy` of 0 or +-1, never more.
+
+Two fixes, neither touching the free-camera path:
+
+- **Unit conversion**: new `unity.screen.width.get` / `unity.screen.height.get`
+  contracts (`UnityEngine.Screen` static properties), and `ApplyFirstPersonLook()`
+  now divides the pixel deltas by the live render resolution before feeding
+  `OnInput`. If the resolution cannot be read the delta is dropped rather than
+  fed as pixels. The sign convention is unchanged (`look_x = dx / width`,
+  `look_y = -dy / height`).
+- **Scale re-anchoring**: `GyroscopeController.PIXELS_PER_RADIAN` goes from 30 to
+  1100 - "one radian of rotation ~ one screen width of drag". On a ~1080-1440 px
+  landscape screen that is about 1.0 percentage/s per radian/s, the same ballpark
+  as a fast finger drag, and clear of the threshold quantization.
+
+The precise percentage-to-angle coefficient (the DragSpeed values) and whether
+the `_speedMinThreshold` still quantizes a very slow turn are the two things that
+still need device calibration.
+
+### Why alpha.10's gyroscope did nothing (3.3.22-alpha.11)
+
+The first device run of the gyroscope produced a journal with `Free camera
+enabled` in it and no camera movement. The deltas were arriving: the controller
+sampled the sensor, called `look`, wrote the `m dx dy` line, and the compat
+accumulator held them. They were dropped one step later.
+
+`ModuleSettings` wrote `free_camera_mouse_look=false` into the camera
+configuration. That key gates two unrelated things, and only one of them was
+meant. On Windows it arms the low-level mouse hook; in `StepFreeCamera` it also
+selects whether `g_mouse_dx/g_mouse_dy` are folded into the aim at all:
+
+```cpp
+case FreePlayback::None: break;
+// ... reached only when the flag is set:
+control.yaw += static_cast<float>(dx) * sensitivity;
+```
+
+So the comment above the key - "there is no cursor to hook on a phone" - was
+correct about the hook and wrong about the consequence. Turning the flag off did
+not leave an unused pointer term at zero; it deleted the only consumer the look
+pad and the gyroscope share. The flag is now written as `true`, which installs no
+hook at all on Android: `FreeCameraMouseHook` and the whole capture branch sit
+behind `#if defined(_WIN32)`, so the pointer term really is zero there and the
+relay deltas are the only thing that ever reaches `g_mouse_dx/dy`.
+
+The second half of the defect would have survived that fix on its own. The deltas
+are consumed inside `StepFreeCamera`, which runs only while the free camera is
+armed (`ApplyFreeCamera` is guarded by `g_free_camera_active` in both
+`CameraManager::TailLateTick` and the unscaled-time heartbeat). A session with the
+gyroscope on and the free camera off therefore sampled, relayed and steered
+nothing - and because the settings write treats "gyroscope" as not counting
+toward `any`, that configuration was not even reaching disk. Turning the gyroscope
+on now sets `freeCamera = true` in the same write, so the flag and the machine it
+depends on can no longer disagree, and the switch's availability is no longer
+gated on the setting it is supposed to enable.
+
+### Why alpha.11's gyroscope still did nothing (3.3.22-alpha.12)
+
+The alpha.11 fix did reach the device - the next journal carries
+`Free camera extras: mouse_look=true` - and the gyroscope still produced no line
+at all. That absence is the evidence: `startGyroscope` logs on every path it can
+take *except* the `!gyro.enabled()` early return, so the settings were being read
+as disabled.
+
+They were read from the wrong file. `ModuleSettings.getFirstPersonGyro(context)`
+went through `preferences(context)` to `FrameworkSettings.open(context)`, which is
+`context.getSharedPreferences("module_settings", MODE_PRIVATE)`. `MODE_PRIVATE`
+resolves against **the context's own package**, and the context here is the game's
+`Application`, so the read opened the game's own `module_settings` - a file no
+settings screen in this project ever writes. Every one of the seven keys fell back
+to its default, `enabled` was `false`, and the function returned silently before
+it could log.
+
+The only channel settings have into the game process is the framework's remote
+preferences (`XposedService.getRemotePreferences("module_settings")`), which
+`FrameworkSettings.publish()` already mirrors the local snapshot into. Reading a
+private file across the two processes cannot work by construction: they run under
+different UIDs and `/data/user/0/<pkg>` is `0700`. `ModuleSettings` now has a
+`readFirstPersonGyro(SharedPreferences)` overload, and `XposedEntry` threads the
+snapshot it has already resolved through `prepare` -> `load` ->
+`startGyroscope`/`refreshGyroscope`. The `Context` overload is kept for the
+settings process, where its semantics are correct.
+
+### Why the body turned to a fixed direction after stopping (3.3.22-alpha.12)
+
+First person had a second, independent defect: after moving and then stopping, the
+character turned to a fixed direction and stayed there. The standing branch of
+`StepFacing` read
+
+```cpp
+state.held_yaw = input.view_yaw - std::clamp(
+    std::remainder(input.view_yaw - state.held_yaw, 360.f), -limit, limit);
+state.lateral_yaw = std::remainder(state.held_yaw - input.view_yaw, 360.f);
+state.target = 0;
+```
+
+and never wrote the clamped value back into `lateral_yaw` - it only derived
+`lateral_yaw` from `held_yaw` afterwards. The walk branch, by contrast, writes
+`held_yaw = view_yaw + lateral_yaw`, so `lateral_yaw` is the body's offset *from
+the view*. With the offset left frozen in place while the view kept turning, the
+clamp's reference point walked away with the view until the offset saturated, at
+which point `held_yaw` was pinned to the absolute world yaw of the moment the
+player stopped. Compiling the header with the MSVC toolchain in `F:/code` and
+stepping the sequence reproduces it exactly - `yaw` never moves off `125.000`
+while `view` goes 85 -> 110:
+
+```
+walk end   view= 80.0  yaw=125.000
+stop f0    view= 85.0  yaw=125.000
+stop f5    view=110.0  yaw=125.000
+```
+
+Resetting `target = 0` is what then made the *next* walk ease from that frozen
+value, so the same defect also showed up as a snap as the player started moving
+again. The branch now keeps the offset relative to the view and releases it to
+zero on a 0.35s time constant, which is the walk's own `turn_time`: a stop holds
+the pose the walk ended in and then settles onto the view, leaving nothing for the
+next step to snap away from.
+
+The release rate is `1/0.35`, not the walk branch's 16/s steady-state tail. At
+60Hz the latter removes 34.8 degrees of a 45 degree offset in the first 16ms
+frame, which is the same snap pointing the other way.
+
+Two existing assertions in `native/tests/first_person_facing_tests.cpp` were
+pinning the defect rather than the intent - they asserted an absolute `yaw` of 0
+and a delta measured from `179`, both of which only hold while the body is frozen
+in world space. They now assert the body's offset from the *current* view, and a
+walk -> stop -> keep-looking regression sequence has been added.
+
+### Deploying the first-person look probe (3.3.22-alpha.13)
+
+The probe exists because the design document's assumed first-person look
+controller (`localYaw`, `soft_limit`, `hard_limit`) **does not exist in this
+repository**, and `ApplyFirstPersonState` explicitly keeps the orientation the
+game produced. Before any gyroscope code can be written there has to be a
+recorded entry point to feed, and the runtime only knows how to look up members
+by name - so step one is asking the game what it actually declares.
+
+The probe is an Android module, not a desktop one. This matters, because the
+desktop host's deployment story (**drop a `.dll` plus a `.module.ini` into a
+`modules/` directory**) does not apply here at all: the Android build does not
+compile `native/shared/host/`, has no module-directory scanner, and links its
+modules statically into `libbetterendfield_android.so`, selecting them from
+environment variables at load time.
+
+To run it:
+
+1. Install an alpha.15-or-later release APK, then force-stop the game so the next
+   launch is a cold start. The module set is decided inside `JNI_OnLoad`, so a
+   game already running will not pick the probe up.
+2. Open the settings app, go to **第一人称 (First person) -> 诊断 (diagnostics)**
+   and turn on **接口探针 (interface probe)**. The value reaches the game through
+   the framework's remote preferences on the next launch.
+
+   This is the only route that works on the reference device, and it is worth
+   recording why the two obvious alternatives do not. The phone is **not rooted**,
+   so the game cannot be started with a variable in its environment
+   (`su -c 'VAR=1 am start ...'` fails: there is no `su`). And a system property
+   is useless twice over: `setprop` cannot influence a process that is already
+   running while the module set is decided during library load, and
+   `debug.betterendfield.fp_look_probe` does not even exist in a release build —
+   it is read behind `if (!BuildConfig.DEBUG)`, which R8 folds away along with
+   the string itself. The preferences file is the one channel that already
+   crosses from the settings app into the game without root.
+
+   For completeness, `BETTER_ENDFIELD_FP_LOOK_PROBE=1` in the process environment
+   still works as a fallback on a rooted or debuggable device. Either source
+   being true enables the probe.
+3. Launch the game and let it reach the main world. The worker starts one second
+   after `JNI_OnLoad`, then polls for `libil2cpp.so`.
+4. Read the log. With the probe on and no path supplied, it is written to the
+   game's own cache directory: `/data/data/com.hypergryph.endfield/cache/betterendfield-fp-look-probe.log`.
+   `adb logcat -s BetterEndfield` carries the same lines if the device is not
+   suppressing injected native output, but do not rely on it — that suppression
+   is the reason the file exists. A path set through
+   `BETTER_ENDFIELD_DIAGNOSTICS_PATH` before launch is honoured instead, which is
+   the option for a device where you would rather collect from `/data/local/tmp`.
+5. Turn the switch off and cold-start again to go back to a normal session. The
+   probe is read-only, but there is no reason to carry the extra enumeration.
+
+Two lines tell you whether the probe even ran before you read its output:
+
+- `[runtime] modules started: ...` lists every module that was registered. If
+  `betterendfield.fp_look_probe` is not in that list, the switch did not reach the
+  process — a deployment problem, not a probe result.
+- `[fp_look_probe] probing the game's own first-person look entry point` marks
+  the start of the actual enumeration.
+
+What to look for after that is a pair of `fields <class> present:` / `absent:`
+lines and a `DescribeClass` dump per class. The `absent` list is as informative
+as the present one: it is what rules candidates out rather than leaving them
+unresolved. If `entry=...:stub` appears on a method that looks like look input,
+that method is a metadata-only declaration with no compiled body on this build,
+and hooking it would not do anything.
+
+### Why the probe needed a settings switch, not a property (3.3.22-alpha.15)
+
+The first two gate designs did not survive contact with the reference device.
+It is a PJX110 on Android 16, and it is **not rooted**: `adb shell` runs as
+`uid=2000` and there is no `su`. That removes the environment-variable route
+outright — the game cannot be started with a variable already in its environment
+unless something with root does the starting.
+
+The system-property route looked like it should work, because `adb shell setprop`
+on a `debug.*` key succeeds. It cannot work, for two independent reasons. The
+property has to be read by the module inside the game process, and the module set
+is decided during library load — so a property set after the game is running is
+read too late, and one set before the launch is not seen because the game does not
+re-read system properties. More decisively, the read sits behind
+`if (!BuildConfig.DEBUG) return false;`. `BuildConfig.DEBUG` is a compile-time
+constant, so R8 folds the whole branch away and takes the property-name string
+with it: the release dex contains zero occurrences of
+`debug.betterendfield.fp_look_probe`. A gate that does not exist in the shipped
+artifact cannot be turned on.
+
+The third design is the one that works, and it is not new infrastructure: the
+probe switch is an ordinary `module_settings` preference. The settings app already
+mirrors that file into the framework's remote preferences, and the game process
+already reads that snapshot — it is the same channel alpha.12 established when it
+fixed the gyroscope reading the wrong package's preferences file. It needs no
+root, it survives R8 (the key string is present in the release dex), and it takes
+effect on the next launch, which is exactly when the module set is decided anyway.
+
+### Why alpha.13's probe wrote nothing anywhere (3.3.22-alpha.14)
+
+The alpha.13 device run showed the runtime starting and all three real modules
+reporting in, but not a single `fp_look_probe` line. Two separate defects were
+behind that, and neither is specific to the probe.
+
+**The diagnostics path was overwritten, not defaulted.** The native log has three
+destinations: logcat, the in-memory ring that feeds the on-device journal, and
+the file named by `BETTER_ENDFIELD_DIAGNOSTICS_PATH`. The third is the only sink
+a release build can rely on, because logcat is frequently suppressed for an
+injected process. The loader set it inside `if (BuildConfig.DEBUG)` — so a release
+build had no diagnostics file at all — and it assigned unconditionally, so a path
+supplied through the process environment was discarded before the native side
+could read it. Both halves had to be fixed: the default is now applied only when
+the variable is unset, which is what lets a caller choose where the probe writes.
+
+**The log ring dropped lines without admitting it.** `CopyNativeLogSince` treated
+any cursor larger than the total as stale and rewound it to zero. That is only
+sound while the counter moves in one direction; a module-library reload inside the
+same process restarts the counter, so the previous session's cursor looked
+impossibly large, every line was re-delivered, and the journal's monotonic serial
+filter discarded the lot as replays — a first screen that is always empty. The
+second half is sharper: `Remember()` overwrote ring slots without moving the
+delivery cursor back, so lines evicted before the relay's next drain were skipped
+forever. Module init is a 305-line burst and the relay drains about twice a
+second, so a burst can exceed the 512-line capacity, and the evicted lines are
+exactly the early ones. A ring is entitled to discard the oldest entry; it is not
+entitled to report it as delivered.
+
+Also added: a `modules started:` line listing every registered module, so "the
+probe was never registered" and "the probe ran and found nothing" stop looking
+identical — they need opposite fixes. The probe's component name is now
+`fp_look_probe` rather than `betterendfield.camera`, so its short report cannot be
+buried by the camera module's own high-volume runtime output.
+
+### Panel input relay and runtime journal (3.3.20)
+
+The panel no longer reaches the native runtime over JNI. `Runtime.nativeLoad`
+registers the module library under the game's classloader, while the panel's
+bridge classes belong to the LSPosed module classloader, and Android refuses to
+open the same `.so` path twice under different classloaders - so unresolved JNI
+symbols made the Java side load a second copy of the library, which would have
+installed every hook twice. That copy now returns early behind the
+`BETTER_ENDFIELD_RUNTIME_STARTED` environment guard and serves JNI symbols only.
+Key presses, runtime commands and status travel as plain lines in files under
+the game's own files directory instead, polled by `input_relay.cpp` (10 ms for
+input, 500 ms for status) and fed into the same virtual-key latch the ported
+modules already poll. The status file is rewritten only when the command status
+changes, and a shrinking file restarts the read offset, which is how a fresh
+session truncates the stream.
+
+The same process now journals its own load pipeline. `RuntimeLog` keeps a
+150-line ring buffer and mirrors it into the remote preference `runtime_log`;
+the panel displays it in-process, so a broken transport cannot lose it, and the
+diagnostics page reads the same store. If the journal section is missing from
+the panel entirely, the game is still running an older module build.
+"保存日志到文件" writes the journal through `ACTION_CREATE_DOCUMENT` (no storage
+permission) and falls back to an `ACTION_SEND` plain-text share; the result is
+routed back through hooked `Activity.onActivityResult` relays, because overlay
+code never receives it directly.
+
+Two silent failures in the ported modules were closed as well. Enum constants
+are read through `System.Enum.Parse` instead of the boxing path that some
+clients refuse, and static fields are read with `il2cpp_field_static_get_value`
+and judged per read, since a shared success flag used to veto values that had in
+fact been recovered. First-person hiding gained a second path for parts the GPU
+mesh patch cannot reach (non-skinned renderers, or exhausted patch attempts):
+they switch to `ShadowCastingMode.ShadowsOnly` - nothing drawn in cameras,
+shadows kept - read and written through the
+`unity.renderer.shadow_casting_mode.get` / `.set` contracts, because Android's
+raw icall table is partial. A failed mesh-patch `Init()` no longer returns
+early, so the fallback covers every matched part, and the part tree is logged
+once per session to diagnose renderer names the tokens miss.
+
+### Sustained dash bone-pose banks
+
+The sustained dash always drives its looping segment from the bone-pose banks,
+not the native-only hold: `external_loop` is written as `true` whenever the
+module is configured. `native/modules/actions/assets/pose_*.bin` - the same
+files the desktop module reads from beside its DLL - are packaged into the APK
+uncompressed and copied into the game's own files directory on first launch,
+and the native side is pointed at them through
+`BETTER_ENDFIELD_ACTIONS_ASSET_ROOT`.
+
+Character names, the clean-exhaust option and the camera/interface labels use
+the desktop UI's wording (洁尔佩塔, 梨诺, 隐藏机甲与光效, 启用时间冻结功能,
+视野（FOV）) so the two platforms describe the same switch the same way.
+
+### Contract evidence
+
+Every distinctive contract these three modules need was checked against the
+1.5.3 client's own `global-metadata.dat`, pulled from the installed APK:
+`UIStyleByState.UpdateStyle`, `CameraUtils.get_cameraManager`,
+`CameraManager.AddUICamCullingMaskConfig` / `RemoveUICamCullingMaskConfig`,
+`CameraMono._ProcessDitherByPitch` / `ForceClearDither`,
+`CameraManager.TailLateTick`, `PlayerController.GetMainCharacter`,
+`Entity.get_modelCom`, `BaseModelComponent.GetModelGo`,
+`CinemachineBrain.PushStateToUnityCamera`,
+`SnapshotCameraController.SetFirstPerson` / `_ShowChar`,
+`Animator.GetBoneTransform`, `CharacterAnimationComponent.StartSpDash` /
+`PreLateTick` / `InterruptSpDashPerform` / `ForceStopSpDashPerform` and
+`CharacterSpecialDashBrain.ShouldInterruptSpDash` are all present.
+
+Note that `CinemachineBrain.PushStateToUnityCamera` is **absent** from the
+1.4.3 snapshot under `android/research/device-1.4.3` and present in 1.5.3. Free
+camera and first person rewrite the camera pose there, so those two features
+need a 1.5-series client; the module reports the contract as unavailable rather
+than pretending on an older one.
+
+The world pause needs one tick the game will not always provide. Hotkey requests
+are drained on the game main thread, and freezing the world stops the game's own
+camera update, so the request that would thaw it stayed latched (3.3.22-alpha.3
+adds the tick that cannot be silenced: `RenderPipelineManager.DoRenderLoop_Internal`,
+which the engine calls for every rendered frame it hands to the Scriptable Render
+Pipeline). It is an optional contract - a build without an SRP keeps the previous
+ticks - and both the input thread and the pump now log what happened: a request
+that goes undrained for 1.5 s is reported, and each drained request names its
+pump.
+
+## Android settings UI
+
+The settings screen is a tree of four tabs — 首页 (overview), 体验 (interface,
+camera, actions), 角色 (appearance, login display, voice) and 工具 (in-game
+panel, diagnostics, journal, about) — plus four sub-pages reached from a card:
+第一人称, 角色外观, 运行日志 and 关于. Both kinds of page are addressed by one
+integer because the shell switches on one value; `SettingsPage.parentOf` is what
+keeps a sub-page's parent tab highlighted, so "which tab am I in" stays
+answerable two levels down.
+
+It is written in Kotlin with Jetpack Compose, in an industrial palette: a
+near-black ground, one white text ramp (`#F2F2EE` / `#A8A8A8` / `#777777`) and a
+single yellow accent (`#F4E900`). There is no second hue anywhere — a green or
+teal "success" colour would break the palette's discipline even when it is only
+used once. Layers step by fill rather than by outline: page `#0A0A0A`, panel
+`#121212`, row `#191919`, field `#1D1D1D`. The palette sheet names three greys;
+the fourth (the row) exists because a row sits *on* a panel and the panel cannot
+serve as its own row fill without flattening the card. The mix is held at roughly
+76% black/grey, 18% white/grey text and 6% yellow, so the accent is spent only on
+the primary action, the current selection and key state. The palette has exactly
+one theme; there is no light variant, because the panel is read over a dark game
+frame and next to a dark launcher. Colour tokens live in `UiTokens.kt`, and
+`colors.xml` keeps only the two values the window theme needs, so there is one
+source of truth rather than two copies to keep in step.
+
+| File | Role |
+|---|---|
+| `UiTokens.kt`, `UiTheme.kt` | palette, spacing, radii, and the Material colour/typography/shape mapping |
+| `UiComponents.kt` | the shared vocabulary: section cards, switch rows, sliders, pickers, buttons, tabs, swatches, HSV wheel |
+| `SettingsState.kt` | every setting as Compose state, plus the configuration strings the native modules parse, the page tree, and the journal body |
+| `SettingsShell.kt` | header, tabs, responsive shell, and the back-and-title row a sub-page gets |
+| `HomePage.kt` | overview: modules the next launch will load, pending changes, current appearance and login display, shortcuts |
+| `ExperiencePage.kt` | interface, camera (general / free / first-person entry), sustained dash |
+| `FirstPersonPage.kt` | the first-person sub-page: basic, display, control, animation, scene behaviour |
+| `SettingsPages.kt` | the characters tab: appearance entry, login display, per-character voice, and the appearance sub-page |
+| `ToolPages.kt` | the tools tab: in-game panel, diagnostics, journal sub-page, about sub-page |
+| `MainActivity.kt` | the settings Activity (Kotlin, edge-to-edge) |
+| `BemInstallState.kt`, `BemInstallScreen.kt`, `BemInstallActivity.kt` | the BEM package manager |
+| `GameOverlay.java` | Activity lifecycle, attachment, hotkey relay and journal export controller |
+| `OverlaySurface.kt`, `FloatingHandle.kt`, `OverlayPanel.kt`, `OverlayControls.kt` | experimental in-game Compose handle and panel; device acceptance is pending |
+
+The camera card is the one place the page tree does not map one-to-one onto the
+preference store. "Default FOV" and the free camera's FOV are the same stored
+key: the desktop module reads `field_of_view` as the free camera's baseline and
+as the target its "reset view" hotkey returns to. It is therefore offered once,
+under the general camera group, and the free camera group points at it. Two
+sliders bound to one value would drift apart as soon as one of them was dragged.
+
+The overview page deliberately does not claim that a change has taken effect. It
+counts the writes made since the screen was opened and says they will apply on
+the next launch; the published snapshot carries a generation number, but nothing
+on the settings side can see which generation the running game process read, so a
+comparison there would be a guess presented as a fact.
+
+Stock Material controls (switch, slider, dropdown) are reused but their colours
+are overridden, so Material cannot reintroduce its own tonal surfaces into the
+palette. Press feedback is a fill step rather than a ripple, because a ripple
+reads as a second accent on a surface that is allowed exactly one.
+
+Bottom navigation on phones and a navigation rail at 720 dp and above are two
+arrangements of one composition, so a setting cannot exist on one layout and be
+missing from the other. The model page reads the generated Android
+`character-presets.json` and `character-names.json` resources and currently
+exposes 32 replacement models and 4,210 final actions, plus final-action looping,
+model scale, and the desktop Logo/login-band theme switch. Saving a preset
+serializes the same schema-5 model configuration consumed by the desktop module.
+The voice page retains the per-character language table and Android catalog
+materializer workflow.
+
+The model page exposes the desktop loop modes: native LoopTime, forced looping,
+and dual-Playable crossfade with editable loop start, loop end, and blend
+duration. Logo and login-band colours can be selected from swatches, from the HSV
+ring, or entered as an exact `#RRGGBB` value. A precision slider keeps the exact
+stored number in its readout until the slider is actually dragged, so saving an
+unrelated setting cannot silently round a first-person eye offset.
+
+## Character rules and embedded comparison table
+
+The Android settings page exposes every character present in the desktop
+short-voice table, plus the desktop-style default rule. Each row supports
+Chinese, English, Japanese, Korean, or Follow Global. The generated files under
+`android/resources` are copied into the APK at build time. Model bundle hashes
+come from the Android manifest, while voice route IDs may be shared with the
+desktop table only after the current `AudioDialog` and device PCK indexes agree.
+The current table contains 32 model presets and 132 character/language catalog
+entries.
+
+## Android catalog materialization
+
+The desktop app already generates `BEVCAT01` files automatically when its
+configuration is saved. Android now has a separate on-device materializer with
+the same catalog format, route deduplication, PCK header/media parsing, VFS
+decryption, target-Media validation, atomic output, and cache validation. It
+runs in the target game process before the native runtime is loaded.
+
+The route pairs are stored in the validated Android
+`voice-catalog-index.json`. Only the payload lookup differs: Windows validates
+the exact desktop package descriptor, while Android extracts the language VFS
+partition from that descriptor, scans the target app's downloaded CHKs, and
+selects the current device package that contains every required target Media
+ID. This is necessary because Windows and Android PCK filenames, sizes, hashes,
+and WEM payloads are not interchangeable.
+
+Generated catalogs are private to the game at
+`files/betterendfield/catalog`. They contain only the selected routes and are
+rebuilt when the embedded table or device PCK identity changes. The APK does
+not contain PCK, BNK, or WEM payloads. A selected language must first be
+downloaded through the game.
+
+For offline research, the existing build script still accepts
+`--package-path` for an explicitly copied Android CHK:
+
+```powershell
+py -3 .\scripts\BuildVoiceCatalog.py `
+  --game-path .\android\research\device-1.4.3\vfs `
+  --package-path .\android\research\device-1.4.3\vfs\japanese-main.chk `
+  --language Japanese `
+  --character-id chr_0013_aglina `
+  --output .\android\research\device-1.4.3\catalog\voice.japanese.chr_0013_aglina.becat
+```
+
+Research catalogs and source PCK/CHK files stay under ignored
+`android/research` paths. They must not be embedded in the APK or distributed.
+
+## Current limitations
+
+- Narrative lip-sync routing is ported through `_PlayLipSyncTrack`,
+  `GetLipSyncTrackPath`, and `TryLoadTrack`, including a global-language
+  fallback when the selected-language track is unavailable. The Android 1.4.3 contracts
+  resolve and hook successfully, but a suitable narrative scene has not yet
+  been available for behavioral verification.
+- Media routes are reasserted after later game `SetMedia` and `UnsetMedia`
+  calls, and the active global PCK is preserved while mounting the auxiliary
+  Japanese package.
+- Rule changes require force-stopping and restarting the game.
+- The in-game panel's controls are wired: hide-HUD, free camera, time freeze,
+  first person, the free-camera movement pad and the roll / FOV / view-reset /
+  motion-preset / keyframe group all press the virtual keys the ported desktop
+  modules poll; VMD replay is one of them, and its button appears once a `.vmd`
+  has been imported. The three keys that start a shot are deferred rather than
+  sent on the tap; see "Deferred playback" below. BEM hot switching is still not
+  connected.
+- The three ported modules are build-verified for ARM64 and their settings and
+  panel were exercised on a local emulator. The emulator has no LSPosed, so
+  their in-game behaviour has not been run against the injected client; the
+  contract evidence above is a metadata check, not a device test.
+- The first launch after selecting a new character/language waits for its
+  device-local catalog preparation before arming the native hooks. Missing or
+  stale language packages are reported in LSPosed logs; external-source routing
+  is still allowed to start when resident catalog generation fails.
+- The current build is ARM64-only and runs in user 0.
+- The target package is not hard-coded. The module attaches to whatever the
+  LSPosed scope names, as long as it is that app's own main process, and then
+  requires evidence before doing anything: `UnityPlayer.nativeRender` must
+  exist, and every native hook is resolved by name through `libil2cpp.so`'s
+  exports rather than by offset. So 官服 (`com.hypergryph.endfield`), 国际服
+  (`com.gryphline.endfield.gp`) and channel builds such as the bilibili one are
+  all supported without a per-variant build, and a client update does not
+  invalidate the hooks unless the managed type or method names themselves
+  change. Only the first two are declared in `xposed_scope`, because the
+  bilibili package name has no authoritative source; tick it by hand.
+- Model, animation, Logo, and login-band behavior is verified on the connected
+  Android client with `chr_0013_aglina` and its default final action. Other
+  character/action combinations remain data-driven but have not each been
+  exercised individually.
+
+## Requirements
+
+- JDK 21 (the version CI pins)
+- Android SDK platform 37 (`platforms;android-37.0`, matching `compileSdk = 37`) and build-tools 36.0.0
+- Android NDK 27.2.12479018
+- CMake 3.22.1
+
+The settings app and the BEM package manager already use Kotlin + Jetpack Compose.
+This experimental branch also composes the in-game handle and panel inside the
+hooked game process. The earlier 3.3.21 attempt crashed on game entry; this
+version uses an Activity-scoped Java controller, explicit Compose view owners and
+an eager first-composition check, but game-process acceptance remains pending.
+AGP 9 compiles Kotlin itself,
+so `org.jetbrains.kotlin.android` must **not** be applied - doing so is a build
+error, not a warning. Only the Compose compiler plugin
+(`org.jetbrains.kotlin.plugin.compose`) is applied, and the Kotlin Gradle plugin
+is raised to the same version in the root build file (2.4.20) because the Compose
+compiler refuses to run against a different Kotlin compiler. The Compose BOM is
+`2026.09.00`.
+
+The repository-local toolchain is under `tools/android-toolchain`. Build without
+network access from the repository root:
+
+```powershell
+.\android\gradlew.bat -p android :app:assembleDebug --offline --no-daemon
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+The release build runs R8 (`isMinifyEnabled = true`). Compose's synthetic classes
+and `kotlin.Metadata` cost roughly 21 MB of dex when they survive into the APK:
+the unminified Compose build measured 27.95 MB, against 6.61 MB for the
+pre-Compose 3.3.20. R8 shrink + obfuscate brings the release APK to 8.60 MB.
+
+The optimiser stage is deliberately **off** (`-dontoptimize` in
+`proguard-rules.pro`). R8 merges classes that are never instantiated into one
+shared holder, and that holder's `<clinit>` pools the initialisers of everything
+folded into it. Measured here: `NativeCommandBridge` - a static-only class whose
+`status()` is polled from inside the game process - was folded into `Lr4;`, whose
+`<clinit>` instantiates `androidx.compose.ui.BiasAbsoluteAlignment` and friends.
+The game process calls `status()` on its normal path, so it ran that initialiser
+and crashed with no Java stack at all. Keeping the class name cannot prevent this:
+the class survives, its side effects are moved elsewhere. Turning the optimiser
+off costs about 1.5 MB (about 7.0 MB to 8.60 MB) and is the only reliable fix.
+The optimiser remains off for this experiment so it cannot merge unrelated
+game-process classes into shared Compose holders. This does not establish that
+the new Compose panel can run inside the game process.
+
+Names that are read from outside the Java type system are pinned in
+`android/app/proguard-rules.pro`:
+
+- the libxposed entry class, which the framework instantiates from
+  `META-INF/xposed/java_init.list` (no root in the APK references it, so R8
+  would otherwise delete it rather than rename it);
+- `dev.betterendfield.android.BemInstaller`, whose name and method names *are*
+  the JNI symbols exported by `libbetterendfield_installer.so`, plus the
+  `conversionProgress` callback that `install_jni.cpp` resolves with
+  `GetStaticMethodID`.
+
+`:app:verifyReleaseEntryPoints` re-checks all of that against the packaged APK -
+entry class, JNI symbols, the `conversionProgress` descriptor, the four manifest
+components, and, as a fifth check, that the listed classes on the game path still
+exist as their own classes rather than folded holders. It is finalized onto
+`packageRelease`, so `:app:assembleRelease` fails instead of producing an APK
+whose entry points were renamed or whose game-process classes were merged. That
+fifth check distinguishes a *folded* class (mapped members, no class header in
+`mapping.txt`) from a *shrunk* one (no mapping lines at all, e.g. `Hotkeys`,
+whose constants javac inlined), so it does not flag a class that simply has no
+code on the game path. Debug builds stay unminified and do not run it.
+
+The `android-apk` workflow (`.github/workflows/android-build.yml`) builds that
+debug APK on GitHub Actions for every push to `main` or the fix branch and every
+pull request touching `android/**`, `native/**` or the workflow itself, and
+uploads it as the `better-endfield-debug-apk` artifact. It pins JDK 21,
+`platforms;android-37.0`, `build-tools;36.0.0`, NDK `27.2.12479018` and CMake
+`3.22.1`, then fetches the Dobby v1.0.5 source into the gitignored
+`tools/android-toolchain/dobby-1.0.5` and drops its `example/` subdirectory,
+which needs the `DobbyInstrument` / `DobbySymbolResolver` entry points Better
+Endfield disables.
+
+Version 3.3.0 dropped the legacy API 82 build variant. libxposed API 102 is the
+only framework entry point, so there are no longer two flavors and `minSdk` is
+29, the version that service requires.
+
+The settings page uses bottom navigation on phones and a navigation rail at
+720 dp and above, with a bounded content width and system-bar insets. The BEM
+entry is separate from login-model settings. The enhancement page owns the
+overlay switch and preview; the BEM page only manages packages. The framework
+entry attaches a collapsed BE icon directly to the scoped Unity application's
+Activity. The host remains a plain `FrameLayout`; two bounded `ComposeView`
+children draw the handle and panel. Blank host space has no touch listener, so
+the game retains it. The host and Compose children share explicit lifecycle, saved-state
+and view-model owners, with resume/pause/destroy driven by the existing Activity
+callbacks. Tapping the icon expands the panel, dragging repositions it, and the panel
+survives pause/resume/destroy: game SDKs can re-call `setContentView`, which
+either strips our host from the content view or leaves it attached but buried
+under the freshly added game view, so the panel re-attaches the host to the
+current content view and raises it when the z-order is the only thing wrong,
+re-checking once shortly after `onActivityResumed`. It does not require
+SYSTEM_ALERT_WINDOW permission or a foreground service. The panel footer
+renders this process's runtime journal in place, with a "save log to file"
+button that writes through the system file picker. After first enabling
+the option, restart the scoped game. The Handle has been observed over the
+game's startup screen on PJX110 after a direct cold launch; panel interaction
+and gameplay remain to be verified.
+The experimental scope and remaining gates are recorded in
+[`docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md`](ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md).
+
+After installing or updating the APK, disable and re-enable the module once in
+LSPosed. This makes LSPosed register the module's protected shared-preference
+store. Set the scope to the Endfield build you actually play — the two
+confirmed ids are pre-selected, any other channel build has to be ticked
+manually — enable the desired character rules in the module app, force-stop the
+game, and launch it again. Scoping the module to unrelated apps is harmless but
+pointless: they fail the Unity check and are left alone.
+
+The debug build writes a short native diagnostic log to
+`/data/user/0/<game package>/cache/betterendfield-diagnostics.log`.
+The native library is linked with 16 KiB ELF LOAD-segment alignment and the APK
+is also zip-aligned for Android 16 page-size compatibility.
+
+## Signing
+
+The Android build carries two signing identities, held at deliberately
+different secrecy.
+
+|  | debug | release |
+|---|---|---|
+| Keystore | `keystore/bem-debug.keystore` — tracked | `keystore/bem-release.keystore` — gitignored |
+| Credentials | `keystore/debug.properties` — tracked | `keystore/release.properties` — gitignored |
+| Alias | `bemdebug` | `bemrelease` |
+| Certificate SHA-256 | `4E:DD:10:B9:8A:C4:A2:39:A7:8B:64:93:15:09:A4:3F:A0:F3:28:FA:77:EF:B8:D4:3D:37:E5:73:58:FA:82:6F` | `8C:D6:FD:C1:50:38:53:0E:10:16:68:AB:4B:3C:CD:00:30:AE:88:AE:37:15:3E:6D:66:AA:45:93:0C:7B:8E:FD` |
+
+Both are PKCS12 with an RSA 2048 key under SHA256withRSA, valid until
+2054-02-14. PKCS12 cannot hold a key password separate from the store password,
+so one value per keystore covers both — that is a property of the format, not a
+choice.
+
+**debug.** Tracked together with its password, because neither protects
+anything: a debug certificate is not a trust boundary, and having both in the
+repository is what lets a fresh clone and every CI runner produce a debug APK
+under one stable identity. That is the point of it — a debug APK built today
+installs over the one built yesterday. Wiring is done by overriding AGP's
+built-in `debug` signing config rather than adding a second one, so
+`debugAndroidTest` and any future test-only build type inherit it without
+further wiring.
+
+**release.** The mirror image. This repository is public, and anyone holding
+`bem-release.keystore` can sign an APK that Android accepts as an in-place
+upgrade of the installed app, so the keystore stays out of it. CI never sees a
+keystore secret per build; `android-release.yml` materialises both the keystore
+and `keystore/release.properties` from three repository secrets before it
+starts, from `base64 -w0 keystore/bem-release.keystore`:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_RELEASE_KEYSTORE_BASE64` | base64 of `keystore/bem-release.keystore`, unwrapped |
+| `ANDROID_RELEASE_KEYSTORE_PASSWORD` | `storePassword` from `keystore/release.properties` |
+| `ANDROID_RELEASE_KEY_ALIAS` | `bemrelease` |
+
+A missing one aborts the job with the secret named, rather than producing an
+unsigned APK. After the build, the workflow compares the APK's signer against
+`RELEASE_CERT_SHA256` — the pinned digest above — so "the pipeline signed with
+the release identity" is checked rather than asserted.
+
+**Locally.** `:app:signingReport` prints both certificates and their stores.
+`assembleDebug` needs nothing configured: `keystore/debug.properties` and its
+keystore are tracked. `assembleRelease` needs the release keystore and
+`keystore/release.properties` present; without them it stops at
+`:app:checkReleaseSigning`, which `preReleaseBuild` depends on and which names
+the missing fields and both ways of supplying them. The check exists so the
+failure is a sentence rather than a keystore exception from inside packaging.
+
+**Upgrade behaviour.** `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` were each
+signed by a different throwaway key — the CI runners regenerated AGP's debug
+keystore every run. The first release cut after this change is signed by
+`bemrelease`, which differs from all three, so installing over any of them still
+requires an uninstall and a backup of app data. From that release onwards
+upgrades install in place. Rotating the release keystore later reintroduces the
+same one-time uninstall, and the pinned digest in the workflow has to move with
+it.
+
+## LSPosed scope troubleshooting
+
+Third-party BEM packages are managed from the `角色外观` sub-page under the
+characters tab.
+Import validates every appearance and preserves the original package bytes;
+texture conversion is optional. If textures look wrong in game, choose
+`转换手机纹理` on that package's management card. A successful conversion
+publishes a new generation while preserving its enabled state and selected
+appearance. Failure or cancellation leaves the active package intact. Packages
+without verified normal-map encoding can still be imported, but conversion
+requires that metadata. Restart the game after changing packages or appearances.
+
+If Endfield is missing from every module's scope list, open the scope page's
+overflow menu, choose `Hide`, and turn off the `Games` filter. LSPosed applies
+that filter globally and Android classifies Endfield as a game.
+
+The module declares its recommended scope in `META-INF/xposed/scope.list`.
+
+## First-person camera
+
+The first-person camera is shared desktop source: Android compiles
+`native/modules/camera/module.cpp` directly into `betterendfield_desktop_features`,
+so both platforms run the same behaviour with no second implementation. The eye
+anchor follows the head bone resolved from the player model. Its forward offset
+is applied along the horizontal projection of the view direction while the
+height offset stays world-vertical, so looking down moves the eye towards the
+face instead of dragging it downwards.
+
+`first_person_hide_head` hides the head parts of the player model. A name-token
+hit (`head`, `face`, `hair`, `brow`, `eyelid`, `eyes`, `iris`, `mouth`, `horn`)
+or an upstream-style role name (`s_actor_..._lodN` carrying a `_face_`, `_hair_`,
+`_brow_`, `_eyebrow_`, `_iris_`, `_eyeshadow_` or `_hairshadow_` segment, and not
+`shadowproxy`) collapses the whole part. A body mesh
+(`s_actor_..._body_..._lodN`) is kept and only loses the triangles whose three
+vertices are dominated by head/neck skin — the ring of body geometry around the
+neck opening. `first_person_fill_neck_hole` requests a cap for the remaining
+opening when the GPU mesh path passes its runtime contract checks.
+
+Where the GPU mesh patch cannot run (non-skinned renderers, unavailable readback
+contracts, or parts whose patch retries are exhausted), matched parts fall back to
+`ShadowCastingMode.ShadowsOnly`: not drawn by the camera, shadows kept. That
+property is read and written through runtime-invoke contracts, because the
+Android icall table implements only part of the engine surface and the direct
+icall does not exist there.
+The Android client's managed readback contracts still require device verification;
+the Windows client's missing methods do not establish Android availability.
+
+Release APKs are signed by the dedicated release identity described under
+[Signing](#signing). `v3.3.20`, `v3.3.21` and `v3.3.22-alpha.1` predate it and
+were each signed by a throwaway CI key, so a standard Android installation still
+cannot upgrade in place across those versions; back up app data before
+uninstalling the old APK. The user's in-game report was made with a local debug
+build; the published APK passed CI build and signature verification but has not
+been retested in-game.
+
+Optional keys, with their defaults: `first_person_eye_forward=0.03`,
+`first_person_eye_height=0.05`, `first_person_near_clip=0.03`,
+`first_person_extend_look_range=false` (widens the vertical look range past the
+game's own pitch clamp: 1.10x up, 1.50x down, clamped to ±89 degrees),
+`first_person_neck_plug_scale=1.0`. The module app writes the keys it exposes;
+any key it does not write falls back to the default listed here.
+
+The 3.3.22 app also exposes `first_person_movement=false`,
+`first_person_side_look_limit=60` (0–90 degrees),
+`first_person_animation_mode=0` (0 off, 1 body, 2 head, 3 realistic),
+`first_person_animation_strength=0.35` (0–1),
+`first_person_yield_dialogue=false`, `first_person_third_person_in_combat=false`,
+`first_person_transition_seconds=0`
+(0–1), and `first_person_external_head_scale=false`. The 3.3.22-alpha.10 app onward also
+writes `first_person_gyro_enabled=false`, `first_person_gyro_look=false`,
+`first_person_gyro_horizontal=1`, `first_person_gyro_vertical=1`,
+`first_person_gyro_invert_horizontal=true`,
+`first_person_gyro_invert_vertical=true`, `first_person_gyro_deadzone=0.002`
+and `first_person_gyro_smoothing=0.08` (see "The gyroscope look source" above for
+what they do, and "Why alpha.10's gyroscope did nothing" for the two settings
+outside that block that the feature also depends on). `first_person_gyro_look` and
+the two scales were added in 3.3.22-alpha.20, when the relay deltas gained a
+first-person consumer; before that the keys were informational and the gyroscope
+reached only the free camera. Saving applies to a running
+game as of 3.3.22-alpha.9 (see "Reloading the camera configuration" above),
+except the first time the camera is switched on at all, which still needs a
+restart because the module would not have been loaded into the process. The
+external head-scale option also removes the head shadow. The combat option
+hands camera control back to the game during combat and restores first person
+after combat. The user reports the operable first-person settings passed on
+Android 3.3.21 except external head scale, which was not tested. The GPU mesh
+readback and cap path still requires separate contract and runtime evidence.
+
+The current development build also gives the game its own camera while an
+ultimate skill is being cast, during a game cinematic, or when the active camera
+controller is no longer the main level controller. The character screen is the
+target for that last handoff. First person stays armed and returns when the game
+resumes the level camera. The perspective journal names the handoff reason as
+`ultimate`, `cinematic`, or `game_camera`, and then `first_person` on return. This
+change passed offline policy tests and Android compilation. The user reports
+that ultimate and character-screen handoff and return passed on a device; logs
+and screenshots have not been supplied for independent review.
+
+The first-person head-hiding path also covers head-attached accessories even
+when their names do not contain a head or hair token. A skinned renderer needs
+every bone in its palette under the player's head bone; a plain renderer needs
+its transform there. Mixed head/body palettes are left to the existing mesh
+path. The shadow-only renderer lease preserves shadows and restores the prior
+mode when first person ends. This uses the existing head-hiding setting and
+does not require GPU mesh readback. Offline tests and Android compilation passed;
+character outfits and restoration still need in-game acceptance.
+
+Since 3.3.22-alpha.5 the same app also writes the free camera's motion, keyframe
+and VMD parameters: `motion_preset=orbit` (`orbit` | `dolly_zoom` | `crane` |
+`truck`, and `ParseMotionPreset` also takes the short aliases `dolly` and `pan`,
+both of which this screen normalises to the long form), `motion_speed=1`
+(-20 to 20), `orbit_speed=20` (-180 to 180 deg/s), `motion_duration=0`
+(0 means unlimited; 0 to 600 s), `motion_target_height=1.2` (-5 to 5, the
+anchor's height above the controlled character), `keyframe_segment_seconds=3`
+(0.2 to 60), `keyframe_loop=false`, `vmd_camera_scale=0.07` (0.001 to 10),
+`vmd_camera_fov_bias=5` (-60 to 60 deg) and `vmd_camera_loop=false`. Those
+ranges are exactly the ones the native module clamps to, so a value the settings
+screen accepts is never rewritten on the way into the game; non-finite input
+falls back to the defaults above.
+
+Since 3.3.22-alpha.6 the import row on that page also accepts a `.vmd`. The file is
+validated before anything is published - the loader's own 64 MiB ceiling and its
+two header generations, `Vocaloid Motion Data 0002` and `Vocaloid Motion Data
+file` - then written to the framework's remote file space as `vmd.current`, which
+is the same channel the BEM package manager uses and the only one that crosses
+between the two processes. Before the native library loads, the game process
+copies it to `betterendfield/camera/current.vmd` under its own files directory
+(skipped when a file of the stamped length is already there). `vmd_camera_file`
+therefore carries `%files%/betterendfield/camera/current.vmd`, and
+`RuntimeBootstrap` expands `%files%` to the game's files directory on the way into
+`BETTER_ENDFIELD_CAMERA_CONFIG`: the settings app cannot write that path out, as
+it neither knows which user or cloned profile the game runs under nor can write
+into another UID's data directory. Clearing the import writes the key empty again,
+and an empty value makes the native side take its existing "no VMD camera file is
+configured" branch instead of reusing a path left over from a desktop
+configuration. The panel's "VMD camera play/stop" button appears only once an
+import exists, for the same reason the zoom keys are press-and-hold: a control
+whose only outcome is a complaint is worse than one that is not there.
+
+**Deferred playback.** The three keys that start a shot - the motion preset, the
+keyframe replay and the VMD replay - do not fire on the tap. Tapping one of them
+collapses the panel, and the key goes out a second later. The panel covers about a
+third of the screen and takes roughly 100 ms to fade, and the tap lands while the
+finger is still on the glass, so a key sent immediately starts the shot with the
+controls in frame. Every other control still fires under the finger, which is where
+an adjustment belongs.
+
+The wait is posted on the foreground controller's own handler, never on a Compose
+scope inside the panel: collapsing the panel is exactly the moment when a
+composable's lifetime stops being something to rely on, and a scope cancelled with
+the panel would swallow the key without leaving a line in the log. Keeping the wait
+in the controller also provides the cancellation semantics - a second tap inside
+the window replaces the pending key rather than queueing another, and re-expanding
+the panel, pressing a volume key, backgrounding the game or tearing the surface down
+all cancel it. The delay itself is a timing behaviour and has no product-level
+evidence behind it; what was checked locally is that the release build and its
+entry-point gate still pass.
+
+**Standing down, and the handle coming back.** The handle goes with the panel for
+the same reason the panel does: it is a 50 dp box drawn over the game, so a take
+started while it is still on screen records it. With both gone there is no touch
+target left, so the handle has to find its own way back, and it does - from either
+of two directions. The runtime reporting that the take ended (a stop line, which
+covers finishing, being switched away from, being stopped by its own hotkey and
+leaving the free camera) fades it back in where it was left; so does the runtime
+staying silent for `TAKEOFF_GRACE_MS` after the key went out. The panel stays
+collapsed either way - it is one tap on the handle away, and expanding it is the
+user's decision, not a side effect of a take ending.
+
+That second path is not a nicety. A preset asked for while the free camera is
+off, a keyframe list holding fewer than two entries and a VMD that failed to load
+all return on the native side without logging either a start or a stop, so with no
+grace those are stand-downs that never end - and the user has no reason to suspect
+that a hidden overlay is still listening to the volume keys. Three seconds is
+twelve times the latency of the 250 ms journal poll, which is the only thing
+between a native line and this decision.
+
+A take that runs forever never reports an end and so never brings the handle back:
+the motion preset runs for as long as its configured duration (zero means forever),
+and the keyframe and VMD loops never end at all. A volume key is the interrupt
+there - it drops a key that has not fired yet, or stops the playback the runtime
+reports as running and brings the handle back. Backgrounding the game and
+returning restores it too, so no state here is a dead end.
+
+Whether a take is running is taken from the runtime's own journal rather than
+assumed from the key that was sent. The native module logs
+`Free camera motion started`, `Free camera keyframe playback started` or
+`VMD camera playback started` when a take begins, and
+`Free camera playback stopped: <reason>` when it ends - for every reason, including
+being switched and being stopped by its own hotkey - plus `Free camera disabled` on
+the way out of the free camera. A stop line is also what ends a stand-down, and it
+is honoured only for a take the overlay was told had started, so a stop belonging
+to something else cannot bring the handle back early. A take that fails to start
+logs no started line, so
+the volume key cannot try to stop a playback that never began, and a take that has
+already ended cannot be restarted by the same press. That last property is why the
+start line is required instead of trusting the fired key: it makes the failure mode
+"the volume key only restores the handle" instead of "the volume key re-runs a shot
+the user thought was over".
+
+Stopping re-sends the key that started the take, because the three playback hotkeys
+are toggles in the native module (`StopPlayback("hotkey")` when the same kind is
+already playing). It cannot be sent immediately: the virtual-key latch holds a pulse
+for 180 ms and the input thread arms a hotkey on a rising edge only, so a second
+press inside that window reads as one long press and toggles nothing. The controller
+therefore releases the whole latch first and sends the pulse 120 ms later.
+
+The volume keys are relayed by hooking `Activity.dispatchKeyEvent`, plus the host
+activity's own override wherever that override is declared - Unity's base activity
+is the kind of class that overrides it without calling super, so hooking only the
+framework method would miss it, while asking only the leaf class would report "no
+override" for an activity that merely extends one. The event is never consumed: the
+phone's volume still changes, the relay stays purely additive, and a host that both
+overrides the method and calls super simply delivers one press twice - the first call
+consumes the state and the second finds nothing to do. Repeats from a held volume key
+are ignored, so one press is one interruption.
+
+**Touch steering.** The desktop free camera is aimed with the mouse: a low-level
+hook accumulates `g_mouse_dx/dy`, and `StepFreeCamera` turns those into yaw and
+pitch. A device has no cursor to hook, so the panel's look pad is the mouse
+instead, and the whole of the rest of that path is shared desktop code.
+
+The deltas travel as a new relay line, `m <dx> <dy>`, in the coordinates the hook
+itself produces - screen pixels, x to the right and y downwards - because that is
+what makes the shared mouse term the correct consumer: dragging right turns right
+and dragging up looks up (the first is the desktop convention, the second the
+touch one), and `mouse_invert_y` means the same thing on both platforms. Deltas
+are *summed*, not queued, in two atomics in the compat layer; the camera module
+folds them into `g_mouse_dx/g_mouse_dy` on every main-thread tick, under
+`#if !defined(_WIN32)`. Nothing accumulates across the moment the camera comes up,
+both because the fold runs whether or not the camera is armed and because
+`EnterFreeCamera` already clears the mouse input.
+
+The panel does not write a line per touch event. A drag reports at display rate
+and the native side reads the relay every 10 ms, so the controller sums the deltas
+and writes at most one line per 16 ms; the running total is identical, and the
+relay sees tens of writes a second instead of hundreds. A drag in flight is
+dropped rather than sent when the panel collapses, the game goes to the background
+or the surface is torn down - a delta arriving after the control it came from is
+gone would turn the camera with nothing on screen to explain it.
+
+Sensitivity and inversion are the desktop settings, `mouse_sensitivity` (degrees
+of turn per pixel dragged) and `mouse_invert_y`, now with a slider and a switch on
+the Motion & Lens page. They had been written at their defaults since the Android
+port began, with no UI, because there was no steering input for them to affect.
+The slider's range is 0.02-0.5, narrower than the native clamp of 0.01-2.0: at the
+default 0.1 a swipe across the pad turns the camera roughly a quarter turn, and at
+0.5 more than a full circle.
+
+Look input is ignored while a playback runs, which is not a new rule - the shared
+`StepFreeCamera` clears the mouse input and returns while a preset, keyframe or
+VMD take is in flight. That is what keeps a scripted shot reproducible no matter
+what the thumb does.
+
+The panel's zoom buttons are press-and-hold rather than a 180 ms tap, matching
+what the desktop keys mean - a tap only steps the lens by about 3.6 degrees.
+
+## 应用运行日志
+
+游戏进程的 `RuntimeLog` 保留最近 150 行；悬浮窗直接读取进程内日志。游戏在 `Application.attach` 后通过 `RuntimeJournalProvider` 向模块应用发布有上限的日志快照，应用日志页和导出功能读取这份快照。被注入进程的框架远程偏好设置仅用于读取配置，不能用作游戏向应用写入日志的通道。
+
+应用日志页在固定高度的终端式视窗中显示最近 40 行，打开或刷新后定位到尾部；导出保留收到的完整快照。单条日志最多 512 字符，传输快照最多 80,000 字符。

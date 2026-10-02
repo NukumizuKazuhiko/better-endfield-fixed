@@ -1,201 +1,59 @@
 # Better Endfield
 
-[English](README.en.md) | [简体中文](README.md)
+[English](README.en.md) · [简体中文](README.md)
 
-Better Endfield is a modular modding runtime for *Arknights: Endfield*. Features such as custom character appearances (BEM), title screen models & choreography, per-character voice language routing, OmniMix dynamic music replacement, real-time combat stats & rDPS metering, display enhancement (OptiScaler DLSS/FSR/XeSS) and mobile touch HUD emulation are provided as decoupled native DLL modules. The core Host handles dynamic IL2CPP runtime symbol resolution, Hook lifecycle management, configuration persistence, and module discovery.
+Better Endfield is a modular extension project for *Arknights: Endfield*, with a Windows controller and an Android/LSPosed module. Features are implemented by separate modules, and the Android build reuses the relevant native module sources. Check the [changelog](CHANGELOG.md) and each release note for platform support and validation status.
 
-The Windows desktop build and the Android/LSPosed build share one set of module sources. As of 3.3.0, custom character appearances use the same standard BEM package on both platforms. See [Android (LSPosed)](#android-lsposed) for the attach model, the in-game control panel and the diagnostics channel.
+> This is an independently maintained derivative of [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield). It is not an official release of the upstream project or the game publisher.
 
----
+## Platforms and features
 
-## Upstream & Project Origin
+| Platform | Main capabilities | Entry point |
+| --- | --- | --- |
+| Windows 10/11 x64 | Models and BEM appearances, character voice, OmniMix music, combat statistics, display enhancements, free camera and touch UI | WinUI controller; built-in injector by default |
+| Android ARM64 | Models and BEM appearances, character voice, free camera, first person, camera motion, gyroscope and in-game control panel | LSPosed module and companion settings app |
 
-This project is derived from [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield) (the upstream project). It is **independently maintained and is not an official version of the upstream project, and does not represent the upstream author**. The upstream code, documentation and design remain the work of their original authors; this repository continues to be released under AGPL-3.0-only, with the full license text in [LICENSE](LICENSE) and the upstream and third-party attributions recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Both platforms use the same standard `.bem` package format. See the [BEM creator guide](docs/BEM_CREATOR_GUIDE.md) for format and conversion limits. Validation on one platform does not establish validation on the other.
 
-This repository carries independent modifications relative to upstream 3.3.0 (commit `9b1e895`), concentrated on the Android/LSPosed port and its documentation; the details are in the 3.3.20 entry of [CHANGELOG.md](CHANGELOG.md). The upstream commit history is preserved in full so that code provenance — and the original authors' attribution — stays traceable. Upstream changes may still be selectively incorporated when appropriate, but continuous upstream contribution is not the goal.
+## Get started
 
----
+### Windows
 
-## Architecture
+1. Use Windows 10/11 x64 and a compatible game client. Build from source with the commands below, or follow the instructions for a published package.
+2. Select the game path and features in the Better Endfield controller. The default injector does not place loader files in the game directory.
+3. Start the game from the controller. The optional XInput autostart mode is installed and removed from the controller settings.
 
-```text
-BetterEndfield.exe
-  runtime/BetterEndfield.Host.dll
-  modules/BetterEndfield.Model.dll
-  modules/BetterEndfield.CustomModel.dll
-  modules/BetterEndfield.Voice.dll
-  modules/BetterEndfield.Music.dll
-  modules/BetterEndfield.CombatStats.dll
-  modules/BetterEndfield.UiModule.dll
-  modules/BetterEndfield.Camera.dll
-  modules/BetterEndfield.Actions.dll
-  modules/BetterEndfield.Gacha.dll
-  loaders/BetterEndfield.Injector.exe
-  payloads/xinput1_4.dll
-```
+### Android
 
-- `BetterEndfield.Host.dll`: The in-process host, runtime symbol resolver, and HookBroker.
-- `BetterEndfield.Model.dll`: Title screen choreography, custom login characters, asset substitution, and camera animation controls.
-- `BetterEndfield.CustomModel.dll`: Custom character appearance (BEM) assembly, material and texture binding, and LOD locking.
-- `BetterEndfield.Voice.dll`: Per-character audio routing (Chinese/English/Japanese/Korean), Wwise media redirection, and lip-sync synchronization.
-- `BetterEndfield.Music.dll`: OmniMix PCM stream injection, Wwise Audio Input integration, and native game music fallback.
-- `BetterEndfield.CombatStats.dll`: Damage number toggles, real-time DirectX combat overlay, team rDPS attribution, and session history recording.
-- `BetterEndfield.UiModule.dll`: Native mobile touch UI layout and mouse-to-touch injection.
-- `BetterEndfield.Camera.dll`: Free camera, field of view (FOV) scaling, and near-object dither disabling.
-- `BetterEndfield.Actions.dll`: Sustained dash and per-character action appearance toggles; disabled by default.
-- `BetterEndfield.Gacha.dll`: Gacha record lookup and local statistics.
-- `BetterEndfield.Injector.exe`: Default external loader; Host and all modules load directly from the application folder without modifying game files.
-- `payloads/xinput1_4.dll`: Optional XInput DLL hijack loader, deployed to the game directory only upon user confirmation.
+1. Download the APK from the [Android 3.4.0 release](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.0), and check its compatibility notes and checksum.
+2. Install it, enable the module in LSPosed, and select the Endfield package you play.
+3. Configure features in the companion app, fully stop the game, then start it again.
 
----
+See the [Android guide](android/README.md) for setup, compatibility and troubleshooting. Bundled headwear assets target the native Android game at versionCode 50; other client versions need separate verification.
 
-## Source Directory Layout
+## Build from source
 
-```text
-ui/BetterEndfield.UI/          WinUI 3 desktop controller application
-native/modules/model/          Title screen visual, model, and animation module
-native/modules/custom_model/   Custom character appearance (BEM) assembly module
-native/modules/voice/          Voice language routing and Wwise media module
-native/modules/music/          OmniMix music integration module
-native/modules/combat_stats/   Combat data metering and in-game DirectX HUD
-native/modules/ui/             Mobile touch UI and input injection module
-native/modules/camera/         Free camera and viewport enhancement module
-native/modules/actions/        Sustained dash and character action module
-native/modules/gacha/          Gacha record lookup module
-native/loaders/injector/       External standalone injector
-native/loaders/xinput/         XInput DLL proxy and in-process bootstrap
-native/shared/                 Host, public ABI headers, and third-party dependencies
-manifests/                     Resource manifests for models, voices, and dependencies
-resources/                     Maintenance inputs for voice and catalog generators
-installer/                     Inno Setup installer scripts and localization files
-scripts/                       Build, manifest generation, and asset scanning scripts
-tools/CustomModel/             BEM conversion, validation, and character profile tooling
-android/                       Android/LSPosed release build
-docs/                          Runtime interfaces, reverse engineering notes, and docs
-```
+The Windows build requires Visual Studio 2022 with the C++ workload, .NET 9 SDK and CMake. Packaging an installer also requires Inno Setup 6. From the repository root:
 
----
-
-## Key Features
-
-1. **Custom Character Appearances (BEM)**: Import `.bem` packages to replace in-game character appearances. One standard package works on both Windows and Android. See [Custom Character Appearances](#custom-character-appearances-bem).
-2. **Title Screen Customization**: Replace the default title screen character with any operator, select custom animations/poses, tweak camera angles, and apply custom theme accent colors.
-3. **Voice Language Routing**: Assign custom voice languages (Chinese, English, Japanese, Korean) individually for each character in both combat and story dialogue.
-4. **OmniMix Audio Engine**: Dynamically replace in-game music with custom audio sources via OmniMix.
-5. **Real-Time Combat Stats Overlay**: High-performance DirectX in-game HUD displaying damage metering, team rDPS contribution, hit counts, crits, and skill breakdown.
-6. **Display & Pipeline (OptiScaler)**: Upscaling with DLSS, FSR, or XeSS, frame generation, sharpness control, and free camera adjustments.
-7. **Mobile Touch Emulation**: Experience the mobile touch UI on PC with mouse-to-touch conversion (`Ctrl+Alt+T`) and HUD toggling.
-8. **Gacha Record Lookup**: Query and locally aggregate gacha history.
-9. **Bilingual Localization**: Built-in support for both English (US) and Simplified Chinese with instant, runtime language switching.
-
----
-
-## Custom Character Appearances (BEM)
-
-Custom appearances are disabled by default. The release extension is `.bem`; one package targets one character and may carry several fixed appearances. Players only import the package - no Python, no source mod injection framework, no character database, and no hand-written `runtime.ini`.
-
-Since 3.3.0 this works on both Windows and Android using **the same standard BEMv1 package**. Android compiles the desktop `native/modules/custom_model` sources directly, so there is no second implementation and no game offsets are introduced; parsing and validation follow the same path on both platforms.
-
-On desktop, packages and their state live in the configuration directory. The distribution ships no appearance assets:
-
-```text
-%LocalAppData%\BetterEndfield\catalog\custom-model\
-  runtime.ini
-  packages\*.bem
-```
-
-`runtime.ini` is written by the Character Appearance page and is read-only at runtime:
-
-```ini
-[CustomModel]
-standalone_lod=false
-
-[Mod.<package_id>]
-enabled=true
-package=packages/<file>.bem
-appearance=<appearance_id>
-```
-
-Only one package per character may be enabled at a time; duplicates are disabled in the UI with a prompt to reselect. Package and appearance choices take effect on the next game launch, so import, update and delete with the game closed. Updates reuse the same `package_id`, preserving the local enabled state and any appearance IDs that still exist; removed appearances fall back to the default with a notice. Enabling any package locks LOD at runtime; disabling all of them restores the standalone LOD preference.
-
-The conversion tool reads unpacked directories as well as ZIP, RAR and 7z source packages directly, without pre-extraction or a separate archiver, and never runs programs contained in them. It matches source asset identity against the character profiles shipped with the tool, checking index counts, vertex streams, bones and materials; export is offered only after the full check passes. Unsupported sources produce a report explaining what is missing.
-
-Capability boundaries: component replace/keep/hide, separate bone and material sources, merged bone palettes, per-draw game materials, replacement of explicitly bound native textures, and UInt16/UInt32 geometry indices. Limits are 256 local bones and 256 draws per part, and 32 texture bindings plus a 512 MiB upload budget per selected appearance; exceeding them fails with a report. Source hotkey scripts and arbitrary shaders are not executed, and runtime form switching, blend shapes, automatic LOD generation and automatic splitting are not supported. A successful conversion is not in-game verification.
-
-Android manages the same packages from its own third-party model page, validating every appearance on import and preserving the original package bytes. The one platform difference is textures: mobile GPUs use different texture formats, so a package that looks wrong in game can be run through the mobile texture conversion on its management card. A successful conversion publishes a new generation while preserving the enabled state and selected appearance; failure or cancellation leaves the active package untouched. Packages without verified normal-map encoding metadata can still be imported, but cannot be converted. Both platforms require a game restart after changing packages or appearances.
-
-For the authoring workflow, conversion automation boundaries and the full field reference see [`docs/BEM_CREATOR_GUIDE.md`](docs/BEM_CREATOR_GUIDE.md) and [`docs/BEM_V1_SPEC.md`](docs/BEM_V1_SPEC.md).
-
----
-
-## Loader Modes
-
-1. **Injector Mode (Recommended)**:
-   - Starts the game from the Better Endfield controller or command line.
-   - Zero files written to the game directory.
-2. **XInput Autostart Mode**:
-   - Deploys `xinput1_4.dll` to the game folder for automatic loading when launching the game via official launchers or desktop shortcuts.
-   - Clean uninstall supported directly from the Settings page.
-
----
-
-## Android (LSPosed)
-
-The Android build compiles the same module sources (`android/`) and attaches to the game process through LSPosed. The companion app provides the model, third-party model, voice, display-enhancement and diagnostics pages, and the game hosts a floating control panel; package management and mobile texture conversion are covered in [Custom Character Appearances](#custom-character-appearances-bem) above. Both the companion app and the BEM package manager are written in Kotlin with Jetpack Compose, in an industrial flat palette of one page tone, one panel tone and one accent (`#F4E900`, industrial yellow): no outlines, no gradients. Bottom tabs on phones and a fixed side rail at 720 dp and above are two arrangements of a single composition. The experimental `3.3.22-alpha.1` release also uses Compose for the in-game handle and panel, with a framework View host to survive the game rebuilding its content view. A PJX110 cold-launch test showed the handle on the startup screen; gameplay interaction remains unverified. The earlier 3.3.21 Compose attempt crashed; see the [experiment record](docs/ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md).
-
-The module attaches to whichever app is selected in the LSPosed scope (main process only), and decides whether to act on evidence: `UnityPlayer.nativeRender` must exist, and every native hook resolves by name from `libil2cpp.so` exports, so the official, international and channel builds share one APK. Three platform differences are handled explicitly: the JNI bridge self-heals a classloader mismatch, and a second copy of the module library only serves JNI symbols instead of installing hooks twice; enum constants go through `System.Enum.Parse` managed reflection rather than the boxing path that fails on some clients; static fields are read straight from their storage, and each value is judged on its own so a shared success flag cannot veto a healthy read.
-
-The in-game panel turns the desktop hotkeys into tappable buttons: hide/restore HUD, free camera, world pause, first person, plus the movement pad and a roll/keyframe group under free camera (motion play/stop, view reset, FOV in/out, roll, keyframe record/play/clear). Key presses do not travel over JNI: the module library is loaded by the game's classloader while the panel's bridge classes belong to the LSPosed module classloader, and Android forbids opening the same `.so` path twice under different classloaders. Keys, runtime commands and status therefore go through plain files in the game's own directory, polled natively.
-
-The current development build temporarily returns the camera to the game during an ultimate cast, a cinematic, or a non-level camera view. First person stays armed and resumes when the level camera returns. Offline tests and Android compilation passed. The user reports that the ultimate and character-screen handoffs and returns passed on a device; logs and screenshots have not been supplied for independent review.
-
-First-person head hiding now also detects head-attached accessories whose renderer names do not mention the head or hair. It uses the existing head-hiding setting and restores the renderer's shadow mode on exit. Mixed head/body bone palettes are kept visible. Offline tests and Android compilation passed; individual character outfits still need in-game acceptance.
-
-Thawing the world now rides the engine's own per-frame callback. Freezing it stops the game's camera update, and the module used to queue its hotkey requests only onto game-side callbacks, so the request stayed queued and the world could never be resumed. The same pump now also runs on `UnityEngine.Rendering.RenderPipelineManager.DoRenderLoop_Internal`, which the engine calls for every rendered frame, so resuming no longer depends on the game still running its own camera logic. If a request goes undrained for more than 1.5 s the input thread says so in the log, which turns "the button did nothing" into a readable condition; the log also names the pump that finally drained each request.
-
-The bottom of the panel shows the current process's runtime log (a 150-line ring buffer) and offers "save log to file": a system file picker writes to a location the user chooses, no storage permission required, degrading to a text share when no picker is available. The companion app's diagnostics page reads the same log. If the runtime-log section is missing from the panel entirely, the game is still running an older module build - re-toggle the module in LSPosed or reboot the game.
-
-The camera extensions' configuration uses `schema_version=3` with explicit key names, pinning the panel buttons to the codes the desktop module polls. `free_camera_mouse_look` is written as `true` on mobile: the key selects whether mouse deltas are folded into the aim at all, which is the same channel the look pad and the gyroscope use - the hook itself is compiled only for Windows, so nothing is installed on a phone. As of 3.3.22-alpha.5 the motion presets, keyframes and VMD-camera parameters are written into that configuration too, and are editable under Experience -> Motion & Lens. They are clamped to the same limits the native module clamps them to, non-finite values fall back to the defaults, and a preset name is normalised to the spellings `ParseMotionPreset` accepts. As of 3.3.22-alpha.6 that sub-page also imports `.vmd` lens files: the settings app validates the file against the native loader's own rules - its 64 MiB ceiling and its two header generations - publishes it through the framework's remote file space, and the game process copies it into its own data directory before the native library loads, at which point the `%files%` placeholder in the configuration expands to an absolute path. The two processes run under different UIDs, so the settings app can neither read nor write the game's data directory and the path can only be assembled by the game process itself. As of 3.3.22-alpha.7 the panel's three playback keys - motion preset, keyframe replay and VMD replay - do not fire on the tap: pressing one collapses the panel and the key goes out a second later, because the panel covers about a third of the screen and the finger is still on the glass when the tap lands, so an immediate start would begin the shot with the controls in frame. The handle fades out with the panel for the same reason - it is drawn over the game - leaving no overlay element on screen at all. It then comes back on its own: the native module reporting that the take has ended (finished, switched, stopped or left the free camera) fades it back in while the panel stays collapsed, and so does the native module staying silent for three seconds after the key goes out, which is what covers a preset asked for outside the free camera, a keyframe list with fewer than two entries and a VMD that failed to load - those paths return without logging a line, and without that fallback the overlay would never come back. A volume key is then the way to interrupt: it drops a key that has not fired yet, or stops the playback the native module reports as running (the three playback hotkeys are toggles, so stopping re-sends the key that started it) and brings the handle back. That matters because a motion preset, a keyframe loop and a VMD loop can all run forever, and a take that never ends never reports an end. Whether a take is running is read from the native module's own journal - a started line when one begins, a stopped line when it ends for any reason - so a key whose take never started is never "stopped", and a finished take is never restarted. Volume keys are relayed by hooking `Activity.dispatchKeyEvent` and are never consumed: the phone's volume still changes. Every other control still acts on the tap. As of 3.3.22-alpha.8 mobile has steering input: the panel grew a look pad - press and drag to aim, right to turn right and up to tilt up - and Experience -> Motion & Lens carries its sensitivity and Y-invert. The chain is drag deltas -> an `m dx dy` relay line -> the compat layer's accumulator -> folded into `g_mouse_dx/g_mouse_dy` by the camera module on every tick, with no change to the shared desktop source, so sensitivity, inversion, the pitch clamp and ignoring look input during a playback are all the original desktop code paths; Windows behaviour is unchanged. Before that `g_mouse_dx/dy` was always 0 on Android because the mouse hook is compiled only for Windows, so the free camera could move, rise, roll and zoom but not turn. As of 3.3.22-alpha.9 a camera parameter change takes effect at once, with no game restart: the whole camera configuration is delivered to the game process through the framework's remote file space and replayed by the native module through the same entry point it uses at start-up, which already writes every key as one idempotent block and already knows the two transitions that assignment cannot express - the free camera and the first-person camera being switched off. The one exception is the first time the camera is switched on: whether a given launch loads the camera module is decided by the configuration that launch started with, so the very first enable still needs a restart, while everything afterwards in the same session is live. Importing a `.vmd` is live too: the game process copies it into its own data directory before applying the configuration that names it, and if the copy cannot be made the configuration is held back in favour of the previous working one, with a line in the panel journal saying so. Switches unrelated to the camera - hide UID/HUD, sustained dash, the voice catalog, model replacement - are unaffected and still act at start-up. As of 3.3.22-alpha.10 mobile has a gyroscope look source: the First Person page grew a Gyroscope group that reads the device gyroscope inside the game process, so turning the phone turns the view, with horizontal and vertical sensitivity, per-axis inversion, smoothing and a dead zone on the same page. It is deliberately not a second camera controller - the deltas it produces travel the same channel as the look pad and share the same view state, so sensitivity, inversion, the pitch clamp and ignoring look input during a playback are all the original code paths, and there is no way for touch to hit a limit while the gyroscope runs past it. Samples are integrated against the sensor clock (about 200 Hz) rather than the frame clock, so the feel is the same at 60, 90 and 120 FPS, and a sub-pixel accumulator keeps a slow turn from being rounded away. As of 3.3.22-alpha.20 that input also drives the module's own first person: the deltas are injected through `CameraManager::OnInput(float, float)`, the main camera's look entry - the same method the player's finger reaches when turning the view, so body follow, pitch clamping and camera blending keep working downstream and touch adds to the gyroscope instead of being overwritten by it. The two consumers are mutually exclusive - they share one accumulator, and consuming from both would have each steal half of the other's motion. While the free camera is armed the deltas are its (that path is unchanged); otherwise they belong to the first person. alpha.16-19 had fed `SnapshotCameraController.RotateCamera*`, which device testing proved a dead end: the snapshot controller is a photography mode that only exists while the snapshot camera is active, so during ordinary play - including the module's first person - there is no instance and the deltas were silently dropped; alpha.19 then gated on `snapshot.is_first_person`, which the module's first person never sets, so the gate stayed shut too. alpha.20 located the object that really owns the orientation - `CameraManager`, whose `TailLateTick` the module already hooks - caches its instance in the hook, and feeds the deltas into `OnInput`. As of 3.3.22-alpha.21 the d-pad-like fixed-step turning is fixed: `OnInput(inputX, inputY)` actually takes *screen-percentage* deltas (the IL2CPP decompile names them `deltaScreenPercentageX/Y` on `CustomFreeLookCameraController.DragCameraHorizontal/Vertical`), but alpha.20 fed raw pixels and had lowered `PIXELS_PER_RADIAN` to 30, so a slow turn was quantized to +-1 pixel and landed in that controller's `_speedMinThreshold` snap-quantization. The native side now divides the pixel deltas by the live render resolution (new `UnityEngine.Screen.width/height` contracts) before feeding `OnInput`, and `PIXELS_PER_RADIAN` is raised to 1100 (one radian ~ one screen width of drag), putting the deltas in the same ballpark as a finger drag and clear of the threshold quantization. A device without a gyroscope gets a journal line rather than silence. As of 3.3.22-alpha.11 a defect in alpha.10 that made the gyroscope do nothing is fixed: the camera configuration wrote `free_camera_mouse_look=false`, and that one key gates two things - whether Windows installs the low-level mouse hook, and whether the native `StepFreeCamera` folds `g_mouse_dx/dy` into the aim. There is no cursor to hook on a phone, so `false` was written with that in mind, but the cost was that the look pad's and the gyroscope's deltas were discarded too: they reached the compat accumulator and were folded into `g_mouse_dx/dy`, then skipped in `StepFreeCamera`. Writing `true` installs no hook - the hook is compiled only under `_WIN32`, so that pointer term is already zero on Android. Turning the gyroscope on now also turns the free camera on, because the deltas are only consumed while that camera runs; without it the switch would be a promise nothing keeps, and the settings screen no longer requires the other switch to be on first. As of 3.3.22-alpha.12 two further defects are fixed. First, the alpha.11 switch fix did ship, yet the device still logged no gyroscope line at all: the gyroscope settings were read through `context.getSharedPreferences("module_settings", MODE_PRIVATE)`, and `MODE_PRIVATE` opens the file belonging to the context's own package - in the game process that context is the game's Application, so it read the game's own copy, which no settings screen ever writes. Every key fell back to its default and the read ended silently at the `!enabled()` early return. The one channel settings have into the game process is the framework's remote preferences, so the snapshot `XposedEntry` already resolved is now read and threaded down the start-up path. Second, in first person the character turned to a fixed direction after moving and stopping: the standing branch computed `held_yaw = view_yaw - clamp(view_yaw - held_yaw, +/-limit)` and only derived `lateral_yaw` back from it, never writing the clamped value back. While standing, a turning view therefore carried the clamp's reference point away with it, and once the offset saturated `held_yaw` was pinned to the absolute world yaw of the moment the player stopped, no longer following the view at all; `target = 0` then made the next walk ease back from that frozen value, which is the visible snap as the player starts moving again. The offset now stays relative to the view and is released to zero over a 0.35s time constant, so a stop holds the pose and then settles onto the view.
-
-First-person part hiding has two paths: parts with a complete readback contract can use the GPU mesh patch; parts it cannot reach (non-skinned renderers, unavailable contracts, or exhausted patch attempts) switch to a shadow-casting-only renderer mode, hiding the part from cameras while keeping its shadow. That property is read and written through metadata contracts because Android's engine icall table is only partially implemented; failed mesh-patch initialization does not block this fallback. The current Windows client lacks managed methods required by the synchronous readback path, so S4/S5 mesh behavior remains pending. The game can reset renderer state on part or LOD rebuilds, so the module re-asserts it.
-
-The experimental Android branch is currently 3.3.22-alpha.21 (versionCode 30322, prerelease) while desktop remains 3.3.0; the two version numbers are not yet unified.
-
-For platform internals, contract evidence and the desktop-hotkey-to-panel-button mapping see [`android/README.md`](android/README.md).
-
----
-
-## Building from Source
-
-### Prerequisites
-- Windows 10/11 (x64)
-- Visual Studio 2022 / MSBuild with C++ (v143) and .NET 9 SDK
-- CMake 3.20+
-- Inno Setup 6 (for installer packaging)
-
-### Build Steps
 ```powershell
-# 1. Build all native modules and loaders
-cmake -B build -S native -A x64
-cmake --build build --config Release
-
-# 2. Build the WinUI 3 Controller
-dotnet build ui/BetterEndfield.UI/BetterEndfield.UI.csproj -c Release
-
-# 3. Package the full distribution
-.\scripts\BuildBetterEndfield.ps1
+pwsh -File .\scripts\BuildBetterEndfield.ps1
+pwsh -File .\scripts\BuildInstaller.ps1
 ```
 
-Android debug APKs are built by `.github/workflows/android-build.yml` on GitHub Actions for pushes and pull requests, uploaded as the `better-endfield-debug-apk` artifact. The environment is JDK 21, `platforms;android-37.0`, build-tools 36.0.0, NDK 27.2.12479018 and CMake 3.22.1; the Dobby v1.0.5 source is fetched before the build (that dependency is not committed) with its `example/` subdirectory removed, since it needs `DobbyInstrument` / `DobbySymbolResolver`, which Better Endfield disables.
+The Android build requires JDK 21, Android SDK 37, NDK 27.2.12479018, CMake 3.22.1, Dobby v1.0.5 and the complete headwear catalog. Follow the [Android build guide](android/README.md#从源码构建); the build fails when that catalog is missing.
 
----
+## Documentation
 
-## Disclaimer
+| Document | Contents |
+| --- | --- |
+| [Android guide](android/README.md) | Installation, LSPosed scope, builds and troubleshooting |
+| [Technical reference](docs/TECHNICAL_DETAILS.md) | Module boundaries, loaders, configuration, logs and build details (Chinese) |
+| [Documentation index](docs/README.md) | Current topic guides and historical records (Chinese) |
+| [Changelog](CHANGELOG.md) | Releases and validation boundaries |
+| [BEM creator guide](docs/BEM_CREATOR_GUIDE.md) | Package authoring and validation |
 
-Better Endfield is an unofficial, experimental open-source project. It is not affiliated with, endorsed by, or associated with Hypergryph, Mountain Contour, or GRYPHLINE. Please use responsibly and adhere to all relevant terms of service.
+For bug reports, use [Issues](https://github.com/NukumizuKazuhiko/better-endfield-fixed/issues) and include the platform, game and module versions, and reproduction steps. The Android app can export its runtime log; review it for personal information before sharing.
 
-This repository is an independently maintained derivative of [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield); upstream attribution, the derivation statement and the current modification status are in [Upstream & Project Origin](#upstream--project-origin) above.
+## Origin and license
 
-MinHook is bundled under its own license. The first-person camera work additionally ports the MIT-licensed [RenoDX Endfield Enhancer](https://github.com/ItsTheSewerRat/renodx) (branch `endfield-enhancer`, by ItsTheSewerRat); the ported scope and attribution are recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-
-Android 3.3.22 exposes eye position, near clip, extended vertical look, movement facing, animation, dialogue and combat camera yield, transition duration, and an explicit external-model head-scale option. New behaviors default to off. Android settings are loaded at game start, so fully stop and restart the game after saving. The head-scale option removes the head shadow. The user reports that the operable first-person features passed on an Android device except the external-model head-scale option, which was not tested. S4 GPU readback and the dependent S5 mesh cap remain blocked by their API contract; the user report does not establish those paths as validated. See the [execution record](docs/CAMERA_FIRST_PERSON_EXECUTION.md).
+The project is licensed under [AGPL-3.0-only](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for upstream and dependency attribution. The project is not affiliated with the game publisher. Back up your configuration before use, and check compatibility after game updates.
