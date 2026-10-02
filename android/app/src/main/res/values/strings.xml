@@ -6,23 +6,20 @@
     <string name="app_icon_description">Better Endfield 图标</string>
     <string name="runtime_badge">ROOT · LSPOSED</string>
     <string name="custom_model_title">第三方模型替换</string>
-    <string name="custom_model_description">安装和管理第三方 BEM 模型包，替换游戏内角色资源。此模块拥有独立的模型包与外观配置。</string>
     <string name="custom_model_install">安装 / 管理 BEM 模型包</string>
+    <string name="bem_install_restart_hint">保存选择后，下次启动游戏生效。</string>
     <string name="diagnostics_eyebrow">DIAGNOSTICS</string>
     <string name="diagnostics_title">运行状态</string>
-    <string name="diagnostics_description">只显示当前配置和已验证的运行边界；字段写入在 Android 证据不足时会自动保持关闭。</string>
     <string name="diagnostics_framework">框架入口：libxposed API 102</string>
     <string name="diagnostics_overlay">悬浮窗：%1$s（权限：%2$s）</string>
     <string name="diagnostics_model">模型配置：%1$s</string>
     <string name="diagnostics_mesh">Mesh 字段：只读动态扫描；候选写入关闭</string>
-    <string name="diagnostics_ready">诊断页已加载</string>
     <string name="diagnostics_runtime">运行时日志（游戏进程内实际执行轨迹）：</string>
     <string name="diagnostics_runtime_empty">运行时日志为空——可能原因：模块未在 LSPosed 中激活/勾选目标游戏、游戏重启后仍是旧进程、或 LSPosed 服务未连接。请确认 LSPosed 作用域后重启游戏再进本页查看。</string>
     <string name="state_on">开</string>
     <string name="state_off">关</string>
     <string name="model_title">开屏模型替换</string>
     <string name="model_eyebrow">MODEL REPLACEMENT</string>
-    <string name="model_description">直接复用桌面端模型模块、角色预设和动画序列。模型设置在下次启动游戏时生效。</string>
     <string name="model_table_ready">桌面预设已加载：%1$d 名角色，%2$d 个可选动作；14 个 Hook 入口同源编译。</string>
     <string name="model_table_failed">模型预设加载失败：%1$s</string>
     <string name="model_enable">启用登录角色模型替换</string>
@@ -48,37 +45,32 @@
     <string name="model_settings_invalid">模型设置无效：%1$s</string>
     <string name="settings_title">角色配音</string>
     <string name="voice_eyebrow">CHARACTER VOICE</string>
-    <string name="voice_list_caption">全角色语言规则</string>
-    <string name="settings_description">为每名角色独立选择中文、英文、日文、韩文或跟随游戏。角色与语气词对照表直接复用桌面端内置旧表；所需 resident catalog 会在下次启动游戏时从手机本机语言包单独生成。</string>
     <string name="voice_table_ready">桌面端旧表已加载：%1$d 名角色，%2$d 个角色/语言目录。</string>
     <string name="voice_table_failed">旧表加载失败：%1$s</string>
     <string name="voice_table_unavailable">无法读取预存语气词对照表，设置未保存。</string>
-    <string name="current_setting_ready">当前设置已加载。修改后需强制停止并重新启动游戏。模型替换、动画序列、Logo 和登录色带已通过实机验证。</string>
     <string name="restart_required">设置已保存。请强制停止并重新启动游戏；首次使用新的配音规则时会自动生成手机专用 catalog。</string>
     <string name="model_restart_required">模型设置已保存。请强制停止并重新启动游戏。</string>
 
     <!-- betterendfield.ui -->
     <string name="ui_card_eyebrow">INTERFACE · betterendfield.ui</string>
     <string name="ui_card_title">界面增强</string>
-    <string name="ui_card_subtitle">与桌面端同源编译。隐藏 UID 是常驻开关；隐藏全部 HUD 需要在游戏里即时切换，开关在这里，触发按钮在悬浮窗。</string>
     <string name="ui_hide_uid">隐藏 UID 水印</string>
-    <string name="ui_hide_uid_hint">隐藏游戏画面中的账号 UID 水印，并每 2 秒补扫一次已存在的面板。</string>
+    <string name="ui_hide_uid_hint">隐藏画面中的账号 UID。</string>
     <string name="ui_hide_hud">启用隐藏全部 HUD</string>
-    <string name="ui_hide_hud_hint">隐藏或恢复游戏内 MainHudRoot 下的全部 HUD 画布，不影响菜单和设置界面。由悬浮窗的按钮切换。</string>
+    <string name="ui_hide_hud_hint">在悬浮窗中切换，不影响菜单。</string>
 
     <!-- betterendfield.camera -->
     <string name="camera_card_eyebrow">CAMERA · betterendfield.camera</string>
     <string name="camera_card_title">相机增强</string>
-    <string name="camera_card_subtitle">自由视角、世界暂停和第一人称都要在游戏里即时触发，按钮在悬浮窗；这里只决定哪些功能装载、以及它们的参数。</string>
     <string name="camera_dither">移除角色近距离虚化</string>
-    <string name="camera_dither_hint">调用游戏自身的 ForceClearDither，移除镜头贴近角色时的半透明虚化。无需热键。</string>
+    <string name="camera_dither_hint">移除镜头贴近角色时的半透明效果。</string>
     <string name="camera_free">启用自由视角功能</string>
-    <string name="camera_free_hint">进入时捕获主相机的位置和视野，退出后恢复原值。悬浮窗展开后会出现方向键与升降键。</string>
+    <string name="camera_free_hint">在悬浮窗中开启并操控。</string>
     <string name="camera_pause">启用时间冻结功能</string>
-    <string name="camera_pause_hint">冻结游戏时间但保留镜头移动。桌面端同样把它挂在自由视角下，因此需要先启用自由视角。</string>
+    <string name="camera_pause_hint">冻结游戏时间，保留镜头移动；需先启用自由视角。</string>
     <string name="camera_fp_eye_forward">眼位前移（游戏单位）</string>
     <string name="camera_fp_movement">身体跟随观察方向</string>
-    <string name="camera_fp_movement_hint">启用后按观察方向调整身体朝向；尚待实机验证。</string>
+    <string name="camera_fp_movement_hint">启用后按观察方向调整身体朝向。</string>
     <string name="camera_fp_side_look_limit">侧视转身阈值</string>
     <string name="camera_fp_animation_mode">动画朝向跟随模式</string>
     <string name="camera_fp_animation_off">关闭</string>
@@ -87,33 +79,32 @@
     <string name="camera_fp_animation_realistic">真实（含头部翻滚）</string>
     <string name="camera_fp_animation_strength">动画朝向跟随强度</string>
     <string name="camera_fp_yield_dialogue">对话时让出相机控制</string>
-    <string name="camera_fp_yield_dialogue_hint">对话期间交还游戏相机，结束后恢复第一人称；尚待实机验证。</string>
+    <string name="camera_fp_yield_dialogue_hint">对话期间交还游戏相机，结束后恢复第一人称。</string>
     <string name="camera_fp_third_person_in_combat">战斗时切换第三人称</string>
-    <string name="camera_fp_third_person_in_combat_hint">进入战斗时交还游戏相机，战斗结束后恢复第一人称；默认关闭，尚待实机验证。</string>
+    <string name="camera_fp_third_person_in_combat_hint">进入战斗时交还游戏相机，战斗结束后恢复第一人称；默认关闭。</string>
     <string name="camera_fp_transition_seconds">视角切换过渡时间（0 为关闭）</string>
     <string name="camera_fp_seconds">秒</string>
     <string name="camera_fp_external_head_scale">外部模型缩头兼容</string>
-    <string name="camera_fp_external_head_scale_hint">仅在你使用外部改模且需要缩头时手动开启；会影响头部阴影。尚待实机验证。</string>
+    <string name="camera_fp_external_head_scale_hint">仅在你使用外部改模且需要缩头时手动开启；会影响头部阴影。</string>
     <string name="camera_fp_eye_height">眼位高度（游戏单位）</string>
     <string name="camera_fp_near_clip">近裁剪面（游戏单位）</string>
     <string name="camera_fp_extend_look_range">放宽俯仰范围</string>
     <string name="camera_fp_extend_look_range_hint">扩大第一人称上下观察范围；默认关闭。保存后立即生效。</string>
     <string name="camera_first_person">启用第一人称视角功能</string>
-    <string name="camera_first_person_hint">将视点固定到当前操控角色的头部。与自由视角相互独立，可单独启用。</string>
     <string name="camera_hide_head">隐藏头部（第一人称）</string>
-    <string name="camera_hide_head_hint">使用独立网格副本隐藏头部，保留身体、手臂和原始阴影。</string>
+    <string name="camera_hide_head_hint">保留身体、手臂和原始阴影。</string>
     <string name="camera_fill_neck">填补颈部开口</string>
-    <string name="camera_fill_neck_hint">隐藏头部后会露出颈部开口，用一小块补面遮住。</string>
+    <string name="camera_fill_neck_hint">隐藏头部时遮住颈部开口。</string>
     <string name="camera_speed_label">移动速度</string>
     <string name="camera_fp_fov_label">第一人称视野（FOV）</string>
 
     <!-- betterendfield.camera · 运镜与镜头 -->
     <string name="camera_motion_hint_short">预设运镜、关键帧段长与 VMD 镜头参数</string>
-    <string name="camera_motion_subtitle">自由镜头的进阶参数。触发按钮在悬浮窗的「运镜 / 关键帧」区，这里只决定参数。这一页（含第一人称与自由视角）的改动会直接投递给正在运行的游戏，无需重启——只有首次启用相机功能时需要重启一次，因为那时模块还没被载入游戏进程。</string>
+    <string name="camera_motion_subtitle">参数修改会即时送达游戏；首次启用相机功能仍需重启。</string>
     <string name="motion_group_look">转向（拖动）</string>
     <string name="motion_look_sensitivity_label">转向灵敏度</string>
     <string name="motion_look_sensitivity_unit">°/像素</string>
-    <string name="motion_look_hint">游戏内面板的「拖动转向」按它换算：数值越大，同样的拖动转得越多。默认 0.1 时滑过整个拖动区约转四分之一圈（随屏幕密度略有出入）。</string>
+    <string name="motion_look_hint">数值越大，同样的拖动转得越多。</string>
     <string name="motion_look_invert">Y 轴反转</string>
     <string name="motion_look_invert_hint">上滑改为俯视、下滑改为仰视。</string>
     <string name="motion_group_preset">运镜预设</string>
@@ -122,7 +113,7 @@
     <string name="motion_preset_dolly_zoom">希区柯克变焦</string>
     <string name="motion_preset_crane">升降</string>
     <string name="motion_preset_truck">横移</string>
-    <string name="motion_preset_hint">环绕：绕锚点转圈。希区柯克变焦：推近的同时反向拉大视野。升降、横移：匀速直线运动。锚点取当前操控角色，取不到时退到镜头前方 5 米；时长到点后自动结束。</string>
+    <string name="motion_preset_hint">环绕与变焦以当前角色为锚点；取不到角色时使用镜头前方 5 米。</string>
     <string name="motion_speed_label">运镜速度倍率</string>
     <string name="motion_speed_unit">×</string>
     <string name="motion_orbit_speed_label">环绕角速度</string>
@@ -133,13 +124,13 @@
     <string name="motion_keyframe_segment_label">关键帧段长（秒）</string>
     <string name="motion_keyframe_loop">循环回放关键帧</string>
     <string name="motion_keyframe_loop_hint">播完最后一段后从头继续。</string>
-    <string name="motion_keyframe_note">关键帧在游戏内由悬浮窗记录，最多 64 个；位置走 Catmull-Rom、朝向走球面插值、视野线性插值。段长决定相邻关键帧之间过渡多久。</string>
+    <string name="motion_keyframe_note">在悬浮窗记录，最多 64 个；段长决定相邻关键帧的过渡时间。</string>
     <string name="motion_group_vmd">VMD 镜头</string>
     <string name="motion_vmd_scale_label">位移缩放</string>
     <string name="motion_vmd_fov_bias_label">视野偏置</string>
     <string name="motion_vmd_loop">循环播放 VMD</string>
     <string name="motion_vmd_loop_hint">播完最后一帧后从头继续。</string>
-    <string name="motion_vmd_note">作用于导入的 .vmd 镜头文件（MMD 相机轨道）。导入的文件会在游戏运行中被同步到游戏自己的目录，配置也随之即时生效，无需重启。标定值（位移缩放 0.07、视野偏置 +5°）来自 MMD 场景，本作里可能需要按实际画面微调。按下悬浮窗的 VMD 按钮会自动进入自由视角。</string>
+    <string name="motion_vmd_note">导入后可即时使用；位移缩放与视野偏置可能需要按画面微调。</string>
     <string name="motion_vmd_import">导入 VMD 镜头文件</string>
     <string name="motion_vmd_clear">清除导入</string>
     <string name="motion_vmd_not_imported">还没有导入 .vmd 镜头文件，按下 VMD 按钮只会在面板日志里提示未配置文件。</string>
@@ -161,25 +152,22 @@
     <!-- betterendfield.actions -->
     <string name="dash_card_eyebrow">SPRINT · betterendfield.actions</string>
     <string name="dash_card_title">冲刺持续</string>
-    <string name="dash_card_subtitle">分角色开启特殊冲刺动作的持续播放。循环段由随包附带的骨骼姿态数据接管，桌面端不用热键，因此这一页就是全部设置。</string>
     <string name="dash_enable">启用冲刺持续</string>
-    <string name="dash_enable_hint">保留游戏本次选中的左或右特殊冲刺动作，在持续冲刺时循环播放，延后自然结束；停止或被打断时结束。</string>
+    <string name="dash_enable_hint">持续冲刺时循环当前特殊冲刺动作，停止或被打断时结束。</string>
     <string name="dash_group_characters">适用角色</string>
     <string name="dash_aglina">洁尔佩塔</string>
-    <string name="dash_aglina_hint">续接 sprint_dash_sp 特效并重新点燃 3 秒的高光。</string>
+    <string name="dash_aglina_hint">延续冲刺特效和高光。</string>
     <string name="dash_liino">梨诺</string>
-    <string name="dash_liino_hint">保留脚下滑板与武器尾焰，推迟游戏在 2.2 秒收板的动作。</string>
+    <string name="dash_liino_hint">延续滑板与武器尾焰。</string>
     <string name="dash_group_options">可选项</string>
-    <string name="dash_pose_note">循环段使用随模块附带的骨骼姿态数据，动画由 %1$s 接管；原生动作与移动逻辑保持不变。</string>
     <string name="dash_liino_clean">隐藏机甲与光效</string>
     <string name="dash_liino_clean_hint">梨诺冲刺全程隐藏机甲（含腿甲）与光效，保留飞行动画。</string>
 
     <!-- overlay -->
     <string name="overlay_card_eyebrow">IN-GAME PANEL</string>
     <string name="overlay_card_title">悬浮窗</string>
-    <string name="overlay_card_subtitle">游戏里的一个可拖动小图标，点开就是需要热键的那些动作。不需要系统悬浮窗权限，也不需要后台服务。</string>
     <string name="overlay_enable">在游戏中显示悬浮窗</string>
-    <string name="overlay_enable_hint">首次启用后需重启游戏。面板随游戏页面显示和隐藏。</string>
+    <string name="overlay_enable_hint">首次启用需重启游戏。</string>
     <string name="overlay_preview">预览悬浮窗</string>
     <string name="overlay_preview_hint">在本机直接查看面板外观与布局，不需要注入游戏。</string>
 
@@ -208,12 +196,11 @@
     <!-- 首页 -->
     <string name="home_eyebrow">OVERVIEW</string>
     <string name="home_greeting">Better Endfield</string>
-    <string name="home_modules_title">模块运行状态</string>
-    <string name="home_modules_none">没有任何模块被配置装载。在「体验」里打开任意开关后，这里会列出游戏下次启动时会加载的模块。</string>
-    <string name="home_modules_loaded">游戏下次启动时会加载 %1$d 个模块：</string>
+    <string name="home_modules_title">下次启动装载</string>
+    <string name="home_modules_none">下次启动不会装载功能模块。</string>
     <string name="home_pending_title">需要重启的更改</string>
-    <string name="home_pending_none">本次没有改动。当前已保存的设置已发布给框架。</string>
-    <string name="home_pending_some">本次已写入 %1$d 项改动，将在下次启动游戏时生效。游戏正在运行则需先强制停止。</string>
+    <string name="home_pending_none">本次没有需要重启的改动。</string>
+    <string name="home_pending_some">%1$d 项改动将在下次启动游戏时生效；请先强制停止游戏。</string>
     <string name="home_appearance_title">当前角色外观</string>
     <string name="home_appearance_none">尚未安装任何 BEM 模型包。</string>
     <string name="home_appearance_idle">已安装 %1$d 个模型包，当前均未启用。</string>
@@ -221,15 +208,11 @@
     <string name="home_login_display_off">登录界面保持游戏原样。</string>
     <string name="home_shortcuts_title">快捷入口</string>
     <string name="home_shortcut_overlay">游戏内控制</string>
-    <string name="home_shortcut_overlay_hint">悬浮窗开关与预览</string>
     <string name="home_shortcut_first_person">第一人称</string>
-    <string name="home_shortcut_first_person_hint">眼位、角色显示、操控与动画</string>
     <string name="home_shortcut_appearance">BEM 外观</string>
-    <string name="home_shortcut_appearance_hint">导入与管理模型包</string>
     <string name="home_state_label">已配置</string>
 
     <!-- 体验 -->
-    <string name="exp_intro">界面、镜头与动作三组增强。除标注「悬浮窗触发」的开关外，其余都在下次启动游戏时生效。</string>
     <string name="exp_group_interface">界面</string>
     <string name="exp_group_camera">镜头</string>
     <string name="exp_group_actions">动作</string>
@@ -237,14 +220,12 @@
     <string name="camera_group_free">自由镜头</string>
     <string name="camera_group_first_person">第一人称</string>
     <string name="camera_default_fov">默认视野（FOV）</string>
-    <string name="camera_default_fov_hint">自由视角的基准视野：进入时使用该值，「复位视角」也回到该值。游戏本体镜头（过场、瞄准变焦）不受影响。</string>
-    <string name="camera_free_fov_note">视野基准在「通用镜头 · 默认视野」；游戏内可用悬浮窗的方向键即时推拉。</string>
+    <string name="camera_default_fov_hint">自由视角进入或复位时使用，不影响游戏本体镜头。</string>
     <string name="camera_first_person_enter">进入第一人称设置</string>
-    <string name="camera_first_person_hint_short">基础、角色显示、操控、动画与场景行为</string>
+    <string name="camera_first_person_hint_short">眼位、操控与场景行为</string>
 
     <!-- 第一人称 -->
     <string name="fp_enable">启用第一人称视角</string>
-    <string name="fp_enable_hint">将视点固定到当前操控角色的头部。与自由视角相互独立，可单独启用。</string>
     <string name="fp_group_basic">基础</string>
     <string name="fp_group_display">角色显示</string>
     <string name="fp_group_control">操控</string>
@@ -252,7 +233,7 @@
     <string name="fp_group_scene">场景行为</string>
     <string name="fp_group_gyroscope">陀螺仪</string>
     <string name="camera_fp_gyroscope">启用陀螺仪视角</string>
-    <string name="camera_fp_gyroscope_hint">在游戏进程内读取设备陀螺仪，把转动手机变成视角输入。陀螺仪只是新的输入来源，最终视角、限位与身体跟随仍由同一套相机逻辑统一处理。本机若无陀螺仪，开启后日志会给出提示。目前该输入驱动的是自由视角。</string>
+    <string name="camera_fp_gyroscope_hint">转动手机控制视角；自由视角优先，否则控制第一人称。</string>
     <string name="camera_fp_gyroscope_horizontal">水平灵敏度</string>
     <string name="camera_fp_gyroscope_vertical">垂直灵敏度</string>
     <string name="camera_fp_gyroscope_invert_horizontal">水平反转</string>
@@ -264,15 +245,15 @@
 
     <string name="fp_group_diagnostics">诊断</string>
     <string name="camera_fp_look_probe">接口探针</string>
-    <string name="camera_fp_look_probe_hint">研究开关，不是功能。开启后下次启动游戏时，模块只读地枚举游戏的视角入口（类、方法、字段）并写进日志，不改任何状态、不影响游戏。用于确认原生第一人称的视角输入该接在哪里。改动需重启游戏才生效。</string>
+    <string name="camera_fp_look_probe_hint">开启后下次启动游戏时，模块只读地枚举游戏的视角入口（类、方法、字段）并写进日志，不改任何状态、不影响游戏。改动需重启游戏才生效。</string>
 
     <!-- 运行日志 -->
     <string name="log_eyebrow">RUNTIME JOURNAL</string>
-    <string name="log_description">日志由游戏进程内的模块写入并发布到框架快照；本页读取的是那一份快照。若为空，多半是模块未在 LSPosed 中激活，或游戏重启后仍是旧进程。</string>
+    <string name="log_description">来自游戏进程；为空时请检查 LSPosed 作用域并重启游戏。</string>
     <string name="log_empty">（暂无可读日志）</string>
     <string name="log_refresh">刷新</string>
     <string name="log_export">导出为文本文件</string>
-    <string name="log_caption">游戏进程内实际执行轨迹</string>
+    <string name="log_caption">最近 40 行 · 导出保留完整日志</string>
     <string name="log_exported">日志已保存。</string>
     <string name="log_export_failed">日志导出失败：%1$s</string>
 

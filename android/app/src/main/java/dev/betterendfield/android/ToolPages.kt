@@ -3,22 +3,33 @@ package dev.betterendfield.android
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Text
 
 /**
  * The tools tab: the in-game panel, the diagnostics readout, the journal, and the
@@ -56,7 +67,6 @@ private fun OverlayCard(state: SettingsState, onPreviewOverlay: () -> Unit) {
     SectionCard(
         eyebrow = stringResource(R.string.overlay_card_eyebrow),
         title = stringResource(R.string.overlay_card_title),
-        subtitle = stringResource(R.string.overlay_card_subtitle),
     ) {
         SwitchRow(
             title = stringResource(R.string.overlay_enable),
@@ -84,8 +94,6 @@ private fun DiagnosticsCard(state: SettingsState) {
     SectionCard(
         eyebrow = stringResource(R.string.diagnostics_eyebrow),
         title = stringResource(R.string.diagnostics_title),
-        subtitle = stringResource(R.string.diagnostics_description),
-        status = stringResource(R.string.diagnostics_ready),
     ) {
         BodyText(
             text = stringResource(R.string.diagnostics_framework),
@@ -119,6 +127,8 @@ private fun DiagnosticsCard(state: SettingsState) {
 fun LogPage(state: SettingsState) {
     val context = LocalContext.current
     var message by remember { mutableStateOf("") }
+    val tail = state.journalTailText()
+    val logScroll = rememberScrollState()
 
     val saver = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -139,6 +149,11 @@ fun LogPage(state: SettingsState) {
 
     LaunchedEffect(state.page) {
         state.refreshJournal()
+    }
+    LaunchedEffect(tail) {
+        // Wait for the new text to be measured before positioning at its end.
+        withFrameNanos { }
+        logScroll.scrollTo(logScroll.maxValue)
     }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
@@ -169,10 +184,25 @@ fun LogPage(state: SettingsState) {
             text = stringResource(R.string.log_caption),
             modifier = Modifier.padding(start = Be.Space.hairline, top = Be.Space.xs),
         )
-        StatusBlock(
-            text = state.journalText.ifBlank { stringResource(R.string.log_empty) },
-            monospace = true,
-        )
+        if (tail.isBlank()) {
+            StatusBlock(stringResource(R.string.log_empty), monospace = true)
+        } else {
+            Box(
+                Modifier.fillMaxWidth().height(380.dp)
+                    .clip(RoundedCornerShape(Be.Radius.status))
+                    .background(Be.Colors.field)
+                    .verticalScroll(logScroll),
+            ) {
+                Text(
+                    text = tail,
+                    color = Be.Colors.textSecondary,
+                    fontSize = Be.Type.mono,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(Be.Space.l),
+                )
+            }
+        }
     }
 }
 

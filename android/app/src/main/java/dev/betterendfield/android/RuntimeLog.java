@@ -1,6 +1,8 @@
 package dev.betterendfield.android;
 
-import android.content.SharedPreferences;
+import android.content.Context;
+import android.os.Bundle;
+import android.net.Uri;
 import android.util.Log;
 
 import java.text.SimpleDateFormat;
@@ -12,22 +14,27 @@ import java.util.Locale;
  * In-process runtime journal for the hooked game process. Every milestone of
  * the load pipeline (LSPosed attach, settings schema, module selection, Unity
  * frame trigger, native library load attempts) records here. The ring is
- * mirrored to the remote preference "runtime_log" — the same transport the
- * settings snapshot already proves works in both directions — and echoed to
- * logcat under one tag for adb capture. The diagnostics page in the module
- * app reads the preference back through the LSPosed service.
+ * sent to the companion app through its journal provider and echoed to logcat.
+ * The hooked process's framework preferences are read-only.
  */
 public final class RuntimeLog {
     private static final int CAPACITY = 150;
     private static final ArrayDeque<String> LINES = new ArrayDeque<>();
-    private static final long FLUSH_INTERVAL_MS = 1500L;
-    private static volatile SharedPreferences remote;
-    private static volatile long lastFlushAt;
+    private static volatile Context gameContext;
+    private static final java.util.concurrent.ExecutorService SENDER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "BetterEndfield-Journal");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private static boolean sending;
+    private static String pendingLog;
+    private static String pendingStatus;
 
     private RuntimeLog() {}
 
-    static void bind(SharedPreferences remoteLogPrefs) {
-        remote = remoteLogPrefs;
+    static void bind(Context context) {
+        gameContext = context;
         flush();
     }
 
@@ -57,11 +64,11 @@ public final class RuntimeLog {
         String line = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(new Date())
                 + " " + message;
         synchronized (RuntimeLog.class) {
+            if (line.length() > 512) line = line.substring(0, 512);
             if (LINES.size() >= CAPACITY) LINES.pollFirst();
             LINES.addLast(line);
             Log.i("BetterEndfield.Runtime", message);
-            long now = System.currentTimeMillis();
-            if (now - lastFlushAt >= FLUSH_INTERVAL_MS) flush();
+            flush();
         }
         if (OBSERVERS.isEmpty()) return;
         // Notified outside the lock, and never allowed to take the journal down
@@ -73,19 +80,47 @@ public final class RuntimeLog {
         }
     }
 
-    /** Force a rewrite of the remote preference; returns false when unbound. */
+    /** Queue the latest bounded snapshot without blocking the game's hook thread. */
     public static synchronized boolean flush() {
-        lastFlushAt = System.currentTimeMillis();
-        SharedPreferences target = remote;
-        if (target == null || LINES.isEmpty()) return false;
+        if (gameContext == null || LINES.isEmpty()) return false;
         StringBuilder all = new StringBuilder();
         for (String line : LINES) all.append(line).append('\n');
-        try {
-            target.edit().putString("log", all.toString()).apply();
-            return true;
-        } catch (Throwable ignored) {
-            return false;
-        }
+        pendingLog = all.toString();
+        scheduleSend();
+        return true;
+    }
+
+    private static synchronized void scheduleSend() {
+        if (sending || gameContext == null) return;
+        sending = true;
+        SENDER.execute(() -> {
+            while (true) {
+                String log;
+                String status;
+                Context context;
+                synchronized (RuntimeLog.class) {
+                    log = pendingLog;
+                    status = pendingStatus;
+                    context = gameContext;
+                    pendingLog = null;
+                    pendingStatus = null;
+                    if (log == null && status == null) {
+                        sending = false;
+                        return;
+                    }
+                }
+                Bundle payload = new Bundle();
+                if (log != null) payload.putString("log", log);
+                if (status != null) payload.putString("status", status);
+                try {
+                    context.getContentResolver().call(
+                            Uri.parse("content://dev.betterendfield.android.journal"),
+                            "publish", null, payload);
+                } catch (RuntimeException error) {
+                    Log.w("BetterEndfield.Runtime", "journal publish failed", error);
+                }
+            }
+        });
     }
 
     /**
@@ -103,18 +138,12 @@ public final class RuntimeLog {
     }
 
     /**
-     * Mirrors the native command bridge status into the same remote preference
-     * as the journal. The game process has no {@code XposedService} binder, so
-     * {@code FrameworkSettings.writeRemoteStatus} could never deliver this.
+     * Mirrors the native command status through the journal provider.
      */
     public static synchronized boolean setStatus(String status) {
-        SharedPreferences target = remote;
-        if (target == null || status == null || status.isEmpty()) return false;
-        try {
-            target.edit().putString("status", status).apply();
-            return true;
-        } catch (Throwable ignored) {
-            return false;
-        }
+        if (gameContext == null || status == null || status.isEmpty()) return false;
+        pendingStatus = status.length() > 512 ? status.substring(0, 512) : status;
+        scheduleSend();
+        return true;
     }
 }

@@ -1358,3 +1358,9 @@ what the thumb does.
 
 The panel's zoom buttons are press-and-hold rather than a 180 ms tap, matching
 what the desktop keys mean - a tap only steps the lens by about 3.6 degrees.
+
+## 应用运行日志
+
+游戏进程的 `RuntimeLog` 保留最近 150 行；悬浮窗直接读取进程内日志。游戏在 `Application.attach` 后通过 `RuntimeJournalProvider` 向模块应用发布有上限的日志快照，应用日志页和导出功能读取这份快照。被注入进程的框架远程偏好设置仅用于读取配置，不能用作游戏向应用写入日志的通道。
+
+应用日志页在固定高度的终端式视窗中显示最近 40 行，打开或刷新后定位到尾部；导出保留收到的完整快照。单条日志最多 512 字符，传输快照最多 80,000 字符。

@@ -16,12 +16,14 @@ import io.github.libxposed.service.XposedServiceHelper;
 /** Local UI preferences remain authoritative; framework service publishes snapshots. */
 final class FrameworkSettings {
     private static XposedService service;
+    private static Context appContext;
     private static SharedPreferences local;
     private static XposedService remoteService;
     // SharedPreferences keeps weak references; retain this for the application lifetime.
     private static final SharedPreferences.OnSharedPreferenceChangeListener listener = (prefs, key) -> publish();
 
     static void initialize(Context context) {
+        appContext = context.getApplicationContext();
         local = open(context);
         local.registerOnSharedPreferenceChangeListener(listener);
         XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
@@ -67,7 +69,7 @@ final class FrameworkSettings {
     }
 
     static synchronized String readRemoteStatus() {
-        return readRemoteFile("command.status");
+        return appContext == null ? "" : RuntimeJournalProvider.readStatus(appContext);
     }
 
     /** Reads a file from the module's remote (LSPosed service) file space; "" when unavailable. */
@@ -83,16 +85,9 @@ final class FrameworkSettings {
         } catch (RuntimeException | java.io.IOException error) { return ""; }
     }
 
-    /**
-     * The game process journals its load pipeline into the remote preference
-     * "runtime_log" ({@link RuntimeLog}); read it back here for the
-     * diagnostics page.
-     */
+    /** Reads the latest game-process snapshot received by the journal provider. */
     static synchronized String readRemoteLog() {
-        if (remoteService == null) return "";
-        try {
-            return service.getRemotePreferences("runtime_log").getString("log", "");
-        } catch (RuntimeException error) { return ""; }
+        return appContext == null ? "" : RuntimeJournalProvider.readLog(appContext);
     }
 
     static SharedPreferences open(Context context) {

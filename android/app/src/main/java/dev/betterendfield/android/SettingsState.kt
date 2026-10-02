@@ -64,15 +64,6 @@ object SettingsPage {
         LOG, ABOUT -> TOOLS
         else -> page
     }
-
-    fun titleOf(page: Int): Int = when (page) {
-        FIRST_PERSON -> R.string.page_first_person
-        CAMERA_MOTION -> R.string.page_camera_motion
-        APPEARANCE -> R.string.page_appearance
-        LOG -> R.string.page_log
-        ABOUT -> R.string.page_about
-        else -> TAB_LABELS[parentOf(page)]
-    }
 }
 
 /** The per-character language choices, in the order the desktop parser expects. */
@@ -93,7 +84,7 @@ class SettingsState(private val context: Context) {
     var page by mutableStateOf(SettingsPage.HOME)
         private set
 
-    var status by mutableStateOf(context.getString(R.string.current_setting_ready))
+    var status by mutableStateOf("")
         private set
 
     /**
@@ -1362,8 +1353,7 @@ class SettingsState(private val context: Context) {
         get() = moduleStatus("betterendfield.camera", disableDither || freeCamera || firstPerson)
 
     val dashCardStatus: String
-        get() = context.getString(R.string.dash_pose_note, "pose_*.bin") + "\n" +
-            moduleStatus("betterendfield.actions", sustainedDash && (dashAglina || dashLiino))
+        get() = moduleStatus("betterendfield.actions", sustainedDash && (dashAglina || dashLiino))
 
     /**
      * Says whether the module will be loaded at all, which is the one thing this
@@ -1439,6 +1429,10 @@ class SettingsState(private val context: Context) {
     fun refreshJournal() {
         journalText = FrameworkSettings.readRemoteLog().trim()
     }
+
+    /** The bounded viewport projection; export still uses the whole snapshot. */
+    fun journalTailText(): String = journalText.lineSequence().toList()
+        .takeLast(40).joinToString("\n")
 
     /**
      * The export body. The remote snapshot is everything this process can see:

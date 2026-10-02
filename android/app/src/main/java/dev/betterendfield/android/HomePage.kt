@@ -70,17 +70,14 @@ fun HomePage(state: SettingsState) {
             CardTitle(stringResource(R.string.home_shortcuts_title))
             ShortcutRow(
                 title = stringResource(R.string.home_shortcut_overlay),
-                hint = stringResource(R.string.home_shortcut_overlay_hint),
                 onClick = { state.openPage(SettingsPage.TOOLS) },
             )
             ShortcutRow(
                 title = stringResource(R.string.home_shortcut_first_person),
-                hint = stringResource(R.string.home_shortcut_first_person_hint),
                 onClick = { state.openPage(SettingsPage.FIRST_PERSON) },
             )
             ShortcutRow(
                 title = stringResource(R.string.home_shortcut_appearance),
-                hint = stringResource(R.string.home_shortcut_appearance_hint),
                 onClick = { state.openPage(SettingsPage.APPEARANCE) },
             )
         }
@@ -104,10 +101,6 @@ private fun ModuleStatusCard(state: SettingsState) {
         subtitle = if (modules.isEmpty()) stringResource(R.string.home_modules_none) else null,
     ) {
         if (modules.isNotEmpty()) {
-            BodyText(
-                text = stringResource(R.string.home_modules_loaded, modules.size),
-                modifier = Modifier.padding(top = Be.Space.s),
-            )
             Column(
                 Modifier.padding(top = Be.Space.l),
                 verticalArrangement = Arrangement.spacedBy(Be.Space.m),
@@ -173,7 +166,6 @@ private fun PendingCard(state: SettingsState) {
 @Composable
 private fun ShortcutRow(
     title: String,
-    hint: String,
     onClick: () -> Unit,
 ) {
     Row(
@@ -186,20 +178,13 @@ private fun ShortcutRow(
             .padding(horizontal = Be.Space.xl, vertical = Be.Space.l),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = Be.Colors.textPrimary,
-                fontSize = Be.Type.rowTitle,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = hint,
-                color = Be.Colors.textSecondary,
-                fontSize = Be.Type.bodySmall,
-                modifier = Modifier.padding(top = 3.dp),
-            )
-        }
+        Text(
+            text = title,
+            color = Be.Colors.textPrimary,
+            fontSize = Be.Type.rowTitle,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
         Text(
             text = "›",
             color = Be.Colors.accent,

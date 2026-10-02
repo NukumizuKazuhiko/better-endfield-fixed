@@ -23,15 +23,14 @@ fun FirstPersonPage(state: SettingsState) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
         SectionCard(
             eyebrow = stringResource(R.string.camera_card_eyebrow),
-            title = stringResource(R.string.camera_first_person),
-            subtitle = stringResource(R.string.camera_first_person_hint),
+            title = stringResource(R.string.page_first_person),
             status = state.cameraCardStatus,
         ) {
             GroupLabel(stringResource(R.string.fp_group_basic), top = Be.Space.l)
             Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
                 SwitchRow(
                     title = stringResource(R.string.fp_enable),
-                    description = stringResource(R.string.fp_enable_hint),
+                    description = "",
                     checked = state.firstPerson,
                     onCheckedChange = state::updateFirstPerson,
                     badge = stringResource(R.string.badge_overlay),

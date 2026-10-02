@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.hypergryph.endfield" />
+        <package android:name="com.gryphline.endfield.gp" />
+    </queries>
     <application
         android:name=".ModuleApplication"
         android:description="@string/xposed_description"
@@ -9,6 +13,10 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/gilberta"
         android:supportsRtl="true">
+        <provider
+            android:name=".RuntimeJournalProvider"
+            android:authorities="${applicationId}.journal"
+            android:exported="true" />
         <activity android:name=".BemInstallActivity" android:exported="false" android:theme="@style/AppTheme" />
         <activity
             android:name=".MainActivity"

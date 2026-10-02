@@ -150,13 +150,6 @@ private fun SettingsBody(
                 Box(Modifier.fillMaxWidth().padding(bottom = Be.Space.l)) {
                     BackButton(state::back)
                 }
-                Text(
-                    text = stringResource(SettingsPage.titleOf(state.page)),
-                    color = Be.Colors.textPrimary,
-                    fontSize = Be.Type.title,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(bottom = Be.Space.l),
-                )
             }
 
             when (state.page) {
@@ -171,7 +164,7 @@ private fun SettingsBody(
                 SettingsPage.ABOUT -> AboutPage()
             }
             Spacer(Modifier.height(Be.Space.xxl))
-            Notice(state.status)
+            if (state.status.isNotBlank()) Notice(state.status)
         }
     }
 }

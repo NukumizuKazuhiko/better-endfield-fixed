@@ -74,7 +74,7 @@ fun BemInstallScreen(state: BemInstallState) {
                 SectionCard(
                     eyebrow = "BEM · PACKAGE MANAGER",
                     title = stringResource(R.string.custom_model_title),
-                    subtitle = "一个包管理全部外观。选择与启用状态保存后，下次启动游戏生效。",
+                    subtitle = stringResource(R.string.bem_install_restart_hint),
                 ) {}
 
                 PrimaryButton(
@@ -113,7 +113,6 @@ fun BemInstallScreen(state: BemInstallState) {
                     }
                 }
 
-                BodyText("导入时保留原始纹理。只有贴图在游戏中显示异常时，才需要单独转换手机纹理。")
 
                 ListCaption(
                     text = "已安装的模型包",

@@ -9,6 +9,29 @@ public final class BemInstallerTest extends Instrumentation {
     public void testCameraSettingsRoundTrip() {
         CameraSettingsTest.run(this);
     }
+    public void testRuntimeJournalTransport() {
+        android.content.Context context = getTargetContext();
+        android.net.Uri uri = android.net.Uri.parse("content://dev.betterendfield.android.journal");
+        android.os.Bundle payload = new android.os.Bundle();
+        String oldLog = RuntimeJournalProvider.readLog(context);
+        String marker = "journal-transport-test-" + System.nanoTime();
+        try {
+            payload.putString("log", marker);
+            context.getContentResolver().call(uri, "publish", null, payload);
+            assertTrue(RuntimeJournalProvider.readLog(context).contains(marker));
+            char[] oversized = new char[80_001];
+            java.util.Arrays.fill(oversized, 'x');
+            payload.putString("log", new String(oversized));
+            try {
+                context.getContentResolver().call(uri, "publish", null, payload);
+                fail("oversized journal accepted");
+            } catch (IllegalArgumentException expected) { }
+            assertTrue(RuntimeJournalProvider.readLog(context).contains(marker));
+        } finally {
+            payload.putString("log", oldLog);
+            context.getContentResolver().call(uri, "publish", null, payload);
+        }
+    }
     private File directory;
     private String method;
     private String realInput;

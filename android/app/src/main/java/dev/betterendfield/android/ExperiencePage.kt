@@ -31,10 +31,6 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ExperiencePage(state: SettingsState) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
-        BodyText(
-            text = stringResource(R.string.exp_intro),
-            modifier = Modifier.padding(start = Be.Space.hairline + 1.dp, top = Be.Space.hairline),
-        )
         InterfaceCard(state)
         CameraCard(state)
         DashCard(state)
@@ -46,7 +42,6 @@ private fun InterfaceCard(state: SettingsState) {
     SectionCard(
         eyebrow = stringResource(R.string.ui_card_eyebrow),
         title = stringResource(R.string.ui_card_title),
-        subtitle = stringResource(R.string.ui_card_subtitle),
         status = state.interfaceCardStatus,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
@@ -72,7 +67,6 @@ private fun CameraCard(state: SettingsState) {
     SectionCard(
         eyebrow = stringResource(R.string.camera_card_eyebrow),
         title = stringResource(R.string.camera_card_title),
-        subtitle = stringResource(R.string.camera_card_subtitle),
         status = state.cameraCardStatus,
     ) {
         GroupLabel(stringResource(R.string.camera_group_general), top = Be.Space.l)
@@ -117,7 +111,6 @@ private fun CameraCard(state: SettingsState) {
                 badge = stringResource(R.string.badge_overlay),
                 enabled = state.worldPauseAvailable,
             )
-            BodyText(stringResource(R.string.camera_free_fov_note))
         }
 
         // No group label of its own: the row's own title already names the
@@ -147,7 +140,6 @@ private fun DashCard(state: SettingsState) {
     SectionCard(
         eyebrow = stringResource(R.string.dash_card_eyebrow),
         title = stringResource(R.string.dash_card_title),
-        subtitle = stringResource(R.string.dash_card_subtitle),
         status = state.dashCardStatus,
     ) {
         SwitchRow(

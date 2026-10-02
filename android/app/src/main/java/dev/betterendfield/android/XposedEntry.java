@@ -244,10 +244,8 @@ public final class XposedEntry extends XposedModule {
 
     private void onPackageAvailable(String stage, String packageName) {
         instance = this;
-        // The journal must never take the entry down with it: a remote
-        // preference or service hiccup here used to abort the whole hook.
+        // Buffer early hook events until Application.attach provides a Context.
         try {
-            RuntimeLog.bind(getRemotePreferences("runtime_log"));
             RuntimeLog.record("journal build " + BuildConfig.VERSION_NAME
                     + " (" + BuildConfig.VERSION_CODE + ")");
             RuntimeLog.record(stage + " pkg=" + packageName
@@ -279,6 +277,7 @@ public final class XposedEntry extends XposedModule {
                     Application application = (Application) chain.getThisObject();
                     Context context = (Context) chain.getArg(0);
                     gameContext = context;
+                    RuntimeLog.bind(context);
                     ClassLoader loader = context.getClassLoader();
                     GameOverlay.install(application, loader,
                             () -> {

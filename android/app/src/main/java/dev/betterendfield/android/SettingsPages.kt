@@ -38,11 +38,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun CharacterPage(state: SettingsState, onInstallBem: () -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
-        SectionCard(
-            eyebrow = "APPEARANCE",
-            title = stringResource(R.string.page_appearance),
-            subtitle = stringResource(R.string.custom_model_description),
-        ) {
+        PanelCard {
             SubPageRow(
                 title = stringResource(R.string.custom_model_title),
                 hint = state.appearanceSummary,
@@ -68,7 +64,6 @@ fun AppearancePage(state: SettingsState, onInstallBem: () -> Unit) {
         SectionCard(
             eyebrow = "BEM",
             title = stringResource(R.string.custom_model_title),
-            subtitle = stringResource(R.string.custom_model_description),
             status = if (packages.isEmpty()) {
                 stringResource(R.string.home_appearance_none)
             } else {
@@ -152,7 +147,6 @@ fun LoginDisplayPage(state: SettingsState) {
         SectionCard(
             eyebrow = stringResource(R.string.model_eyebrow),
             title = stringResource(R.string.model_title),
-            subtitle = stringResource(R.string.model_description),
             status = state.modelTableStatus,
         ) {}
 
@@ -309,14 +303,8 @@ fun VoicePage(state: SettingsState) {
         SectionCard(
             eyebrow = stringResource(R.string.voice_eyebrow),
             title = stringResource(R.string.settings_title),
-            subtitle = stringResource(R.string.settings_description),
             status = state.voiceTableStatus,
         ) {}
-
-        ListCaption(
-            text = stringResource(R.string.voice_list_caption),
-            modifier = Modifier.padding(start = Be.Space.hairline, top = Be.Space.xs),
-        )
 
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.m)) {
             state.voiceCharacterIds.forEachIndexed { index, characterId ->
