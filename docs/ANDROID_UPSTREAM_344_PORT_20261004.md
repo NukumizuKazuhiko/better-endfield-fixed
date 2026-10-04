@@ -2,9 +2,9 @@
 
 ## 来源与范围
 
-工作分支 `codex/upstream-features-20261004` 从本仓库 `d9bd612` 创建，位于独立工作树；原 `F:\bem` 的未提交改动未纳入。来源为 `Dr-hydra/Better-Endfield` 的 `main`，本轮核对到 `e180ede`（3.4.4）。上游 Android 增量主要在 `5eeb06d`。
+工作分支 `codex/android-upstream-344-port` 从本仓库 `d9bd612` 创建，位于独立工作树；原 `F:\bem` 的未提交改动未纳入。来源为 `Dr-hydra/Better-Endfield` 的 `main`，本轮核对到 `e180ede`（3.4.4）。上游 Android 增量主要在 `5eeb06d`。
 
-本分支只交付 Android 改动。先前误做的桌面动作钩子和 WinUI 模型页提交 `279b995` 已由 `abba8d9` 完整撤销，后续移植不依赖它们。
+本分支只交付 Android 改动，不包含此前误做的桌面动作钩子和 WinUI 模型页提交。
 
 ## 已移植
 
