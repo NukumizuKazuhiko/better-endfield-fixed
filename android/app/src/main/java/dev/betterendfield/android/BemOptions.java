@@ -12,6 +12,11 @@ import java.util.HashSet;
 final class BemOptions {
     private BemOptions() {}
 
+    static void requireToken(String value) throws IOException {
+        if(value==null || !value.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,95}"))
+            throw new IOException("无效的选项标识");
+    }
+
     static LinkedHashMap<String,String> parse(JSONObject entry, String encoded) throws Exception {
         JSONArray groups=entry.getJSONArray("option_groups");
         LinkedHashMap<String,String> values=new LinkedHashMap<>();
@@ -64,7 +69,7 @@ final class BemOptions {
         return true;
     }
 
-    private static boolean test(Object condition, Map<String,String> active) throws Exception {
+    static boolean test(Object condition, Map<String,String> active) throws Exception {
         if(condition==null || condition==JSONObject.NULL) return true;
         if(condition instanceof Boolean) return (Boolean)condition;
         JSONObject rule=(JSONObject)condition;

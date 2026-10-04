@@ -15,7 +15,7 @@ final class BemInstalledResources {
     /** Pruning is safe only during game startup, before the runtime opens package paths. */
     static String prepare(Context context,String index,Source source,Consumer<String> log,boolean pruneUnused) throws Exception {
         java.util.Set<String> used=new java.util.HashSet<>();
-        JSONArray entries=new JSONArray(index);StringBuilder paths=new StringBuilder(),appearances=new StringBuilder(),options=new StringBuilder();
+        JSONArray entries=new JSONArray(index);StringBuilder paths=new StringBuilder(),appearances=new StringBuilder(),options=new StringBuilder(),parameters=new StringBuilder();
         File root=new File(context.getFilesDir(),"betterendfield/installed-models");
         if(!root.isDirectory()&&!root.mkdirs()) throw new IOException("Cannot create game model directory");
         for(int i=0;i<entries.length();++i) {
@@ -37,11 +37,13 @@ final class BemInstalledResources {
             boolean composable=entry.optInt("bem_minor",0)>=1;
             String appearance=composable?"":entry.optString("selected_appearance",entry.getString("default_appearance"));
             String selection=composable?entry.optString("selected_options",entry.getString("default_options")):"";
+            String parameterSelection=BemParameters.encode(BemParameters.parse(entry,
+                entry.optString("selected_parameters",entry.optString("default_parameters",""))));
             if(!appearance.isEmpty()&&!appearance.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,95}")) throw new IOException("Invalid appearance");
             if(composable&&!selection.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,95}:[A-Za-z0-9][A-Za-z0-9_.-]{0,95}(&[A-Za-z0-9][A-Za-z0-9_.-]{0,95}:[A-Za-z0-9][A-Za-z0-9_.-]{0,95})*"))
                 throw new IOException("Invalid option selection");
-            if(paths.length()>0) {paths.append(',');appearances.append(',');options.append(',');}
-            paths.append(output.getAbsolutePath());appearances.append(appearance);options.append(selection);
+            if(paths.length()>0) {paths.append(',');appearances.append(',');options.append(',');parameters.append(',');}
+            paths.append(output.getAbsolutePath());appearances.append(appearance);options.append(selection);parameters.append(parameterSelection);
             log.accept("Installed BEM ready: "+entry.getString("package_id")+" selection="+(composable?selection:appearance));
         }
         File[] stale=pruneUnused?root.listFiles():null;
@@ -50,6 +52,6 @@ final class BemInstalledResources {
             if(file.isFile() && name.matches("[a-f0-9-]{36}\\.(bem|tmp)") && !used.contains(name) && file.delete())
                 log.accept("Unused installed BEM removed: "+name);
         }
-        return paths.length()==0?"":"resource=auto;replace=1;lod_pipeline=1;lod_npc=1;packages="+paths+";appearances="+appearances+";options="+options;
+        return paths.length()==0?"":"resource=auto;replace=1;lod_pipeline=1;lod_npc=1;packages="+paths+";appearances="+appearances+";options="+options+";parameters="+parameters;
     }
 }

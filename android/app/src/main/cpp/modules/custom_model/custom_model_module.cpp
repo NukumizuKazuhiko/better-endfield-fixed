@@ -216,6 +216,7 @@ bool CustomModelModule::InitializeSharedReplacement(const std::string& config) {
     replacement_config_ = "[CustomModel]\nstandalone_lod=false\n";
     const auto configured_appearances=ConfigStrings(ConfigValue(config,"appearances"));
     const auto configured_options=ConfigStrings(ConfigValue(config,"options"));
+    const auto configured_parameters=ConfigStrings(ConfigValue(config,"parameters"));
     for (size_t i = 0; i < package_paths_.size(); ++i) {
         replacement_config_ += "[Mod.android" + std::to_string(i) + "]\nenabled=true\npackage=" +
             package_paths_[i].string() + "\n";
@@ -224,6 +225,8 @@ bool CustomModelModule::InitializeSharedReplacement(const std::string& config) {
         if (!selected.empty()) replacement_config_ += "appearance=" + selected + "\n";
         if(i<configured_options.size() && !configured_options[i].empty())
             replacement_config_ += "options=" + configured_options[i] + "\n";
+        if(i<configured_parameters.size() && !configured_parameters[i].empty())
+            replacement_config_ += "parameters=" + configured_parameters[i] + "\n";
     }
     host_ = {};
     host_.abi_version = BETTER_ENDFIELD_MODULE_ABI_V1; host_.context = this;

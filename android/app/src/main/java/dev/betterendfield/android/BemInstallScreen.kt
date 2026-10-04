@@ -276,6 +276,19 @@ private fun PackageCard(
             )
         }
 
+        pkg.parameterGroups.forEach { group ->
+            SliderRow(
+                label = group.name,
+                value = pkg.selectedParameter(group.id).toFloat(),
+                onValueChange = { pkg.chooseParameter(group, it.toInt()) },
+                valueRange = group.min.toFloat()..group.max.toFloat(),
+                steps = (group.max - group.min) / group.step,
+                decimals = 0,
+                enabled = pkg.parameterAvailable(group),
+                modifier = Modifier.padding(top = Be.Space.m),
+            )
+        }
+
         pkg.problem?.let { message ->
             Text(
                 text = message,

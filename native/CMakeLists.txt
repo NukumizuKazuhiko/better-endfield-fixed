@@ -222,6 +222,11 @@ add_executable(BetterEndfield.CustomModelBindingTests EXCLUDE_FROM_ALL
 better_endfield_target_defaults(BetterEndfield.CustomModelBindingTests)
 target_link_libraries(BetterEndfield.CustomModelBindingTests PRIVATE BetterEndfield.CustomModelCore)
 
+add_executable(BetterEndfield.BemV13MorphTests EXCLUDE_FROM_ALL
+    tests/bem_v13_morph_tests.cpp)
+better_endfield_target_defaults(BetterEndfield.BemV13MorphTests)
+target_link_libraries(BetterEndfield.BemV13MorphTests PRIVATE BetterEndfield.CustomModelCore)
+
 add_executable(BetterEndfield.AndroidWorldBindingTests EXCLUDE_FROM_ALL
     tests/android_world_binding_tests.cpp)
 better_endfield_target_defaults(BetterEndfield.AndroidWorldBindingTests)

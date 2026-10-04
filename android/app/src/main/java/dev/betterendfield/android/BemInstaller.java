@@ -101,9 +101,12 @@ final class BemInstaller {
                 checkpoint();
                 synchronized(BemInstaller.class) {
                     JSONArray previous=index(app), next=new JSONArray();
+                    String savedParameters=result.optString("default_parameters","");
                     if(converting) {
                         JSONObject latest=findEntry(previous,previousGeneration);
                         if(latest==null) throw new IOException("模型包已被替换，原配置保持不变");
+                        savedParameters=latest.optString("remembered_parameters",
+                            latest.optString("selected_parameters",savedParameters));
                         result.put("enabled",latest.optBoolean("enabled",true));
                         if(result.optInt("bem_minor",0)>=1) {
                             String saved=latest.optString("selected_options",result.getString("default_options"));
@@ -111,6 +114,7 @@ final class BemInstaller {
                             catch(Exception removedChoice) {result.put("selected_options",result.getString("default_options"));}
                         } else result.put("selected_appearance",latest.optString("selected_appearance",latest.getString("default_appearance")));
                     }
+                    BemParameters.restore(result,savedParameters);
                     for(int i=0;i<previous.length();++i) {
                         JSONObject old=previous.getJSONObject(i);
                         if(!old.getString("character_id").equals(result.getString("character_id"))) next.put(old);
@@ -176,9 +180,11 @@ final class BemInstaller {
                     File report=new File(version,"report.json");
                     if(!belongs && report.isFile()) {
                         try {
-                            JSONObject metadata=new JSONObject(Files.readString(report.toPath()));
+                            if(report.length()>1024*1024) {complete=false;continue;}
+                            JSONObject metadata=new JSONObject(new String(
+                                Files.readAllBytes(report.toPath()),StandardCharsets.UTF_8));
                             belongs=removed.getString("character_id").equals(metadata.optString("character_id"));
-                        } catch(Exception ignored) {continue;}
+                        } catch(Exception unreadable) {complete=false;continue;}
                     }
                     if(!belongs) continue;
                     complete &= FrameworkSettings.removeBem("bem-"+version.getName()+".bem");
@@ -343,6 +349,8 @@ final class BemInstaller {
                 if(!valid) throw new IOException("无效的外观选项");
                 entry.put("selected_appearance",appearance);
             }
+            if(entry.optInt("bem_minor",0)>=3)
+                BemParameters.select(entry,change.getString("parameters"));
             entry.put("enabled",change.getBoolean("enabled"));
         }
         if(!FrameworkSettings.open(app).edit().putString(INDEX,entries.toString()).commit()) throw new IOException("保存失败");

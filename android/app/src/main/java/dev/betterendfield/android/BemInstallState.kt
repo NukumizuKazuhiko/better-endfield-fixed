@@ -18,6 +18,14 @@ class BemOptionGroup(
     class Choice(val id: String, val name: String)
 }
 
+class BemParameterGroup(val raw: JSONObject) {
+    val id: String = raw.getString("id")
+    val name: String = raw.getString("name")
+    val min: Int = BemParameters.tick(raw, "min")
+    val max: Int = BemParameters.tick(raw, "max")
+    val step: Int = BemParameters.tick(raw, "step")
+}
+
 /**
  * One installed package, as the management screen edits it.
  *
@@ -34,11 +42,13 @@ class BemPackage(
     val minorVersion: Int,
     val appearances: List<String>,
     val optionGroups: List<BemOptionGroup>,
+    val parameterGroups: List<BemParameterGroup>,
     val raw: JSONObject,
 ) {
     var enabled by mutableStateOf(true)
     var appearanceIndex by mutableStateOf(0)
     var options by mutableStateOf("")
+    var parameters by mutableStateOf("")
     var problem by mutableStateOf<String?>(null)
     val visibleGroups = mutableStateMapOf<String, Boolean>()
 
@@ -49,6 +59,7 @@ class BemPackage(
         put("generation", generation)
         put("enabled", enabled)
         if (minorVersion >= 1) put("options", options) else put("appearance", appearances[appearanceIndex])
+        if (minorVersion >= 3) put("parameters", parameters)
     }
 
     fun selections(): LinkedHashMap<String, String> = LinkedHashMap(BemOptions.parse(raw, options))
@@ -88,6 +99,23 @@ class BemPackage(
     fun selectedOption(groupId: String): String = selections()[groupId] ?: ""
 
     fun selectedAppearance(): String = appearances.getOrElse(appearanceIndex) { "" }
+
+    fun selectedParameter(id: String): Int = BemParameters.parse(raw, parameters)[id] ?: 0
+
+    fun chooseParameter(group: BemParameterGroup, value: Int) {
+        try {
+            val selected = BemParameters.parse(raw, parameters)
+            selected[group.id] = BemParameters.snap(group.raw, value)
+            parameters = BemParameters.encode(selected)
+            problem = null
+        } catch (error: Exception) {
+            problem = "滑条设置错误：" + error.message
+        }
+    }
+
+    fun parameterAvailable(group: BemParameterGroup): Boolean = try {
+        BemParameters.available(raw, group.raw, selections())
+    } catch (_: Exception) { false }
 }
 
 /**
@@ -131,7 +159,9 @@ class BemInstallState(private val context: Context) {
     private var displayedIndex = ""
 
     /** Drafts survive a rebuild so a refresh cannot discard an uncommitted edit. */
-    private val drafts = HashMap<String, Triple<Boolean, Int, String>>()
+    private data class Draft(val enabled: Boolean, val appearance: Int,
+        val options: String, val parameters: String)
+    private val drafts = HashMap<String, Draft>()
 
     fun refresh() {
         status = BemInstaller.status
@@ -154,7 +184,7 @@ class BemInstallState(private val context: Context) {
     private fun rebuild(index: String) {
         drafts.clear()
         packages.forEach { pkg ->
-            drafts[pkg.generation] = Triple(pkg.enabled, pkg.appearanceIndex, pkg.options)
+            drafts[pkg.generation] = Draft(pkg.enabled, pkg.appearanceIndex, pkg.options, pkg.parameters)
         }
         val list = try {
             val parsed = JSONArray(index)
@@ -193,6 +223,10 @@ class BemInstallState(private val context: Context) {
                 )
             }
         }
+        val parameterGroups = buildList {
+            val array = BemParameters.groups(entry)
+            for (index in 0 until array.length()) add(BemParameterGroup(array.getJSONObject(index)))
+        }
 
         val active = if (minor >= 1) {
             entry.optString("selected_options", entry.getString("default_options"))
@@ -208,6 +242,7 @@ class BemInstallState(private val context: Context) {
             minorVersion = minor,
             appearances = appearances,
             optionGroups = groups,
+            parameterGroups = parameterGroups,
             raw = entry,
         )
 
@@ -226,14 +261,24 @@ class BemInstallState(private val context: Context) {
             pkg.appearanceIndex = appearances.indexOfFirst { it == stored }.takeIf { it >= 0 } ?: 0
         }
 
-        drafts[generation]?.let { (enabled, appearance, options) ->
-            pkg.enabled = enabled
+        if (minor >= 3) {
+            val saved = entry.optString("selected_parameters", entry.optString("default_parameters", ""))
+            pkg.parameters = try {
+                BemParameters.encode(BemParameters.parse(entry, saved))
+            } catch (_: Exception) {
+                BemParameters.encode(BemParameters.parse(entry, entry.optString("default_parameters", "")))
+            }
+        }
+
+        drafts[generation]?.let { draft ->
+            pkg.enabled = draft.enabled
             if (minor >= 1) {
-                pkg.options = options
+                pkg.options = draft.options
                 pkg.refreshVisibility()
             } else {
-                pkg.appearanceIndex = appearance.coerceIn(0, (appearances.size - 1).coerceAtLeast(0))
+                pkg.appearanceIndex = draft.appearance.coerceIn(0, (appearances.size - 1).coerceAtLeast(0))
             }
+            if (minor >= 3) pkg.parameters = draft.parameters
         } ?: run {
             pkg.enabled = entry.optBoolean("enabled", true)
         }

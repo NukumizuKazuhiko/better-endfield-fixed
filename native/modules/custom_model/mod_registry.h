@@ -8,10 +8,10 @@
 #include <memory>
 
 namespace BetterEndfield::CustomModel {
-// Unity appends (Clone), and the Android model pool may append #<serial>.
-// Only a trailing decimal pool serial is removed; other resource names remain exact.
+// Unity names an instance "<prefab>(Clone)"; the game's model pool may append
+// "#<serial>" as well (device 2026-10-04: "chr_0003_endminf_postmodel(Clone)#27").
 inline std::string_view ResourceBaseName(std::string_view name) {
-    if (const auto hash=name.rfind('#'); hash!=std::string_view::npos && hash+1<name.size() &&
+    if (const auto hash=name.rfind('#');hash!=std::string_view::npos && hash+1<name.size() &&
         name.find_first_not_of("0123456789",hash+1)==std::string_view::npos) name=name.substr(0,hash);
     if (name.ends_with("(Clone)")) name.remove_suffix(7);
     return name;
@@ -29,6 +29,10 @@ struct EnabledMod {
     const CharacterAdapter* adapter = nullptr;
     std::filesystem::path package;
     std::string appearance;
+    bool skip_validation = false;
+    bool loading_optimization = false;
+    std::string selection_key;
+    std::string parameters;
 };
 struct OwnedCharacterAdapter {
     std::string id, world, ui;
@@ -38,9 +42,15 @@ struct OwnedCharacterAdapter {
 };
 struct ModRegistry {
     bool standalone_lod = false;
+    bool skip_validation = false;
+    bool hot_switch = false;
+    // Payload move/release parsing; verified byte-identical, always on.
+    bool loading_optimization = true;
+    // Optional: fewer render-thread syncs while uploading (faster, higher peak).
+    bool fast_loading = false;
     std::vector<EnabledMod> enabled;
     std::vector<std::string> diagnostics;
-    std::vector<std::unique_ptr<OwnedCharacterAdapter>> owned_adapters;
+    std::vector<std::shared_ptr<OwnedCharacterAdapter>> owned_adapters;
     const EnabledMod* Match(std::string_view resource) const;
 };
 std::span<const CharacterAdapter> CharacterAdapters();

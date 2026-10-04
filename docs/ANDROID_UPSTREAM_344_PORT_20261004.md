@@ -24,7 +24,7 @@
 | 模型管理与存储 | Compose 页按角色筛选、可选保留本地副本、显式清理未使用数据；转换可读取框架副本；游戏启动前清理未引用的私有模型副本 | 清理只针对已识别的 UUID 代际、stage 和游戏私有 `.bem/.tmp`；索引无效、远端列举失败或删除失败均报告未完成；实际文件清理尚未在设备执行 |
 | 设置文案 | 模型管理和悬浮窗新增项的标签、提示补充英、日、韩、繁中 Android 资源 | 仅覆盖本轮新增项；原有页面中未抽入资源的文案仍按现有中文显示 |
 
-依赖审计显示：本分支 BEM 解析器仍只支持 1.0–1.2，而上游 `071288c` 的 BEM 1.3（形变与体型参数）是 `5f82b3c` 低峰值加载、通用匹配和场景热切换实现的前置合同。直接应用 1.3 补丁到本分支的解析器、注册表和运行时全部冲突；因此没有添加空的“加载速度优先”开关，也没有声称完成低峰值加载或热切换。后续要先移植 BEM 1.3 的解析、参数选择、Android 安装与运行时合同，再接入分批贴图上传、原版资产保存和实例重建，最后做设备显存、帧时与切换回滚验收。上游 `5f82b3c` 的完整通用匹配（含独立的场景原网格身份与阴影代理 owner）也仍未闭合。
+当时的依赖审计显示：本分支 BEM 解析器仍只支持 1.0–1.2，而上游 `071288c` 的 BEM 1.3（形变与体型参数）是 `5f82b3c` 低峰值加载、通用匹配和场景热切换实现的前置合同。当时直接应用 1.3 补丁到本分支的解析器、注册表和运行时全部冲突，因此未添加空的“加载速度优先”开关，也未声称完成低峰值加载或热切换。BEM 1.3 的接入结果见文末 2026-10-05 记录；分批贴图上传、原版资产保存和实例重建仍需另行接入并做设备显存、帧时与切换回滚验收。上游 `5f82b3c` 的完整通用匹配（含独立的场景原网格身份与阴影代理 owner）也仍未闭合。
 
 HookInlineScan 辅助工具未移植。Windows 模型存储位置迁移不属于 Android 范围。
 
@@ -63,3 +63,11 @@ Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`，79,204,939 字
 BEM 1.2 的 `bone_name_aliases` 已声明所属资源，但原解析结果把 world 与 UI 别名合为同一组。现保留原集合供现有通用绑定流程使用，同时在解析时记录每个别名的资源。Android 场景路径查找和名称校验只接受 world 别名，详情资源读回只接受 UI 别名。场景从 UI 骨骼路径查找时，先尝试包声明的标准骨名，再尝试 world 别名，因此 UI 专属别名不会误导场景搜索。
 
 本轮 `:app:assembleDebug -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon --quiet` 成功；`BetterEndfield.CustomModelBindingTests.exe --resource-alias` 通过，覆盖同一骨骼的标准名、world 别名、UI 别名和跨资源拒绝。APK SHA-256 为 `660CC35687896AE00B8B11370D2C6570E4B35BF2AC64BAB6C26292521D8969F2`，含 1 份清单、834 份 `.behw` 和两个 Better Endfield ARM64 库。设备没有游戏资源，真实 BEM 场景和详情替换仍待验收。已有 Visual Studio 17 构建目录在当前机器不可用，改用原有 Visual Studio 18 测试目录完成编译；MinHook 第三方代码仍有既有 C4701 警告。
+
+## 上游 3.5.0 BEM 1.3 体型参数（2026-10-05）
+
+共用 BEM 读取器和创作者工具采用上游 1.3 的参数、形变帧与负载选择合同；本仓库 Android 安装器、Compose 模型页和原生运行配置接入参数选择。模型注册表及负载缓存身份包含参数，修改滑条后不会误用旧形变。原有第一人称、头饰与 Android 资源匹配链路保留。安装索引跨包更新保存仍有效的滑条值，失效值回退包默认值；参数值必须符合声明范围与步长。
+
+本轮执行 `py -m unittest test_bem_v13 test_bem_tasks -q`，25 项通过；`BetterEndfield.BemV13MorphTests.exe` 通过 86 项检查。固定 834 份头饰目录下执行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --offline --no-daemon --quiet` 成功。HLK-AL00（Android 10）覆盖安装两份 Debug APK 后，`BemInstallerTest` 整套设备测试通过，包含参数保存、非法步长拒绝、配置生成及模型安装。APK SHA-256 为 `23CD0E33173FD6A8230AF75EA353B9AFE7FCBEF3AAD331622356B9ADD24996CB`，包内有一份头饰清单、834 个 `.behw` 和两个 Better Endfield ARM64 库。
+
+设备没有游戏资源，形变在世界/详情场景的画面、角色切换和运行时资源峰值未实测。当前安装与选项仍在下次启动游戏时生效；模型热切换和低峰值加载不是本阶段结果。

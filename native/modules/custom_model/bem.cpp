@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <functional>
 #include <optional>
+#include <charconv>
 
 namespace BetterEndfield::CustomModel {
 namespace {
@@ -72,7 +73,38 @@ bool Evaluate(const J& node,const std::map<std::string,std::string>& effective) 
     if(item.key()=="any") return std::any_of(value.begin(),value.end(),[&](const J& child){return Evaluate(child,effective);});
     return !Evaluate(value,effective);
 }
+using ParameterTicks=std::map<std::string,uint32_t>;
+ParameterTicks ParseParameters(const J& definitions,std::string_view requested,std::string* canonical=nullptr) {
+    ParameterTicks saved,result;
+    while(!requested.empty()) {
+        const auto end=requested.find('&'); const auto token=requested.substr(0,end); const auto colon=token.find(':');
+        Check(colon!=token.npos && colon>0 && colon+1<token.size() && token.find(':',colon+1)==token.npos,"Invalid parameter selection");
+        auto id=Id(J(std::string(token.substr(0,colon)))); const auto text=token.substr(colon+1);
+        uint32_t tick=0; const auto parsed=std::from_chars(text.data(),text.data()+text.size(),tick);
+        Check(parsed.ec==std::errc{} && parsed.ptr==text.data()+text.size(),"Parameter value must be an unsigned integer tick");
+        Check(saved.emplace(id,tick).second,"Duplicate parameter selection");
+        requested=end==requested.npos?std::string_view{}:requested.substr(end+1);
+        Check(end==std::string_view::npos || !requested.empty(),"Trailing parameter separator");
+    }
+    if(canonical) canonical->clear();
+    for(const auto& parameter:definitions) {
+        const auto id=parameter.at("id").get<std::string>();
+        const auto tick=saved.contains(id)?saved.at(id):U(parameter.at("default"));
+        const auto min=U(parameter.at("min")),max=U(parameter.at("max")),step=U(parameter.at("step"));
+        Check(tick>=min && tick<=max && (tick-min)%step==0,"Parameter tick is outside range or step");
+        result.emplace(id,tick);
+        if(canonical) { if(!canonical->empty()) *canonical+='&'; *canonical+=id+":"+std::to_string(tick); }
+    }
+    for(const auto& [id,_]:saved) Check(result.contains(id),"Unknown parameter");
+    return result;
+}
 struct Container {
+    bool skip_validation=false;
+    bool loading_optimization=false;
+    // Texture payloads are described, not read; their decoded bytes are
+    // excluded from consumer counts and from the load-plan reservation.
+    bool deferTextures=false;
+    void Validate(bool ok,const std::string& message) const { if(!skip_validation) Check(ok,message); }
     uint16_t minor=0;
     Limits limits=LimitsFor(0);
     BemLoadStats* stats=nullptr;
@@ -84,14 +116,21 @@ struct Container {
     std::vector<Entry> directory;
     std::function<std::vector<uint8_t>(uint64_t,size_t)> read;
     BemPackageInfo info;
+    J parameters=J::array();
     void Open(uint64_t size) {
-        Check(size>=sizeof(Header) && size<=2ull*1024*MiB,"Invalid BEM file size");
+        Check(size>=sizeof(Header),"Invalid BEM file size");
+        Validate(size<=2ull*1024*MiB,"Invalid BEM file size");
         auto raw=read(0,sizeof(Header)); Header h{}; std::memcpy(&h,raw.data(),sizeof(h));
-        Check(std::memcmp(h.magic,"BEM\0PKG\0",8)==0 && h.major==1 && h.minor<=2 && h.size==sizeof(h) && !h.flags,
-            "Only BEM 1.0/1.1/1.2 packages are supported");
+        Check(std::memcmp(h.magic,"BEM\0PKG\0",8)==0 && h.major==1 && h.minor<=3 && h.size==sizeof(h) && !h.flags,
+            "Only BEM 1.0/1.1/1.2/1.3 packages are supported");
         minor=h.minor; limits=LimitsFor(minor);
-        Check(h.file==size && h.manifest>0 && h.manifest<=4*MiB && h.count<=limits.directory &&
-            h.manifest+sizeof(h)+uint64_t(h.count)*sizeof(Entry)<=size,"Invalid BEM directory sizes");
+        if(skip_validation) {
+            limits.choices=SIZE_MAX; limits.rules=SIZE_MAX; limits.textures=kMaxBemTextures;
+            limits.textureBytes=UINT32_MAX; limits.budget=UINT64_MAX; limits.directory=UINT32_MAX;
+        }
+        Check(h.file==size && h.manifest>0 && h.manifest<=size-sizeof(h) &&
+            uint64_t(h.count)<=(size-sizeof(h)-h.manifest)/sizeof(Entry),"Invalid BEM directory sizes");
+        Validate(h.manifest<=4*MiB && h.count<=limits.directory,"Invalid BEM directory sizes");
         auto json=read(sizeof(h),static_cast<size_t>(h.manifest));
         // Reject duplicate keys, including nested objects, instead of accepting last-wins metadata.
         std::vector<std::set<std::string>> keys;
@@ -107,8 +146,9 @@ struct Container {
         if(!table.empty()) std::memcpy(directory.data(),table.data(),table.size());
         uint64_t end=sizeof(h)+h.manifest+table.size();
         for(const auto& e:directory) {
-            Check(e.codec<=1 && !e.reserved && e.offset==end && e.stored>0 && e.stored<=Budget &&
-                e.decoded>0 && e.decoded<=Budget && e.stored<=size-end,"Invalid payload extent/codec/budget");
+            Check(e.codec<=1 && !e.reserved && e.offset==end && e.stored>0 &&
+                e.decoded>0 && e.stored<=size-end,"Invalid payload extent/codec/budget");
+            Validate(e.stored<=Budget && e.decoded<=Budget,"Invalid payload extent/codec/budget");
             Check(e.codec || e.stored==e.decoded,"Raw payload size differs"); end+=e.stored;
         }
         Check(end==size,"Trailing or missing BEM bytes");
@@ -134,26 +174,28 @@ struct Container {
         if(!minor) info.default_appearance=Id(m.at("default_appearance_id"));
         std::set<std::string> caps{"native-materials","palette-u8","indices-u32","fixed-appearances","texture-astc","composable-options","keep-material-textures"};
         if(minor>=2) caps.insert({"texture-slots","resource-bone-aliases"});
+        if(minor>=3) caps.insert({"body-parameters","mesh-position-deltas"});
         bool composable=false,fixed=false,keepTextureCapability=false,slotCapability=false,aliasCapability=false;
         std::set<std::string> declared;
-        for(const auto& c:m.at("required_capabilities")) {auto cap=S(c);Check(caps.contains(cap),"Unsupported required capability");
-            Check(declared.insert(cap).second,"Duplicate required capability");
+        for(const auto& c:m.at("required_capabilities")) {auto cap=S(c);Validate(caps.contains(cap),"Unsupported required capability");
+            Validate(declared.insert(cap).second,"Duplicate required capability");
             composable|=cap=="composable-options";fixed|=cap=="fixed-appearances";
             keepTextureCapability|=cap=="keep-material-textures";
             slotCapability|=cap=="texture-slots";aliasCapability|=cap=="resource-bone-aliases";}
-        Check(minor?composable&&!fixed:!composable,"BEM capability/version mismatch");
-        const auto& t=m.at("target"); Check(S(t.at("platform"))=="windows-x64","Unsupported target platform");
+        Validate(minor?composable&&!fixed:!composable,"BEM capability/version mismatch");
+        const auto& t=m.at("target"); Validate(S(t.at("platform"))=="windows-x64","Unsupported target platform");
         info.character_id=Id(t.at("character_id")); Id(t.at("profile_id")); Id(t.at("revision"));
         info.world_resource=Id(t.at("world_resource")); info.ui_resource=Id(t.at("ui_resource"));
-        Check(info.world_resource!=info.ui_resource,"Duplicate resource roots");
-        const auto& cs=t.at("components"); Check(cs.is_array() && !cs.empty() && cs.size()<=64,"Invalid target components");
-        std::set<std::string> names; bool hasAliases=false; boneAliases.assign(cs.size(),{});
-        boneAliasResources.assign(cs.size(),{});
+        Validate(info.world_resource!=info.ui_resource,"Duplicate resource roots");
+        const auto& cs=t.at("components"); Check(cs.is_array() && !cs.empty(),"Invalid target components");
+        Validate(cs.size()<=64,"Invalid target components");
+        std::set<std::string> names; bool hasAliases=false; boneAliases.assign(cs.size(),{}); boneAliasResources.assign(cs.size(),{});
         for(size_t i=0;i<cs.size();++i) {
             const auto& c=cs[i]; auto name=S(c.at("mesh_name")); auto count=U(c.at("original_index_count"));
-            Check(U(c.at("id"))==i && names.insert(name).second && count && count%3==0,"Invalid target identity");
-            Check(c.at("bone_names").is_array() && c.at("bone_names").size()<=65536 &&
-                c.at("materials").is_array() && c.at("materials").size()<=256,"Invalid target donor tables");
+            Check(U(c.at("id"))==i && count,"Invalid target identity");
+            Validate(names.insert(name).second && count%3==0,"Invalid target identity");
+            Check(c.at("bone_names").is_array() && c.at("materials").is_array(),"Invalid target donor tables");
+            Validate(c.at("bone_names").size()<=65536 && c.at("materials").size()<=256,"Invalid target donor tables");
             if(c.contains("bone_name_aliases")) {
                 const auto& aliases=c.at("bone_name_aliases"); Check(aliases.is_array(),"Invalid bone name aliases");
                 std::set<std::pair<uint32_t,std::string>> seen;
@@ -163,16 +205,16 @@ struct Container {
                     Check(index<c.at("bone_names").size() && (resource=="world"||resource=="ui") &&
                         seen.emplace(index,resource).second && c.at("bone_names").at(index)!=aliasName,"Invalid bone name alias");
                     boneAliases[i][index].push_back(aliasName);
-                    boneAliasResources[i][index][resource=="world"?0:1].push_back(aliasName);
-                    hasAliases=true;
+                    boneAliasResources[i][index][resource=="world"?0:1].push_back(aliasName); hasAliases=true;
                 }
             }
             info.component_names.push_back(name); info.original_counts.push_back(count);
         }
-        Check(aliasCapability==hasAliases,"Bone name alias capability mismatch");
+        // Supported requirements may be a superset of the features actually used.
+        Validate(!hasAliases || aliasCapability,"Bone name alias capability mismatch");
         ChoiceTable optionChoices;size_t candidateCount=0;bool hasKeepTextures=false;
         if(!minor) {
-            const auto& apps=m.at("appearances"); Check(apps.is_array() && !apps.empty() && apps.size()<=64,"Invalid appearances");
+            const auto& apps=m.at("appearances"); Check(apps.is_array() && !apps.empty(),"Invalid appearances"); Validate(apps.size()<=64,"Invalid appearances");
             std::set<std::string> ids;
             for(const auto& a:apps) {
                 auto id=Id(a.at("id")); S(a.at("name")); Check(ids.insert(id).second,"Duplicate appearance ID");
@@ -188,7 +230,7 @@ struct Container {
             }
             Check(ids.contains(info.default_appearance),"Default appearance missing");
         } else {
-            const auto& groups=m.at("option_groups");Check(groups.is_array() && !groups.empty() && groups.size()<=64,"Invalid option groups");
+            const auto& groups=m.at("option_groups");Check(groups.is_array() && (!groups.empty() || minor>=3),"Invalid option groups"); Validate(groups.size()<=64,"Invalid option groups");
             std::set<std::string> earlier;
             for(const auto& group:groups) {
                 auto id=Id(group.at("id"));S(group.at("name"));
@@ -208,7 +250,7 @@ struct Container {
                 for(const auto& condition:m.at("selection_constraints")) Condition(condition,optionChoices);}
             info.selection_constraints_json=m.value("selection_constraints",J::array()).dump();
             if(m.contains("texture_slots")) {
-                const auto& slots=m.at("texture_slots");Check(slots.is_array() && slots.size()<=1024,"Invalid texture slots");
+                const auto& slots=m.at("texture_slots");Check(slots.is_array(),"Invalid texture slots"); Validate(slots.size()<=1024,"Invalid texture slots");
                 for(const auto& slot:slots) {
                     Check(slot.is_object() && slot.size()==2,"Invalid texture slot");
                     Check(slotIds.insert(Id(slot.at("id"))).second,"Duplicate texture slot");
@@ -226,7 +268,7 @@ struct Container {
                     Check(originals.size()==1,"Texture slot candidates must replace one original texture");
                 }
             }
-            Check(slotCapability==!slotIds.empty(),"Texture slot capability mismatch");
+            Validate(slotIds.empty() || slotCapability,"Texture slot capability mismatch");
             const auto& rules=m.at("component_rules");Check(rules.is_array() && rules.size()==cs.size(),"Incomplete component rules");
             for(size_t i=0;i<rules.size();++i) {
                 const auto& rule=rules[i];Check(U(rule.at("target"))==i,"Invalid component rule target");
@@ -239,13 +281,13 @@ struct Container {
                     if(candidate.contains("material_overrides")) {
                         hasKeepTextures=true;
                         const auto& overrides=candidate.at("material_overrides");
-                        Check(overrides.is_array()&&!overrides.empty()&&overrides.size()<=256,"Invalid keep material overrides");
+                        Check(overrides.is_array()&&!overrides.empty(),"Invalid keep material overrides"); Validate(overrides.size()<=256,"Invalid keep material overrides");
                         std::set<uint32_t> slots;
                         for(const auto& override:overrides) {
                             auto slot=U(override.at("material_slot"));
                             const auto& materials=cs.at(i).at("materials");
-                            Check(slot<materials.size()&&slots.insert(slot).second&&
-                                materials.at(slot)==override.at("material_name"),"Keep material identity differs from target");
+                            Check(slot<materials.size(),"Keep material reference outside donor table");
+                            Validate(slots.insert(slot).second&&materials.at(slot)==override.at("material_name"),"Keep material identity differs from target");
                             const auto& refs=override.at("textures");
                             Check(refs.is_array()&&!refs.empty()&&refs.size()<=limits.textures,"Invalid keep material textures");
                             TextureRefs(refs,"Invalid keep material texture reference");
@@ -255,9 +297,9 @@ struct Container {
                 }
             }
         }
-        Check(keepTextureCapability==hasKeepTextures,"Keep material override capability mismatch");
-        Check(m.at("meshes").is_array() && m.at("meshes").size()<=4096 &&
-            m.at("textures").is_array() && m.at("textures").size()<=4096,"Invalid resource tables");
+        Validate(!hasKeepTextures || keepTextureCapability,"Keep material override capability mismatch");
+        Check(m.at("meshes").is_array() && m.at("textures").is_array(),"Invalid resource tables");
+        Validate(m.at("meshes").size()<=4096 && m.at("textures").size()<=4096,"Invalid resource tables");
         for(const auto& mesh:m.at("meshes")) {
             Check(mesh.at("streams").is_array() && mesh.at("streams").size()==3,"Three streams required");
             for(const auto& s:mesh.at("streams")) Check(U(s.at("payload"))<directory.size(),"Missing stream payload");
@@ -266,7 +308,7 @@ struct Container {
             if(minor) Check(draws.is_array() && !draws.empty() && draws.size()<=limits.rules,"Invalid draw candidates");
             for(const auto& d:draws) {
                 if(minor) {Check(U(d.at("indices"))<directory.size(),"Missing draw index payload");
-                    Check(U(d.at("count"))>0 && U(d.at("count"))%3==0,"Invalid draw index count");}
+                    Check(U(d.at("count"))>0,"Invalid draw index count"); Validate(U(d.at("count"))%3==0,"Invalid draw index count");}
                 if(minor) {++candidateCount;if(d.contains("when")) Condition(d.at("when"),optionChoices);}
                 Check(d.at("textures").is_array(),"Invalid draw textures");
                 TextureRefs(d.at("textures"),"Missing texture reference");
@@ -274,9 +316,72 @@ struct Container {
         }
         if(minor) Check(candidateCount<=limits.rules,"More than "+std::to_string(limits.rules)+" candidate rules/draws");
         for(const auto& texture:m.at("textures")) Check(U(texture.at("payload"))<directory.size(),"Missing texture payload");
+        if(m.contains("parameters")) {
+            Check(minor>=3 && m.at("parameters").is_array(),"Parameters require BEM 1.3");
+            Validate(m.at("parameters").size()<=64,"More than 64 body parameters");
+            std::set<std::string> ids;
+            for(auto parameter:m.at("parameters")) {
+                const auto id=Id(parameter.at("id")); S(parameter.at("name"));
+                Check(ids.insert(id).second,"Duplicate body parameter");
+                if(!parameter.contains("min")) parameter["min"]=0;
+                if(!parameter.contains("max")) parameter["max"]=1000;
+                if(!parameter.contains("neutral")) parameter["neutral"]=0;
+                if(!parameter.contains("default")) parameter["default"]=parameter.at("neutral");
+                if(!parameter.contains("step")) parameter["step"]=1;
+                const auto min=U(parameter.at("min")),max=U(parameter.at("max")),neutral=U(parameter.at("neutral")),def=U(parameter.at("default")),step=U(parameter.at("step"));
+                Check(min<max && max<=1000 && step>0 && (max-min)%step==0 && neutral>=min && neutral<=max && def>=min && def<=max &&
+                    (neutral-min)%step==0 && (def-min)%step==0,"Invalid body parameter range/default/neutral/step");
+                if(parameter.contains("available_when")) Condition(parameter.at("available_when"),optionChoices);
+                parameters.push_back(std::move(parameter));
+            }
+        }
+        Validate(parameters.empty() || declared.contains("body-parameters"),"Body parameter capability mismatch");
+        info.parameter_groups_json=parameters.dump();
+        info.parameter_frame_values.resize(parameters.size());
+        ParseParameters(parameters,{},&info.default_parameters);
+        if(m.contains("mesh_deformations")) {
+            Check(minor>=3 && m.at("mesh_deformations").is_array(),"Mesh deformations require BEM 1.3");
+            Validate(m.at("mesh_deformations").size()<=4096,"More than 4096 mesh deformation channels");
+            std::set<std::pair<uint32_t,std::string>> channels;
+            for(const auto& channel:m.at("mesh_deformations")) {
+                const auto mesh=U(channel.at("mesh")); const auto id=Id(channel.at("parameter"));
+                Check(mesh<m.at("meshes").size() && channels.emplace(mesh,id).second,"Missing mesh or duplicate deformation channel");
+                const J* parameter=nullptr;size_t parameterIndex=0;
+                for(size_t index=0;index<parameters.size();++index) if(parameters.at(index).at("id")==id) {parameter=&parameters.at(index);parameterIndex=index;}
+                Check(parameter,"Unknown deformation parameter");
+                const auto min=U(parameter->at("min")),max=U(parameter->at("max")),neutral=U(parameter->at("neutral")),step=U(parameter->at("step"));
+                const auto& frames=channel.at("frames");
+                Check(frames.is_array() && frames.size()>=2 && frames.size()<=64,"Invalid deformation frame count");
+                bool hasNeutral=false; uint32_t previous=0;
+                for(size_t i=0;i<frames.size();++i) {
+                    const auto& frame=frames.at(i); const auto value=U(frame.at("value"));
+                    Check(value>=min && value<=max && (value-min)%step==0 && (!i || value>previous),"Deformation frame values must be ordered and in parameter range");
+                    previous=value;
+                    auto& samples=info.parameter_frame_values.at(parameterIndex);
+                    if(std::find(samples.begin(),samples.end(),value)==samples.end()) samples.push_back(value);
+                    if(frame.value("neutral",false)) {
+                        Check(value==neutral && !hasNeutral && !frame.contains("payload") && !frame.contains("count") && !frame.contains("encoding"),"Invalid neutral deformation frame");
+                        hasNeutral=true;
+                    } else {
+                        Check(value!=neutral && U(frame.at("payload"))<directory.size() &&
+                            U(frame.at("count"))<=U(m.at("meshes").at(mesh).at("vertex_count")) && S(frame.at("encoding"))=="sparse-position-f32","Invalid deformation payload reference/count/encoding");
+                        const auto id=U(frame.at("payload"));
+                        Check(directory[id].decoded>=4ull+16ull*U(frame.at("count")),"Truncated position delta payload");
+                    }
+                }
+                Check(hasNeutral && U(frames.front().at("value"))==min && U(frames.back().at("value"))==max,"Deformation frames must include neutral and range endpoints");
+                const auto& meshDefinition=m.at("meshes").at(mesh); bool validPosition=false;
+                for(const auto& a:meshDefinition.at("attributes")) if(a.is_array() && a.size()==5 && U(a.at(0))==0)
+                    validPosition=U(a.at(1))==0 && U(a.at(2))==3;
+                Check(validPosition,"Position deformations require Float32 XYZ position attribute");
+            }
+            Validate(m.at("mesh_deformations").empty() || declared.contains("mesh-position-deltas"),"Position delta capability mismatch");
+        }
     }
     uint64_t decoded=0;
     std::map<uint32_t,std::vector<uint8_t>> cache;
+    std::map<uint32_t,size_t> payloadUses;
+    uint64_t cacheBytes=0;
     const std::vector<uint8_t>& Payload(const J& reference,uint64_t expected) {
         auto id=U(reference); Check(id<directory.size(),"Missing payload"); const auto& e=directory[id];
         Check(e.decoded==expected,"Payload decoded size differs from resource description");
@@ -292,7 +397,43 @@ struct Container {
             auto n=ZSTD_decompress(result.data(),result.size(),bytes.data(),bytes.size());
             Check(!ZSTD_isError(n) && n==result.size(),"Invalid Zstd payload"); bytes=std::move(result);
         }
+        cacheBytes+=bytes.size();
+        if(stats) {
+            stats->decoded_cache_peak_bytes=std::max(stats->decoded_cache_peak_bytes,cacheBytes);
+            stats->decoded_cache_remaining_bytes=cacheBytes;
+        }
         return cache.emplace(id,std::move(bytes)).first->second;
+    }
+    void ReleasePayload(uint32_t id) {
+        if(!loading_optimization) return;
+        auto use=payloadUses.find(id);
+        Check(use!=payloadUses.end() && use->second,"Selected payload consumer count differs");
+        if(--use->second==0) {
+            auto entry=cache.find(id);
+            Check(entry!=cache.end(),"Selected payload missing from cache");
+            cacheBytes-=directory[id].decoded;
+            cache.erase(entry); payloadUses.erase(use);
+            if(stats) stats->decoded_cache_remaining_bytes=cacheBytes;
+        }
+    }
+    std::vector<uint8_t> TakePayload(const J& reference,uint64_t expected) {
+        const auto id=U(reference); const auto& bytes=Payload(reference,expected);
+        if(loading_optimization) {
+            auto use=payloadUses.find(id);
+            Check(use!=payloadUses.end() && use->second,"Selected payload consumer count differs");
+            if(use->second==1) {
+                if(stats) stats->payload_move_bytes+=bytes.size();
+                auto result=std::move(cache.at(id)); ReleasePayload(id); return result;
+            }
+        }
+        if(stats) stats->payload_copy_bytes+=bytes.size();
+        auto result=bytes; ReleasePayload(id); return result;
+    }
+    void AppendPayload(const J& reference,uint64_t expected,std::vector<uint8_t>& output) {
+        const auto& bytes=Payload(reference,expected);
+        output.insert(output.end(),bytes.begin(),bytes.end());
+        if(stats) stats->payload_copy_bytes+=bytes.size();
+        ReleasePayload(U(reference));
     }
     struct Selection { J operations;std::map<std::string,std::string> effective; };
     Selection Select(std::string_view requested) const {
@@ -339,8 +480,72 @@ struct Container {
         }
         return result;
     }
-    void Decode(std::string_view requested,BemPocData& out) {
+    struct WeightedFrame { const J* frame; double weight; };
+    std::vector<WeightedFrame> MorphFrames(uint32_t mesh,const ParameterTicks& ticks) const {
+        std::vector<WeightedFrame> result;
+        if(!manifest.contains("mesh_deformations")) return result;
+        for(const auto& channel:manifest.at("mesh_deformations")) {
+            if(U(channel.at("mesh"))!=mesh) continue;
+            const auto tick=ticks.at(channel.at("parameter").get<std::string>());
+            const auto& frames=channel.at("frames");
+            auto right=std::lower_bound(frames.begin(),frames.end(),tick,[](const J& frame,uint32_t value){return U(frame.at("value"))<value;});
+            Check(right!=frames.end(),"Deformation interpolation outside parameter range");
+            auto add=[&](const J& frame,double weight) {if(weight>0 && !frame.value("neutral",false)) result.push_back({&frame,weight});};
+            if(U(right->at("value"))==tick) {add(*right,1);continue;}
+            Check(right!=frames.begin(),"Deformation interpolation outside parameter range");
+            const auto& left=*(right-1);
+            const double blend=double(tick-U(left.at("value")))/double(U(right->at("value"))-U(left.at("value")));
+            add(left,1-blend);add(*right,blend);
+        }
+        return result;
+    }
+    void ApplyMorph(uint32_t mesh,const ParameterTicks& ticks,BemComponent& component) {
+        const auto frames=MorphFrames(mesh,ticks); if(frames.empty()) return;
+        uint32_t stream=0,offset=0;bool found=false;
+        for(const auto& attribute:manifest.at("meshes").at(mesh).at("attributes")) if(U(attribute.at(0))==0) {
+            Check(!found && U(attribute.at(1))==0 && U(attribute.at(2))==3,"Position deformations require one Float32 XYZ position attribute");
+            stream=U(attribute.at(3));offset=U(attribute.at(4));found=true;
+        }
+        Check(found && stream<3,"Missing morph position stream");
+        const uint32_t strides[]{component.info.stride0,component.info.stride1,component.info.stride2};
+        Check(offset<=strides[stream] && 12<=strides[stream]-offset,"Morph position attribute exceeds stream stride");
+        // Each load starts with immutable package bytes. Channels only add position
+        // deltas; skin, directions, UVs, indices and material ownership are unchanged.
+        for(const auto& selected:frames) {
+            const auto& frame=*selected.frame; const auto id=U(frame.at("payload"));
+            const auto& bytes=Payload(frame.at("payload"),directory.at(id).decoded);
+            uint32_t jsonLength=0; Check(bytes.size()>=4,"Truncated position delta header");
+            std::memcpy(&jsonLength,bytes.data(),4);
+            const auto count=U(frame.at("count"));
+            Check(jsonLength>0 && jsonLength<=MiB && uint64_t(jsonLength)+4+uint64_t(count)*16==bytes.size(),"Position delta payload extent differs");
+            const auto header=J::parse(bytes.begin()+4,bytes.begin()+4+jsonLength);
+            Check(header.is_object() && header.size()==2 && U(header.at("count"))==count &&
+                S(header.at("encoding"))=="sparse-position-f32","Position delta header differs from frame");
+            std::set<uint32_t> vertices;
+            for(uint32_t n=0;n<count;++n) {
+                const auto* record=bytes.data()+4+jsonLength+size_t(n)*16;
+                uint32_t vertex=0;float delta[3];std::memcpy(&vertex,record,4);std::memcpy(delta,record+4,12);
+                Check(vertex<component.info.vertex_count && vertices.insert(vertex).second,"Position delta vertex is outside mesh or duplicated");
+                const auto address=size_t(vertex)*strides[stream]+offset;
+                auto* target=component.streams[stream].data()+address;float position[3];std::memcpy(position,target,12);
+                for(size_t axis=0;axis<3;++axis) {
+                    Check(std::isfinite(delta[axis]) && std::isfinite(position[axis]),"Non-finite morph position/delta");
+                    const double next=double(position[axis])+selected.weight*double(delta[axis]);
+                    position[axis]=static_cast<float>(next);
+                    Check(std::isfinite(position[axis]),"Morphed position overflow");
+                }
+                std::memcpy(target,position,12);
+            }
+            ReleasePayload(id);
+        }
+    }
+    void Decode(std::string_view requested,BemPocData& out,std::string_view parameterSelection={},BemLoadPlan* plan=nullptr) {
+        out.skip_validation=skip_validation;
+        out.loading_optimization=loading_optimization;
         const auto& m=manifest;auto selection=Select(requested);
+        auto ticks=ParseParameters(parameters,parameterSelection);
+        for(const auto& parameter:parameters) if(parameter.contains("available_when") && !Evaluate(parameter.at("available_when"),selection.effective))
+            ticks.at(parameter.at("id").get<std::string>())=U(parameter.at("neutral"));
         out.header.version=1;
         out.header.component_count=static_cast<uint32_t>(info.component_names.size());
         std::map<uint32_t,uint32_t> textures;
@@ -355,6 +560,58 @@ struct Container {
             const auto& texture=selected->at("texture");
             slots[slot.at("id").get<std::string>()]=texture.is_null()?std::nullopt:std::optional<uint32_t>(U(texture));
         }
+        if(loading_optimization || plan) {
+            // Count exactly the selected consumers before decoding any payload.
+            // A payload may back several streams, textures or concatenated draws;
+            // only its last consumer may take ownership of the cached vector.
+            std::set<uint32_t> selectedTextures;
+            auto add=[&](const J& reference,std::optional<uint64_t> expected=std::nullopt) {
+                const auto id=U(reference);Check(id<directory.size(),"Missing payload");
+                if(expected) Check(directory[id].decoded==*expected,"Payload decoded size differs from resource description");
+                ++payloadUses[id];
+            };
+            auto addTextures=[&](const J& refs) {
+                for(const auto& ref:refs) {
+                    const auto id=ref.is_object()?slots.at(ref.at("slot").get<std::string>()):std::optional<uint32_t>(U(ref));
+                    if(id) selectedTextures.insert(*id);
+                }
+            };
+            for(const auto& op:selection.operations) {
+                const auto action=op.at("operation").get<std::string>();
+                if(action=="keep" && op.contains("material_overrides"))
+                    for(const auto& material:op.at("material_overrides")) addTextures(material.at("textures"));
+                if(action!="replace") continue;
+                const auto& mesh=m.at("meshes").at(U(op.at("mesh")));
+                for(const auto& frame:MorphFrames(U(op.at("mesh")),ticks)) add(frame.frame->at("payload"));
+                for(const auto& stream:mesh.at("streams"))
+                    add(stream.at("payload"),uint64_t(U(mesh.at("vertex_count")))*U(stream.at("stride")));
+                if(!minor) add(mesh.at("indices"),uint64_t(U(mesh.at("index_count")))*U(mesh.at("index_size")));
+                for(const auto& draw:mesh.at("draws")) {
+                    if(minor && draw.contains("when") && !Evaluate(draw.at("when"),selection.effective)) continue;
+                    if(minor) add(draw.at("indices"),uint64_t(U(draw.at("count")))*U(mesh.at("index_size")));
+                    addTextures(draw.at("textures"));
+                }
+            }
+            if(!deferTextures) for(auto id:selectedTextures) add(m.at("textures").at(id).at("payload"));
+        }
+        if(plan) {
+            plan->package=info;
+            for(const auto& [id,uses]:payloadUses) {
+                Check(id<directory.size(),"Missing payload");
+                const auto bytes=directory[id].decoded;
+                Check(bytes<=limits.budget && plan->decoded_payload_bytes<=limits.budget-bytes,
+                    "Selected appearance exceeds decoded payload budget");
+                plan->decoded_payload_bytes+=bytes;
+                // One cached allocation plus every selected consumer. This also
+                // safely covers repeated references and temporary morph backing.
+                Check(uses<UINT64_MAX && bytes<=UINT64_MAX/(uses+1),"Decoded reservation overflow");
+                const auto bound=bytes*(uses+1);
+                Check(plan->reservation_bytes<=UINT64_MAX-bound,"Decoded reservation overflow");
+                plan->reservation_bytes+=bound;
+                plan->payload_ids.push_back(id);
+            }
+            return; // Metadata and directory only; no payload reads/decompression.
+        }
         uint64_t resident=0;
         const uint64_t selectedBudget=limits.budget;
         auto reserve=[&](uint64_t bytes) { Check(bytes<=selectedBudget-resident,"Appearance exceeds runtime memory budget"); resident+=bytes; };
@@ -365,13 +622,22 @@ struct Container {
                         const auto& t=m.at("textures").at(id); BemTexture tex;
                         auto& ti=tex.info; ti.width=U(t.at("width")); ti.height=U(t.at("height")); ti.mip_count=U(t.at("mips"));
                         ti.create_format=int32_t(U(t.at("format"))); ti.create_srgb=t.at("srgb").get<bool>()?1:0;
-                        uint32_t block=0,pixel=0,blockWidth=4; switch(ti.create_format) {case 4:pixel=4;break;case 63:pixel=1;Check(!ti.create_srgb,"R8 texture must be linear");break;case 10:case 26:block=8;break;case 12:case 25:case 27:block=16;break;case 48:block=16;break;case 49:block=16;blockWidth=5;break;case 50:block=16;blockWidth=6;break;default:Check(false,"Unsupported texture format");}
-                        Check(ti.width && ti.height && ti.width<=32768 && ti.height<=32768 && (pixel || ti.create_format>=48 || (ti.width%4==0 && ti.height%4==0)) && ti.mip_count && ti.mip_count<=16,"Invalid texture dimensions");
+                        uint32_t block=0,pixel=0,blockWidth=4; switch(ti.create_format) {case 4:pixel=4;break;case 63:pixel=1;Validate(!ti.create_srgb,"R8 texture must be linear");break;case 10:case 26:block=8;break;case 12:case 25:case 27:block=16;break;case 48:block=16;break;case 49:block=16;blockWidth=5;break;case 50:block=16;blockWidth=6;break;default:Check(false,"Unsupported texture format");}
+                        Check(ti.width && ti.height && ti.mip_count && ti.mip_count<=32,"Invalid texture dimensions");
+                        Validate(ti.width<=32768 && ti.height<=32768 && (pixel || ti.create_format>=48 || (ti.width%4==0 && ti.height%4==0)) && ti.mip_count<=16,"Invalid texture dimensions");
                         uint64_t size=0; for(uint32_t level=0;level<ti.mip_count;++level) {
                             const uint64_t mipWidth=std::max(ti.width>>level,1u),mipHeight=std::max(ti.height>>level,1u);
-                            size+=pixel?mipWidth*mipHeight*pixel:((mipWidth+blockWidth-1)/blockWidth)*((mipHeight+blockWidth-1)/blockWidth)*block;
+                            const uint64_t units=pixel?mipWidth*mipHeight:((mipWidth+blockWidth-1)/blockWidth)*((mipHeight+blockWidth-1)/blockWidth);
+                            const uint64_t unitBytes=pixel?pixel:block;
+                            Check(units<=(UINT32_MAX-size)/unitBytes,"Texture exceeds upload size representation"); size+=units*unitBytes;
                         }
-                        Check(size<=limits.textureBytes,"Texture exceeds "+std::to_string(limits.textureBytes/MiB)+" MiB"); reserve(size); tex.data=Payload(t.at("payload"),size);
+                        Check(size<=limits.textureBytes,"Texture exceeds "+std::to_string(limits.textureBytes/MiB)+" MiB"); reserve(size);
+                        if(deferTextures) {
+                            const auto pid=U(t.at("payload")); Check(pid<directory.size(),"Missing payload");
+                            const auto& e=directory[pid];
+                            Check(e.decoded==size,"Payload decoded size differs from resource description");
+                            tex.payload_id=pid; tex.payload_codec=e.codec; tex.payload_offset=e.offset; tex.payload_stored=e.stored;
+                        } else tex.data=TakePayload(t.at("payload"),size);
                         ti.data_size=static_cast<uint32_t>(size); ti.reserved=2; tex.original_name=S(t.at("original_name")); tex.name=tex.original_name;
                         ti.explicit_slot=static_cast<int32_t>(Crc(tex.original_name));
                         tid=static_cast<uint32_t>(out.textures.size()); textures[id]=tid; out.textures.push_back(std::move(tex));
@@ -391,7 +657,7 @@ struct Container {
             return mask;
         };
         for(const auto& op:selection.operations) {
-            BemComponent c; auto cid=U(op.at("target")); c.info.component_id=cid; c.info.original_index_count=info.original_counts[cid];
+            BemComponent c; c.skip_validation=skip_validation; auto cid=U(op.at("target")); c.info.component_id=cid; c.info.original_index_count=info.original_counts[cid];
             const auto action=S(op.at("operation"));
             if(action!="replace") {
                 c.info.flags=kComponentFlagNoGeometry|(action=="hide"?kComponentFlagHidden:0);
@@ -412,119 +678,212 @@ struct Container {
                 uint64_t count=0;
                 for(const auto& draw:mesh.at("draws"))
                     if(!draw.contains("when") || Evaluate(draw.at("when"),selection.effective)) {
-                        count+=U(draw.at("count"));Check(count<=16777216,"Selected index count exceeds limit");
+                        count+=U(draw.at("count"));Check(count<=UINT32_MAX,"Index count exceeds upload representation");
+                        Validate(count<=16777216,"Selected index count exceeds limit");
                         chosenDraws.push_back(draw);
                     }
-                Check(!chosenDraws.empty() && chosenDraws.size()<=256,"Selected draw limit exceeded");
+                Check(!chosenDraws.empty(),"Selected draw limit exceeded"); Validate(chosenDraws.size()<=256,"Selected draw limit exceeded");
                 h.index_count=static_cast<uint32_t>(count);
             } else {h.index_count=U(mesh.at("index_count"));chosenDraws=mesh.at("draws");}
-            Check(h.vertex_count && h.vertex_count<=1048576 && h.index_count && h.index_count<=16777216 && h.index_count%3==0 &&
+            Check(h.vertex_count && h.index_count &&
                 (h.index_element_size==2||h.index_element_size==4),"Invalid geometry counts/index type");
+            Validate(h.vertex_count<=1048576 && h.index_count<=16777216 && h.index_count%3==0,"Invalid geometry counts/index type");
             std::array<uint32_t,3> strides{};
             for(size_t s=0;s<3;++s) {
                 const auto& stream=mesh.at("streams")[s]; strides[s]=U(stream.at("stride"));
-                Check(strides[s] && strides[s]<=64,"Invalid stream stride");
-                const auto size=uint64_t(h.vertex_count)*strides[s]; reserve(size); c.streams[s]=Payload(stream.at("payload"),size);
+                Check(strides[s],"Invalid stream stride"); Validate(strides[s]<=64,"Invalid stream stride");
+                const auto size=uint64_t(h.vertex_count)*strides[s]; reserve(size); c.streams[s]=TakePayload(stream.at("payload"),size);
             }
             h.stride0=strides[0]; h.stride1=strides[1]; h.stride2=strides[2];
-            Check(h.stride2==4||h.stride2==12||(minor>=2&&h.stride2==32),"Unsupported skin layout");
+            Check(h.stride2==4||h.stride2==12||((minor>=2||skip_validation)&&h.stride2==32),"Unsupported skin layout");
             const auto& attrs=mesh.at("attributes"); Check(attrs.is_array() && !attrs.empty() && attrs.size()<=16,"Invalid attributes");
             std::array<uint32_t,3> offsets{}; std::set<uint32_t> semantics;
             constexpr uint32_t sizes[]{4,2,1,1,2,2,1,1,2,2,4,4};
             for(const auto& a:attrs) {
                 Check(a.is_array() && a.size()==5,"Attribute needs semantic/format/dimension/stream/offset");
                 auto sem=U(a[0]),fmt=U(a[1]),dim=U(a[2]),stream=U(a[3]),off=U(a[4]);
-                Check(sem<=13 && semantics.insert(sem).second && fmt<12 && dim>=1 && dim<=4 && stream<3,"Invalid vertex attribute");
-                Check(off==offsets[stream],"Invalid vertex attribute offset"); offsets[stream]+=sizes[fmt]*dim;
+                Check(sem<=13 && fmt<12 && dim>=1 && dim<=4 && stream<3,"Invalid vertex attribute"); Validate(semantics.insert(sem).second,"Invalid vertex attribute");
+                Validate(off==offsets[stream],"Invalid vertex attribute offset"); offsets[stream]+=sizes[fmt]*dim;
                 c.attributes.push_back({int32_t(sem),int32_t(fmt),int32_t(dim),int32_t(stream)});
             }
             // Stride 32 (float weights, UInt32 indices) is BEM 1.2's uncompressed native skin layout.
             const bool skin32=h.stride2==32;
-            Check(offsets==strides && c.attributes.back()==std::array<int32_t,4>{13,skin32?10:6,4,2},"Declaration/stride or skin indices differ");
+            Validate(offsets==strides && c.attributes.back()==std::array<int32_t,4>{13,skin32?10:6,4,2},"Declaration/stride or skin indices differ");
             std::vector<std::array<int32_t,4>> skinAttributes;
             for(const auto& a:c.attributes) if(a[3]==2) skinAttributes.push_back(a);
             const std::vector<std::array<int32_t,4>> expectedSkin=h.stride2==4?
                 std::vector<std::array<int32_t,4>>{{13,6,4,2}}:skin32?
                 std::vector<std::array<int32_t,4>>{{12,0,4,2},{13,10,4,2}}:
                 std::vector<std::array<int32_t,4>>{{12,4,4,2},{13,6,4,2}};
-            Check(skinAttributes==expectedSkin,"Unsupported skin declaration");
+            Validate(skinAttributes==expectedSkin,"Unsupported skin declaration");
             c.layout_crc=Crc(std::string_view(reinterpret_cast<const char*>(c.attributes.data()),c.attributes.size()*16));
+            ApplyMorph(U(op.at("mesh")),ticks,c);
             auto indexBytes=uint64_t(h.index_count)*h.index_element_size; reserve(indexBytes);
             if(minor) {
-                c.indices.reserve(static_cast<size_t>(indexBytes));
-                for(const auto& draw:chosenDraws) {
-                    const auto& bytes=Payload(draw.at("indices"),uint64_t(U(draw.at("count")))*h.index_element_size);
-                    c.indices.insert(c.indices.end(),bytes.begin(),bytes.end());
+                if(loading_optimization && chosenDraws.size()==1)
+                    c.indices=TakePayload(chosenDraws[0].at("indices"),indexBytes);
+                else {
+                    c.indices.reserve(static_cast<size_t>(indexBytes));
+                    for(const auto& draw:chosenDraws)
+                        AppendPayload(draw.at("indices"),uint64_t(U(draw.at("count")))*h.index_element_size,c.indices);
                 }
                 Check(c.indices.size()==indexBytes,"Selected index buffer differs");
-            } else c.indices=Payload(mesh.at("indices"),indexBytes);
-            for(size_t n=0;n<h.index_count;++n) { uint32_t index=0; std::memcpy(&index,c.indices.data()+n*h.index_element_size,h.index_element_size); Check(index<h.vertex_count,"Index outside vertex buffer"); }
-            const auto& bones=mesh.at("bones"); Check(bones.is_array() && !bones.empty() && bones.size()<=256,"Invalid palette");
+            } else c.indices=TakePayload(mesh.at("indices"),indexBytes);
+            for(size_t n=0;n<h.index_count;++n) { uint32_t index=0; std::memcpy(&index,c.indices.data()+n*h.index_element_size,h.index_element_size); Validate(index<h.vertex_count,"Index outside vertex buffer"); }
+            const auto& bones=mesh.at("bones"); Check(bones.is_array() && !bones.empty(),"Invalid palette");
+            Validate(bones.size()<=256,"Invalid palette");
             for(const auto& b:bones) {
                 auto donor=U(b.at("component")), index=U(b.at("index")); auto name=S(b.at("name"));
-                Check(donor<info.component_names.size() && index<65536 && m.at("target").at("components").at(donor).at("bone_names").at(index)==name,"Bone identity differs");
+                Check(donor<info.component_names.size() && index<m.at("target").at("components").at(donor).at("bone_names").size(),"Bone reference outside donor table");
+                Validate(index<65536 && m.at("target").at("components").at(donor).at("bone_names").at(index)==name,"Bone identity differs");
                 c.bones.push_back({donor,index,Crc(name)}); c.bone_names.push_back(name);
                 const auto& aliases=boneAliases.at(donor); auto alias=aliases.find(index);
                 c.bone_aliases.push_back(alias==aliases.end()?std::vector<std::string>{}:alias->second);
                 std::array<std::vector<std::string>,2> resourceAliases{};
-                const auto& resourceTable=boneAliasResources.at(donor);
-                const auto resourceAlias=resourceTable.find(index);
-                if (resourceAlias!=resourceTable.end()) resourceAliases=resourceAlias->second;
+                const auto& resourceTable=boneAliasResources.at(donor); auto resourceAlias=resourceTable.find(index);
+                if(resourceAlias!=resourceTable.end()) resourceAliases=resourceAlias->second;
                 c.bone_aliases_by_resource.push_back(std::move(resourceAliases));
             }
             for(uint32_t n=0;n<h.vertex_count;++n) for(uint32_t k=0;k<4;++k) {
                 uint32_t b=0;
                 if(h.stride2==32) std::memcpy(&b,c.streams[2].data()+size_t(n)*32+16+k*4,4);
                 else b=c.streams[2][size_t(n)*h.stride2+h.stride2-4+k];
-                Check(b<c.bones.size(),"Skin index outside palette"); h.max_bone=std::max(h.max_bone,b);
+                Validate(b<c.bones.size(),"Skin index outside palette"); h.max_bone=std::max(h.max_bone,b);
             }
             if(h.stride2==32) for(uint32_t n=0;n<h.vertex_count;++n) {
                 float w[4]; std::memcpy(w,c.streams[2].data()+size_t(n)*32,16);
                 const float sum=w[0]+w[1]+w[2]+w[3];
-                Check(std::isfinite(sum) && sum>=0.99f && sum<=1.01f && w[0]>=0 && w[1]>=0 && w[2]>=0 && w[3]>=0,"Invalid skin weight sum");
+                Validate(std::isfinite(sum) && sum>=0.99f && sum<=1.01f && w[0]>=0 && w[1]>=0 && w[2]>=0 && w[3]>=0,"Invalid skin weight sum");
             }
             if(h.stride2==12) for(uint32_t n=0;n<h.vertex_count;++n) {
                 uint16_t w[4]; std::memcpy(w,c.streams[2].data()+size_t(n)*12,8);
                 const uint32_t sum=uint32_t(w[0])+w[1]+w[2]+w[3];
-                Check(sum>=64880 && sum<=66190,"Invalid skin weight sum");
+                Validate(sum>=64880 && sum<=66190,"Invalid skin weight sum");
             }
-            const auto& draws=chosenDraws; Check(draws.is_array() && !draws.empty() && draws.size()<=256,"Invalid draws");
+            const auto& draws=chosenDraws; Check(draws.is_array() && !draws.empty(),"Invalid draws"); Validate(draws.size()<=256,"Invalid draws");
             uint64_t end=0;
             for(const auto& d:draws) {
                 auto start=minor?static_cast<uint32_t>(end):U(d.at("start"));
                 auto count=U(d.at("count")),donor=U(d.at("material_component")),slot=U(d.at("material_slot")); auto name=S(d.at("material_name"));
-                Check(start==end && count && count%3==0 && donor<info.component_names.size() && slot<256 &&
-                    m.at("target").at("components").at(donor).at("materials").at(slot)==name,"Invalid material draw"); end+=count;
+                Check(count && donor<info.component_names.size() && slot<m.at("target").at("components").at(donor).at("materials").size(),"Material reference outside donor table");
+                Validate(start==end && count%3==0 && slot<256 && m.at("target").at("components").at(donor).at("materials").at(slot)==name,"Invalid material draw"); end+=count;
                 const auto mask=selectTextures(d.at("textures"),"Duplicate draw texture");
                 c.draws.push_back({start,count,donor,slot,Crc(name),0,mask}); c.material_names.push_back(name);
             }
-            Check(end==h.index_count,"Draws must partition IB"); h.reserved0=static_cast<uint32_t>(c.bones.size()); h.reserved1=static_cast<uint32_t>(c.draws.size());
+            Validate(end==h.index_count,"Draws must partition IB"); h.reserved0=static_cast<uint32_t>(c.bones.size()); h.reserved1=static_cast<uint32_t>(c.draws.size());
             out.components.push_back(std::move(c));
         }
         out.header.texture_count=static_cast<uint32_t>(out.textures.size());
+        Check(!loading_optimization || (payloadUses.empty() && cache.empty() && cacheBytes==0),
+            "Selected payload consumers were not exhausted");
     }
 };
-template<class F> bool File(const std::filesystem::path& path,std::string& error,F action) {
+template<class F> bool File(const std::filesystem::path& path,std::string& error,F action,bool skip_validation=false,bool loading_optimization=false,bool defer_textures=false) {
     error.clear(); try {
         std::ifstream in(path,std::ios::binary|std::ios::ate); Check(bool(in),"BEM package cannot be opened");
-        auto size=in.tellg(); Check(size>=0,"BEM size unavailable"); Container c;
-        c.read=[&](uint64_t off,size_t count) { std::vector<uint8_t> bytes(count); in.seekg(static_cast<std::streamoff>(off));
+        auto size=in.tellg(); Check(size>=0,"BEM size unavailable"); Container c; c.skip_validation=skip_validation; c.loading_optimization=loading_optimization;
+        c.deferTextures=defer_textures;
+        c.read=[&](uint64_t off,size_t count) {
+            Check(off<=static_cast<uint64_t>(size) && count<=static_cast<uint64_t>(size)-off,"Truncated BEM");
+            std::vector<uint8_t> bytes(count); in.seekg(static_cast<std::streamoff>(off));
             Check(bool(in.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(count))),"BEM read failed"); return bytes; };
         c.Open(static_cast<uint64_t>(size)); action(c); return true;
     } catch(const std::exception& e) { error=e.what(); return false; }
 }
 }
-bool ReadBemPackageInfo(const std::filesystem::path& path,BemPackageInfo& out,std::string& error) {
-    out={}; return File(path,error,[&](Container& c){out=c.info;});
+bool ReadBemPackageInfo(const std::filesystem::path& path,BemPackageInfo& out,std::string& error,bool skip_validation) {
+    out={}; return File(path,error,[&](Container& c){out=c.info;},skip_validation);
 }
-bool LoadBem(const std::filesystem::path& path,BemPocData& out,std::string& error,std::string_view appearance,BemLoadStats* stats) {
-    out={}; if(stats) stats->payload_ids.clear();BemPocData parsed;
-    if(!File(path,error,[&](Container& c){c.stats=stats;c.Decode(appearance,parsed);})) return false;
+bool ResolveBemParameters(const BemPackageInfo& info,std::string_view requested,std::string& canonical,std::string& error) {
+    canonical.clear();error.clear();
+    try { ParseParameters(info.parameter_groups_json.empty()?J::array():J::parse(info.parameter_groups_json),requested,&canonical);return true; }
+    catch(const std::exception& e) {error=e.what();canonical.clear();return false;}
+}
+bool ReadBemLoadPlan(const std::filesystem::path& path,BemLoadPlan& out,std::string& error,std::string_view appearance,bool skip_validation,std::string_view parameters,bool defer_texture_payloads) {
+    out={};BemLoadPlan plan;
+    if(!File(path,error,[&](Container& c){BemPocData unused;c.Decode(appearance,unused,parameters,&plan);},skip_validation,false,defer_texture_payloads)) return false;
+    out=std::move(plan);return true;
+}
+bool LoadBem(const std::filesystem::path& path,BemPocData& out,std::string& error,std::string_view appearance,BemLoadStats* stats,bool skip_validation,bool loading_optimization,std::string_view parameters,uint64_t max_decoded_reservation,bool defer_texture_payloads) {
+    out={}; if(stats) *stats={};BemPocData parsed;
+    std::shared_ptr<BemPayloadSource> source;
+    if(defer_texture_payloads) {
+        std::error_code size_error,time_error; source=std::make_shared<BemPayloadSource>(); source->path=path;
+        source->file_size=std::filesystem::file_size(path,size_error);
+        source->write_time=static_cast<int64_t>(std::filesystem::last_write_time(path,time_error).time_since_epoch().count());
+        if(size_error || time_error) { error="BEM package generation unavailable"; return false; }
+    }
+    if(!File(path,error,[&](Container& c){
+        if(max_decoded_reservation!=UINT64_MAX) {
+            BemLoadPlan plan;BemPocData unused;c.Decode(appearance,unused,parameters,&plan);
+            Check(plan.reservation_bytes<=max_decoded_reservation,"Decoded reservation changed before load");
+            c.payloadUses.clear();
+        }
+        c.stats=stats;c.Decode(appearance,parsed,parameters);
+    },skip_validation,loading_optimization,defer_texture_payloads)) return false;
+    if(source) {
+        // The parsed directory belongs to the generation recorded above.
+        std::error_code size_error,time_error;
+        const auto size=std::filesystem::file_size(path,size_error);
+        const auto time=std::filesystem::last_write_time(path,time_error);
+        if(size_error || time_error || size!=source->file_size ||
+            static_cast<int64_t>(time.time_since_epoch().count())!=source->write_time) {
+            error="BEM package changed while loading"; return false;
+        }
+    }
+    parsed.payload_source=std::move(source);
     out=std::move(parsed); return true;
 }
-bool ParseBem(std::span<const uint8_t> bytes,BemPocData& out,std::string& error) {
+bool DecodeBemTexturePayload(const BemPayloadSource& source,const BemTexture& texture,std::vector<uint8_t>& out,std::string& error) {
+    out.clear(); error.clear();
+    try {
+        const uint64_t expected=texture.info.data_size;
+        Check(texture.payload_id!=UINT32_MAX && texture.payload_codec<=1 && expected && texture.payload_stored &&
+            texture.payload_stored<=Budget && expected<=Budget && (texture.payload_codec || texture.payload_stored==expected),
+            "Invalid deferred texture payload extent");
+        std::error_code ec;
+        const auto size=std::filesystem::file_size(source.path,ec);
+        Check(!ec && size==source.file_size,"BEM package changed since the selection was loaded");
+        const auto time=std::filesystem::last_write_time(source.path,ec);
+        Check(!ec && static_cast<int64_t>(time.time_since_epoch().count())==source.write_time,"BEM package changed since the selection was loaded");
+        Check(texture.payload_offset<=size && texture.payload_stored<=size-texture.payload_offset,"Truncated BEM");
+        std::ifstream in(source.path,std::ios::binary); Check(bool(in),"BEM package cannot be opened");
+        in.seekg(static_cast<std::streamoff>(texture.payload_offset));
+        out.resize(static_cast<size_t>(expected));
+        if(!texture.payload_codec) {
+            Check(bool(in.read(reinterpret_cast<char*>(out.data()),static_cast<std::streamsize>(expected))),"BEM read failed");
+            return true;
+        }
+        // Stream the frame: the stored bytes and the decoded texture are never held whole together.
+        struct Stream { ZSTD_DStream* s=ZSTD_createDStream(); ~Stream(){ ZSTD_freeDStream(s); } } stream;
+        Check(stream.s && !ZSTD_isError(ZSTD_initDStream(stream.s)),"Zstd stream unavailable");
+        std::vector<uint8_t> chunk(static_cast<size_t>(std::min<uint64_t>(texture.payload_stored,MiB)));
+        uint64_t remaining=texture.payload_stored; ZSTD_outBuffer output{out.data(),out.size(),0}; size_t status=1; bool first=true;
+        while(remaining) {
+            const auto count=static_cast<size_t>(std::min<uint64_t>(remaining,chunk.size()));
+            Check(bool(in.read(reinterpret_cast<char*>(chunk.data()),static_cast<std::streamsize>(count))),"BEM read failed");
+            remaining-=count;
+            if(first) {
+                first=false;
+                Check(ZSTD_getFrameContentSize(chunk.data(),count)==expected,"Zstd frame extent/content size differs");
+            }
+            ZSTD_inBuffer input{chunk.data(),count,0};
+            while(input.pos<input.size) {
+                Check(status!=0,"Trailing bytes after Zstd frame");
+                const auto consumed=input.pos,produced=output.pos;
+                status=ZSTD_decompressStream(stream.s,&output,&input);
+                Check(!ZSTD_isError(status),"Invalid Zstd payload");
+                // No progress with a full output buffer: the frame is larger than declared.
+                Check(status==0 || input.pos!=consumed || output.pos!=produced,"Zstd frame exceeds texture size");
+            }
+        }
+        Check(status==0 && output.pos==out.size(),"Invalid Zstd payload");
+        return true;
+    } catch(const std::exception& e) { out.clear(); out.shrink_to_fit(); error=e.what(); return false; }
+}
+bool ParseBem(std::span<const uint8_t> bytes,BemPocData& out,std::string& error,bool skip_validation,bool loading_optimization) {
     out={}; error.clear(); try {
-        Container c; c.read=[&](uint64_t off,size_t n) { Check(off<=bytes.size() && n<=bytes.size()-off,"Truncated BEM");
+        Container c; c.skip_validation=skip_validation; c.loading_optimization=loading_optimization; c.read=[&](uint64_t off,size_t n) { Check(off<=bytes.size() && n<=bytes.size()-off,"Truncated BEM");
             return std::vector<uint8_t>(bytes.begin()+off,bytes.begin()+off+n); };
         c.Open(bytes.size()); BemPocData parsed; c.Decode({},parsed); out=std::move(parsed); return true;
     } catch(const std::exception& e) {error=e.what(); return false;}
@@ -564,6 +923,8 @@ bool RewriteBemTextures(const std::filesystem::path& input,const std::filesystem
             if(c.minor) for(auto& draw:mesh["draws"]) copy(draw["indices"]);
             else copy(mesh["indices"]);
         }
+        if(manifest.contains("mesh_deformations")) for(auto& channel:manifest["mesh_deformations"])
+            for(auto& frame:channel["frames"]) if(frame.contains("payload")) copy(frame["payload"]);
         if(!c.minor) for(auto& appearance:manifest["appearances"]) if(appearance.contains("preview")) copy(appearance["preview"]);
         BemJson changes=BemJson::array();
         // Identical texture descriptors share converted output; geometry/texture aliases are kept separate.
@@ -607,6 +968,9 @@ bool RewriteBemTextures(const std::filesystem::path& input,const std::filesystem
             summary["option_groups"]=manifest.at("option_groups");
             summary["selection_constraints"]=manifest.value("selection_constraints",J::array());}
         else {summary["default_appearance"]=c.info.default_appearance;summary["appearances"]=c.info.appearances;}
+        summary["parameters"]=c.parameters;
+        summary["parameter_groups_json"]=c.info.parameter_groups_json;
+        summary["default_parameters"]=c.info.default_parameters;
         report=summary.dump();
     });
     std::error_code ignored; std::filesystem::remove(spool,ignored);

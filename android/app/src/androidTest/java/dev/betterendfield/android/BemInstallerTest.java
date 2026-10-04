@@ -80,13 +80,21 @@ public final class BemInstallerTest extends Instrumentation {
     private static void assertFalse(boolean value){assertTrue(!value);}
     private static void assertEquals(int a,int b){if(a!=b) throw new AssertionError(a+" != "+b);}
     private static void fail(String text){throw new AssertionError(text);}
+    private static void writeText(File file,String text) throws IOException {
+        try(FileOutputStream out=new FileOutputStream(file)) {
+            out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
     private void setUp() throws Exception {
         directory=new File(getInstrumentation().getTargetContext().getCacheDir(),"installer-tests");directory.mkdirs();
         BemInstaller.loadCodec();
     }
     private File fixture() throws Exception {
         File file=new File(directory,"input.bem");
-        try(InputStream in=getInstrumentation().getContext().getAssets().open("installer-fixture.bem");FileOutputStream out=new FileOutputStream(file)){in.transferTo(out);}
+        try(InputStream in=getInstrumentation().getContext().getAssets().open("installer-fixture.bem");FileOutputStream out=new FileOutputStream(file)) {
+            byte[] buffer=new byte[8192];int count;
+            while((count=in.read(buffer))!=-1) out.write(buffer,0,count);
+        }
         return file;
     }
     public void testAstcConversionAndOverwriteRejection() throws Exception {
@@ -130,6 +138,48 @@ public final class BemInstallerTest extends Instrumentation {
         entry.put("generation","../../bad");
         try {BemInstalledResources.prepare(getInstrumentation().getTargetContext(),new JSONArray().put(entry).toString(),name->new FileInputStream(input),x->{});fail("Accepted path traversal");}catch(IOException expected){}
     }
+    public void testBem13ParameterSelectionPersistsAndRejectsInvalidTick() throws Exception {
+        android.content.Context isolated = new android.content.ContextWrapper(getTargetContext()) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) {
+                return super.getSharedPreferences("bem-parameters-test-" + name, mode);
+            }
+        };
+        android.content.SharedPreferences preferences = FrameworkSettings.open(isolated);
+        String generation = "33333333-3333-3333-3333-333333333333";
+        JSONObject group = new JSONObject().put("id", "width").put("name", "Width")
+                .put("min", 0).put("max", 1000).put("step", 100)
+                .put("neutral", 0).put("default", 0);
+        JSONObject choice = new JSONObject().put("id", "on").put("name", "On");
+        JSONObject options = new JSONObject().put("id", "base").put("default", "on")
+                .put("choices", new JSONArray().put(choice));
+        JSONObject entry = new JSONObject().put("generation", generation).put("bem_minor", 3)
+                .put("enabled", true).put("option_groups", new JSONArray().put(options))
+                .put("selection_constraints", new JSONArray())
+                .put("default_options", "base:on")
+                .put("parameters", new JSONArray().put(group))
+                .put("default_parameters", "width:0");
+        try {
+            preferences.edit().putString(BemInstaller.INDEX, new JSONArray().put(entry).toString()).commit();
+            JSONObject change = new JSONObject().put("generation", generation).put("enabled", true)
+                    .put("options", "base:on").put("parameters", "width:700");
+            BemInstaller.saveAll(isolated, new JSONArray().put(change));
+            JSONObject saved = BemInstaller.index(isolated).getJSONObject(0);
+            assertTrue("width:700".equals(saved.getString("selected_parameters")));
+            assertTrue("width:700".equals(saved.getString("remembered_parameters")));
+            File payload = fixture();
+            saved.put("remote", "bem-" + generation + ".bem").put("bytes", payload.length())
+                    .put("package_id", "test.parameters");
+            String runtime = BemInstalledResources.prepare(getTargetContext(),
+                    new JSONArray().put(saved).toString(), name -> new FileInputStream(payload), value -> {});
+            assertTrue(runtime.contains("parameters=width:700"));
+            change.put("parameters", "width:750");
+            try { BemInstaller.saveAll(isolated, new JSONArray().put(change)); fail("Accepted off-step tick"); }
+            catch (IOException expected) {}
+            assertTrue("width:700".equals(BemInstaller.index(isolated).getJSONObject(0).getString("selected_parameters")));
+        } finally {
+            preferences.edit().clear().commit();
+        }
+    }
     public void testGameStartupPrunesOnlyUnusedGenerations() throws Exception {
         android.content.Context base=getTargetContext();
         File isolated=new File(base.getCacheDir(),"game-prune-"+java.util.UUID.randomUUID());isolated.mkdirs();
@@ -138,8 +188,8 @@ public final class BemInstallerTest extends Instrumentation {
         };
         String active="00000000-0000-0000-0000-000000000011",stale="00000000-0000-0000-0000-000000000012";
         File root=new File(isolated,"betterendfield/installed-models");root.mkdirs();
-        Files.writeString(new File(root,stale+".bem").toPath(),"old");
-        Files.writeString(new File(root,"keep.txt").toPath(),"other data");
+        writeText(new File(root,stale+".bem"),"old");
+        writeText(new File(root,"keep.txt"),"other data");
         File source=fixture();
         JSONObject entry=new JSONObject().put("generation",active).put("remote","bem-"+active+".bem")
                 .put("bytes",source.length()).put("package_id","test.package").put("default_appearance","hidden");
@@ -154,10 +204,10 @@ public final class BemInstallerTest extends Instrumentation {
         String active="00000000-0000-0000-0000-000000000021",stale="00000000-0000-0000-0000-000000000022";
         File keep=new File(isolated,active),remove=new File(isolated,stale),stage=new File(isolated,"stage-00000000-0000-0000-0000-000000000023");
         keep.mkdir();remove.mkdir();stage.mkdir();
-        Files.writeString(new File(keep,"installed.bem").toPath(),"keep");
-        Files.writeString(new File(remove,"installed.bem").toPath(),"remove");
-        Files.writeString(new File(stage,"source.bem").toPath(),"stage");
-        Files.writeString(new File(isolated,"unrelated.txt").toPath(),"leave");
+        writeText(new File(keep,"installed.bem"),"keep");
+        writeText(new File(remove,"installed.bem"),"remove");
+        writeText(new File(stage,"source.bem"),"stage");
+        writeText(new File(isolated,"unrelated.txt"),"leave");
         java.util.Set<String> referenced=BemInstaller.referencedGenerations(new JSONArray().put(new JSONObject().put("generation",active)));
         assertTrue(BemInstaller.cleanLocalUnused(isolated,referenced)>0);
         assertTrue(keep.isDirectory());assertFalse(remove.exists());assertFalse(stage.exists());
@@ -169,7 +219,7 @@ public final class BemInstallerTest extends Instrumentation {
     public void testCleanupReportsDeletionFailure() throws Exception {
         File isolated=new File(getTargetContext().getCacheDir(),"cleanup-failure-"+java.util.UUID.randomUUID());isolated.mkdirs();
         File stale=new File(isolated,"00000000-0000-0000-0000-000000000024");stale.mkdir();
-        Files.writeString(new File(stale,"installed.bem").toPath(),"old");
+        writeText(new File(stale,"installed.bem"),"old");
         try {
             BemInstaller.cleanLocalUnused(isolated,java.util.Collections.emptySet(),file->{});
             fail("Deletion failure was reported as success");
@@ -200,7 +250,7 @@ public final class BemInstallerTest extends Instrumentation {
         try(InputStream in=getInstrumentation().getTargetContext().getAssets().open("android-normal-rules.json")){rules=new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);}
         long start=System.currentTimeMillis();
         String report=BemInstaller.convertNative(input.getPath(),output.getPath(),rules,true);
-        Files.writeString(new File(directory,"real-report.json").toPath(),report);
+        writeText(new File(directory,"real-report.json"),report);
         android.util.Log.i("BetterEndfield.InstallTest","real conversion ms="+(System.currentTimeMillis()-start)+" report="+report);
         assertTrue(output.isFile());
     }
@@ -217,8 +267,8 @@ public final class BemInstallerTest extends Instrumentation {
         File root=new File(isolated,"bem-installed");root.mkdirs();
         for(String id:new String[]{target,other,old}) {
             File folder=new File(root,id);folder.mkdir();
-            Files.writeString(new File(folder,"installed.bem").toPath(),"test bytes");
-            Files.writeString(new File(folder,"report.json").toPath(),"{\"character_id\":\""+(id.equals(other)?"other":"target")+"\"}");
+            writeText(new File(folder,"installed.bem"),"test bytes");
+            writeText(new File(folder,"report.json"),"{\"character_id\":\""+(id.equals(other)?"other":"target")+"\"}");
         }
         JSONObject keep=new JSONObject().put("generation",other).put("character_id","other").put("enabled",true).put("selected_appearance","alternate");
         JSONArray entries=new JSONArray().put(new JSONObject().put("generation",target).put("character_id","target").put("name","Removal fixture")).put(keep);

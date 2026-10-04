@@ -1,4 +1,4 @@
-"""Creator CLI: inspect, convert, pack, validate BEM 1.0/1.1/1.2. Never executes source INI/shaders."""
+"""Creator CLI: inspect, convert, pack, validate BEM 1.0..1.3. Never executes source INI/shaders."""
 from __future__ import annotations
 import argparse
 import contextlib
@@ -11,8 +11,8 @@ from pathlib import Path
 import bem_v1 as bem
 import bem_projects
 
-TOOL_VERSION = "1.3.0"
-FORMAT_VERSIONS = {0: '1.0', 1: '1.1', 2: '1.2'}
+TOOL_VERSION = "1.5.0"
+FORMAT_VERSIONS = {0: '1.0', 1: '1.1', 2: '1.2', 3: '1.3'}
 from convert_efmi_poc import Source
 from efmi_source import sections, analyze_source
 from efmi_lod_source import ENTRY, inspect_lod_source
@@ -94,9 +94,11 @@ def check_geometry(m, payloads, minor=None):
     """
     if 'option_groups' in m:
         import bem_v11
-        summary = bem_v11.check_geometry(m, payloads, minor)
+        import bem_v13
+        summary = (bem_v13.check_geometry(m, payloads, minor) if bem_v13.used(m)
+                   else bem_v11.check_geometry(m, payloads, minor))
         bem.require(minor is None or minor >= summary['required_minor'],
-                    'Package content needs BEM 1.2 but the header is BEM 1.1')
+                    'Package content needs a newer BEM header')
         return summary
     import struct
     for mesh in m['meshes']:
@@ -135,14 +137,20 @@ def check_geometry(m, payloads, minor=None):
         bem.require(len(textures)<=32 and resident<=bem.LIMIT, 'Appearance exceeds 32 texture bindings / 512 MiB budget')
 
 
-def convert(source, recipe_path, output):
+def convert(source, recipe_path, output, package=None, deformations=None):
     recipe_path=Path(recipe_path); recipe=bem.load_json(recipe_path); root=recipe_path.parent
     bem.require(recipe['schema']==1, 'Unsupported conversion recipe schema')
     def path(v):
         p=Path(v); return p if p.is_absolute() else root/p
+    deformations = deformations or (path(recipe['deformations']) if recipe.get('deformations') else None)
+    if deformations:
+        from bem_v13 import author_input_paths
+        bem.require(Path(output).resolve() not in author_input_paths(deformations), 'Output cannot overwrite shape input')
     builder=None; evidence=[]
     for appearance in recipe['appearances']:
         source_path=path(appearance['source']) if appearance.get('source') else Path(source)
+        from efmi_shapes import require_shape_binding
+        require_shape_binding(source_path, deformations)
         profile=bem.load_json(path(appearance['profile'])) if appearance.get('profile') else None
         kind=appearance.get('format','auto')
         if kind=='auto':
@@ -204,40 +212,104 @@ def convert(source, recipe_path, output):
             builder.m['appearances'][-1]['preview']=builder.payload(data)
     bem.require(builder is not None,'No appearances')
     builder.m['default_appearance_id']=recipe.get('default_appearance_id',builder.m['default_appearance_id'])
+    from bem_export import prepare_builder, package_overrides
+    prepare_builder(builder)
+    from bem_v13 import apply_author_spec
+    builder.m, builder.payloads, deformation_report = apply_author_spec(builder.m, builder.payloads, deformations)
+    package_overrides(builder.m, package)
     bem.validate_manifest(builder.m,len(builder.payloads)); check_geometry(builder.m,builder.payloads)
     builder.write(output)
-    return dict(package=builder.m,evidence=evidence,size=Path(output).stat().st_size,
+    return dict(package=builder.m,evidence=evidence,deformations=deformation_report,size=Path(output).stat().st_size,
+                format_version=FORMAT_VERSIONS[bem.package_minor(output)],
                 conversion_ready=True,render_verified=False,issues=[])
 
 
-def convert_automatic(source, output, ini=None):
+def convert_automatic(source, output, ini=None, package=None, deformations=None):
+    from efmi_shapes import require_shape_binding
+    require_shape_binding(source, deformations)
+    if deformations:
+        from bem_v13 import author_input_paths
+        bem.require(Path(output).resolve() not in author_input_paths(deformations), 'Output cannot overwrite shape input')
     prepared=[]
     inspection=inspect_source(source,ini,prepared=prepared)
     bem.require(inspection.get('conversion_ready') and len(prepared)==1,
         '\n'.join(i['message'] for i in inspection.get('issues',[])) or 'AUTO_CONVERSION: 此来源暂不能自动转换')
-    builder=prepared[0]; builder.write(output)
-    return dict(package=builder.m,matching=inspection['matching'],issues=inspection['issues'],
-        size=Path(output).stat().st_size,conversion_ready=True,render_verified=False)
+    builder=prepared[0]
+    from bem_export import prepare_builder, package_overrides
+    prepare_builder(builder); package_overrides(builder.m, package)
+    from bem_v13 import apply_author_spec
+    builder.m, builder.payloads, deformation_report = apply_author_spec(builder.m, builder.payloads, deformations)
+    builder.write(output)
+    return dict(package=builder.m,matching=inspection['matching'],issues=inspection['issues'],deformations=deformation_report,
+        size=Path(output).stat().st_size,format_version=FORMAT_VERSIONS[bem.package_minor(output)],conversion_ready=True,render_verified=False)
 
 
 def main(argv=None):
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # Keep the established single-command CLI while also accepting the more
+    # discoverable `workspace init ROOT --source INPUT` spelling.
+    if len(raw_argv) >= 2 and raw_argv[0] == 'workspace' and raw_argv[1] == 'init':
+        raw_argv = ['init-workspace', *raw_argv[2:]]
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['inspect','convert','validate','pack','unpack','bundle'])
-    parser.add_argument('--version', action='version', version='BEM Tools '+TOOL_VERSION+' / BEM 1.0+1.1+1.2')
+    parser.add_argument('command',choices=['inspect','convert','validate','pack','unpack','bundle','new-project','build',
+                                           'init-workspace','workspace-init'])
+    parser.add_argument('--version', action='version', version='BEM Tools '+TOOL_VERSION+' / BEM 1.0+1.1+1.2+1.3')
     parser.add_argument('source',type=Path)
     parser.add_argument('additional',type=Path,nargs='*',help='Additional BEM files for bundle only')
     parser.add_argument('--recipe',type=Path)
+    parser.add_argument('--source',dest='workspace_source',type=Path,
+                        help='Input source for init-workspace; positional source is the workspace directory')
+    parser.add_argument('--deformations',type=Path,help='Author position-morph inputs saved in the export project')
     parser.add_argument('--ini')
     parser.add_argument('-o','--output',type=Path)
     parser.add_argument('--report',type=Path)
-    args=parser.parse_args(argv)
-    result=dict(tool_version=TOOL_VERSION,format_version='1.0/1.1/1.2',command=args.command,source=str(args.source),success=False,conversion_ready=False,render_verified=False,issues=[])
+    parser.add_argument('--mode', choices=['convert', 'pack'], default='convert', help='Export mode for new-project')
+    parser.add_argument('--export-output', type=Path, help='BEM output saved in new-project')
+    parser.add_argument('--package-id')
+    parser.add_argument('--name')
+    parser.add_argument('--author')
+    parser.add_argument('--package-version')
+    args=parser.parse_args(raw_argv)
+    result=dict(tool_version=TOOL_VERSION,format_version='1.0/1.1/1.2/1.3',command=args.command,source=str(args.source),success=False,conversion_ready=False,render_verified=False,issues=[])
+    report_path = args.report
+    protected_paths = [args.source, *args.additional] + ([args.output] if args.output else []) + ([args.recipe] if args.recipe else [])
+    if args.deformations: protected_paths.append(args.deformations)
     try:
+        shape_input = args.deformations
+        if shape_input is None and args.recipe and args.command == 'convert':
+            recipe_data = bem.load_json(args.recipe)
+            if recipe_data.get('deformations'):
+                shape_input = args.recipe.resolve().parent / recipe_data['deformations']
+        if shape_input:
+            from bem_v13 import author_input_paths
+            protected_paths.extend(author_input_paths(shape_input))
         bem.require(not args.additional or args.command=='bundle', 'Additional inputs are only valid for bundle')
         if args.report:
-            paths=[args.source,*args.additional]+([args.output] if args.output else [])+([args.recipe] if args.recipe else [])
+            paths=protected_paths
             bem.require(all(args.report.resolve()!=p.resolve() for p in paths), 'Report cannot overwrite input/output/recipe')
-        if args.command=='inspect': result.update(inspect_source(args.source,args.ini))
+        if args.command in ('init-workspace', 'workspace-init'):
+            import bem_tasks
+            bem.require(args.workspace_source, 'SOURCE: workspace 初始化需要 --source 输入路径')
+            package = {key: value for key, value in (('id', args.package_id), ('name', args.name),
+                       ('author', args.author), ('version', args.package_version)) if value is not None}
+            result.update(bem_tasks.init_workspace(args.source, args.workspace_source, args.mode,
+                                                   args.recipe, package, args.deformations, args.export_output))
+        elif args.command == 'new-project':
+            import bem_tasks
+            bem.require(args.output, 'OUTPUT: 缺少工程文件路径')
+            package = {key: value for key, value in (('id', args.package_id), ('name', args.name),
+                       ('author', args.author), ('version', args.package_version)) if value is not None}
+            result.update(bem_tasks.new_project(args.source, args.output, args.mode, args.recipe, package, args.export_output, args.deformations))
+        elif args.command == 'build':
+            import bem_tasks
+            bem.require(not args.output and not args.recipe and not args.deformations, 'BUILD: 输出、配方和形态数据由工程文件保存，请编辑工程')
+            task = bem_tasks.load_task(args.source)
+            protected_paths.extend([*task['input_paths'], task['output']])
+            report_path = args.report or task['report']
+            bem.require(report_path is None or report_path.resolve() not in {p.resolve() for p in protected_paths},
+                        'Report cannot overwrite project/input/output/recipe')
+            result.update(bem_tasks.build_task(task))
+        elif args.command=='inspect': result.update(inspect_source(args.source,args.ini))
         elif args.command=='validate':
             minor=bem.package_minor(args.source)
             m,payloads=bem.read_package(args.source); selection_space=check_geometry(m,payloads,minor or None)
@@ -246,21 +318,21 @@ def main(argv=None):
                 result['selection_space']=selection_space
         elif args.command in ('pack','unpack','bundle'):
             bem.require(args.output, 'OUTPUT: 缺少输出路径')
-            if args.command=='pack': result.update(bem_projects.pack_project(args.source,args.output))
+            if args.command=='pack': result.update(bem_projects.pack_project(args.source,args.output,deformations=args.deformations))
             elif args.command=='unpack': result.update(bem_projects.unpack(args.source,args.output))
             else: result.update(bem_projects.bundle([args.source,*args.additional],args.output))
         else:
             bem.require(args.output,'OUTPUT: 请选择输出文件')
             bem.require(args.source.resolve()!=args.output.resolve(),'OUTPUT: 不能覆盖源文件')
-            result.update(convert(args.source,args.recipe,args.output) if args.recipe else convert_automatic(args.source,args.output,args.ini))
-            result['format_version']='1.0'
+            result.update(convert(args.source,args.recipe,args.output,deformations=args.deformations) if args.recipe else
+                          convert_automatic(args.source,args.output,args.ini,deformations=args.deformations))
         result['success']=True
     except Exception as exc:
         result['issues'].append(dict(code='CONVERSION_FAILED',message=str(exc),
             hint='核对入口、已验证角色 profile、骨骼/材质映射和源文件版本；特殊 Shader 需要审阅配方。'))
     encoded=json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False)
-    if args.report and all(args.report.resolve()!=p.resolve() for p in [args.source,*args.additional]+([args.output] if args.output else [])+([args.recipe] if args.recipe else [])):
-        bem.atomic_write(args.report,encoded.encode('utf-8'))
+    if report_path and all(report_path.resolve()!=p.resolve() for p in protected_paths):
+        bem.atomic_write(report_path,encoded.encode('utf-8'))
     print(encoded)
     return 0 if result['success'] else 2
 

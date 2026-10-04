@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -86,10 +87,24 @@ struct BemTexture {
     std::string name;
     std::vector<uint8_t> data;  // complete block-compressed mip chain
     std::string original_name;
+    // LoadBem(..., defer_texture_payloads=true) leaves `data` empty and records
+    // the package extent of this entry. DecodeBemTexturePayload decodes exactly
+    // one texture on demand, so a caller can release it right after upload.
+    uint32_t payload_id = UINT32_MAX, payload_codec = 0;
+    uint64_t payload_offset = 0, payload_stored = 0;
+    bool Deferred() const { return data.empty() && payload_id != UINT32_MAX; }
+};
+// Package generation a deferred texture belongs to. Decoding refuses a file
+// whose size or write time changed after the selection was loaded.
+struct BemPayloadSource {
+    std::filesystem::path path;
+    uint64_t file_size = 0;
+    int64_t write_time = 0;
 };
 
 // BEMv1 resources lowered into the established native upload representation.
 struct BemComponent {
+    bool skip_validation = false;
     BemComponentHeaderRaw info{};
     std::array<std::vector<uint8_t>, 3> streams;
     std::vector<uint8_t> indices;
@@ -108,8 +123,8 @@ struct BemComponent {
     // BEM 1.2: other names a resource's renderer may carry for palette bone i
     // (a bone the game names differently in its world and UI skeletons).
     std::vector<std::vector<std::string>> bone_aliases;
-    // Keep aliases scoped to the resource that declared them: world, then UI.
-    std::vector<std::array<std::vector<std::string>, 2>> bone_aliases_by_resource;
+    // Alias names split by resource: [0] world, [1] UI.
+    std::vector<std::array<std::vector<std::string>,2>> bone_aliases_by_resource;
     bool BoneNameMatches(size_t i, std::string_view name) const {
         if (bone_names[i] == name) return true;
         if (i < bone_aliases.size())
@@ -117,11 +132,10 @@ struct BemComponent {
         return false;
     }
     bool BoneNameMatchesForResource(size_t i, std::string_view name, size_t resource) const {
-        if (i >= bone_names.size() || resource >= 2) return false;
+        if (i >= bone_names.size()) return false;
         if (bone_names[i] == name) return true;
-        if (i < bone_aliases_by_resource.size())
-            for (const auto& alias : bone_aliases_by_resource[i][resource])
-                if (alias == name) return true;
+        if (i < bone_aliases_by_resource.size() && resource < 2)
+            for (const auto& alias : bone_aliases_by_resource[i][resource]) if (alias == name) return true;
         return false;
     }
 };
@@ -133,6 +147,10 @@ struct BemPocData {
     BemFileHeader header{};
     std::vector<BemComponent> components;
     std::vector<BemTexture> textures;
+    bool skip_validation = false; // Developer option, never read from a package.
+    bool loading_optimization = false; // Experimental runtime option, never read from a package.
+    // Set only for deferred texture payloads. Metadata only (path/size/time).
+    std::shared_ptr<const BemPayloadSource> payload_source;
 };
 
 struct BemPackageInfo {
@@ -140,17 +158,45 @@ struct BemPackageInfo {
     std::string package_id, name, author, version, character_id;
     std::string world_resource, ui_resource, default_appearance;
     std::string default_options, option_groups_json, selection_constraints_json;
+    // BEM 1.3 position morph controls. Saved values are UInt32 ticks, not floats.
+    std::string default_parameters, parameter_groups_json;
+    // Authored frame ticks for bounded native validator sampling, parallel to parameters.
+    std::vector<std::vector<uint32_t>> parameter_frame_values;
     std::vector<std::string> appearances, component_names;
     std::vector<uint32_t> original_counts;
 };
-struct BemLoadStats { std::vector<uint32_t> payload_ids; };
-bool ReadBemPackageInfo(const std::filesystem::path&, BemPackageInfo&, std::string& error);
+struct BemLoadStats {
+    std::vector<uint32_t> payload_ids;
+    uint64_t decoded_cache_peak_bytes = 0, decoded_cache_remaining_bytes = 0;
+    uint64_t payload_copy_bytes = 0, payload_move_bytes = 0;
+};
+// Conservative selected decoded backing bound (cache plus output copies).
+// Excludes compressed input, decoder workspace and metadata allocations.
+struct BemLoadPlan {
+    BemPackageInfo package;
+    uint64_t decoded_payload_bytes = 0;
+    uint64_t reservation_bytes = 0;
+    std::vector<uint32_t> payload_ids;
+};
+bool ReadBemLoadPlan(const std::filesystem::path&, BemLoadPlan&, std::string& error,
+    std::string_view appearance = {}, bool skip_validation = false,
+    std::string_view parameters = {}, bool defer_texture_payloads = false);
+bool ReadBemPackageInfo(const std::filesystem::path&, BemPackageInfo&, std::string& error, bool skip_validation = false);
+bool ResolveBemParameters(const BemPackageInfo&, std::string_view requested,
+    std::string& canonical, std::string& error);
 
 constexpr uint32_t kBemStreamCount = 3;
 constexpr int32_t kIndexElementSize = 2;
 
 
-bool ParseBem(std::span<const uint8_t> bytes, BemPocData& output, std::string& error);
+bool ParseBem(std::span<const uint8_t> bytes, BemPocData& output, std::string& error,
+    bool skip_validation = false, bool loading_optimization = false);
 bool LoadBem(const std::filesystem::path& path, BemPocData& output, std::string& error,
-    std::string_view appearance = {}, BemLoadStats* stats = nullptr);
+    std::string_view appearance = {}, BemLoadStats* stats = nullptr, bool skip_validation = false,
+    bool loading_optimization = false, std::string_view parameters = {},
+    uint64_t max_decoded_reservation = UINT64_MAX, bool defer_texture_payloads = false);
+// Reads and decodes one deferred texture entry (streaming Zstd; the stored
+// bytes are never held whole). `output` receives exactly info.data_size bytes.
+bool DecodeBemTexturePayload(const BemPayloadSource& source, const BemTexture& texture,
+    std::vector<uint8_t>& output, std::string& error);
 } // namespace BetterEndfield::CustomModel

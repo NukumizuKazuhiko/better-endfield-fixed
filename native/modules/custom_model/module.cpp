@@ -2326,6 +2326,7 @@ bool ReadCompletedAndroidDonor(const CharacterAdapter& adapter,const BemPocData&
 struct PayloadCacheEntry {
     std::filesystem::path path;
     std::string appearance;
+    std::string selection_key;
     std::shared_ptr<const BemPocData> payload;
     size_t bytes=0;
     uint64_t expires=0;
@@ -2340,11 +2341,13 @@ void PrunePayloadCache(uint64_t now) {
 }
 std::shared_ptr<const BemPocData> AcquirePayload(const EnabledMod& mod) {
     const auto now=GetTickCount64(); PrunePayloadCache(now);
-    for (auto& entry:g_payload_cache) if (entry.path==mod.package && entry.appearance==mod.appearance) {
+    for (auto& entry:g_payload_cache) if (entry.path==mod.package &&
+        entry.appearance==mod.appearance && entry.selection_key==mod.selection_key) {
         entry.expires=now+kPayloadCacheTtlMs; return entry.payload;
     }
     auto payload=std::make_shared<BemPocData>(); std::string error;
-    if (!LoadBem(mod.package,*payload,error,mod.appearance) || !ValidatePayloadAdapter(*mod.adapter,*payload)) {
+    if (!LoadBem(mod.package,*payload,error,mod.appearance,nullptr,mod.skip_validation,
+        mod.loading_optimization,mod.parameters) || !ValidatePayloadAdapter(*mod.adapter,*payload)) {
         Log("Package refused for "+std::string(mod.adapter->id)+": "+error); return {};
     }
     size_t size=0;
@@ -2358,7 +2361,7 @@ std::shared_ptr<const BemPocData> AcquirePayload(const EnabledMod& mod) {
         while (held+size>kPayloadCacheLimit && !g_payload_cache.empty()) {
             held-=g_payload_cache.front().bytes; g_payload_cache.erase(g_payload_cache.begin());
         }
-        g_payload_cache.push_back({mod.package,mod.appearance,payload,size,now+kPayloadCacheTtlMs});
+        g_payload_cache.push_back({mod.package,mod.appearance,mod.selection_key,payload,size,now+kPayloadCacheTtlMs});
     }
     return payload;
 }
