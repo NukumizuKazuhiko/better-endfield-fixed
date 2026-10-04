@@ -8,7 +8,7 @@ Android 端是 Better Endfield 的 ARM64 LSPosed 模块，同时提供设置应�
 
 ## 兼容范围
 
-- APK 版本：`3.4.1`（versionCode `30401`）；最低 Android 版本为 10，设备需为 ARM64。
+- 当前开发分支 APK 版本：`3.4.2`（versionCode `30402`）；已发布版本为 `3.4.1`。最低 Android 版本为 10，设备需为 ARM64。
 - 需要可用的 LSPosed 环境，并将模块加入实际游戏包名的作用域。预选包名包括 `com.hypergryph.endfield` 和 `com.gryphline.endfield.gp`。
 - 内置 834 份头饰资源，面向原生 Android 游戏 versionCode 50。其他客户端版本、渠道包和逐角色表现需分别验证。
 

@@ -51,3 +51,9 @@ Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`，79,204,939 字
 `testOverlayPreviewLifecycleWithoutFramework` 在修改前于设备上稳定失败，异常同为 `NoClassDefFoundError`；修改后通过。重新运行 `testOverlayAppearance` 通过。设备上连续两次打开并结束预览后，设置应用 PID 保持不变、页面仍可操作；截图保存于 `D:/CodexData/bem-preview-diagnosis-20261004/preview-fixed.png`。设备没有游戏资源，因此这些证据只覆盖设置应用中的预览，不覆盖游戏内悬浮窗或模型、Hook、第一人称运行时。
 
 重新运行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --offline --no-daemon` 通过。新 Debug APK 大小 79,217,894 字节，SHA-256 为 `67a55c76e9602f9fd9e9595a501a347629bb2f3b5df4bbc1417b9d8371f003c7`；v2 签名有效，包内有资源清单和 834 个 `.behw`。设备上原有的 3.3.21 安装与当前 Debug 包签名不同，按用户授权卸载后安装新包；旧 APK 备份在 `D:/CodexData/bem-device-backups/HLK-AL00-20261004/betterendfield-3.3.21-installed.apk`，原应用数据随卸载清除。
+
+## 3.4.2 开发分支构建（2026-10-05）
+
+`origin` 已有 `v3.4.1`，尚无 `v3.4.2`，因此 Android 版本调整为 `versionName=3.4.2`、`versionCode=30402`；发布工作流的手动触发默认值同步为 3.4.2。版本调整不改变已发布的 3.4.1 下载入口。本分支构建与验收后推送，以工作流的 `build_only` 模式验证正式签名 APK，不创建标签或 GitHub Release。
+
+在 JDK 21、D 盘 Gradle 主缓存和固定 834 份头饰输入下执行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --no-daemon --quiet` 成功。原离线临时缓存出现 Kotlin DSL 类解析错误；D 盘主缓存联网补齐缺少的构建依赖后成功，源码无需为缓存问题改动。`output-metadata.json` 显示 3.4.2 / 30402；Debug APK SHA-256 为 `C44C6845088BA8E64D57BFF1BDCA8991DDF18CC0E9279F7686A74CB97277BA71`，含清单与 834 个 `.behw`。在 HLK-AL00 上覆盖安装主 APK 和测试 APK 后，`testOverlayPreviewLifecycleWithoutFramework`、`testOverlayAppearance` 均通过。设备仍没有游戏资源，模型、Hook 和第一人称运行时无法据此宣称通过。
