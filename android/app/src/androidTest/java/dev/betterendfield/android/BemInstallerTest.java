@@ -12,6 +12,9 @@ public final class BemInstallerTest extends Instrumentation {
     public void testOverlayAppearance() {
         OverlaySettingsTest.run(this);
     }
+    public void testOverlayPreviewLifecycleWithoutFramework() {
+        OverlayPreviewTest.run(this);
+    }
     public void testDisableAllModelsPreservesSelections() throws Exception {
         android.content.Context isolated = new android.content.ContextWrapper(getTargetContext()) {
             @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) {

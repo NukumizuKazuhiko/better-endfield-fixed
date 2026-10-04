@@ -346,7 +346,7 @@ final class GameOverlay {
      */
     private void saveJournalToFile() {
         pendingSaveBody = buildJournalBody();
-        if (XposedEntry.activityResultRelayReady()) {
+        if (!preview && XposedEntry.activityResultRelayReady()) {
             try {
                 String stamp = new java.text.SimpleDateFormat(
                         "yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(new java.util.Date());
@@ -862,8 +862,10 @@ final class GameOverlay {
         dropPendingLook();
         // Both registrations are static and outlive this surface; a volume key
         // that still reached a torn-down overlay would have nowhere to land.
-        XposedEntry.clearVolumeKeyListener(volumeKeys);
-        RuntimeLog.stopObserving(journalLines);
+        if (!preview) {
+            XposedEntry.clearVolumeKeyListener(volumeKeys);
+            RuntimeLog.stopObserving(journalLines);
+        }
         ui.dispose();
         if (host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);

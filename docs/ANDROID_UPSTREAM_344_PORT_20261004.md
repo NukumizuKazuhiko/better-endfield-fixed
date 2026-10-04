@@ -43,3 +43,11 @@ Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`，79,204,939 字
 使用 JDK 21、现有 Android SDK/NDK/CMake 和 `D:/CodexData/headwear-audit/all-characters/catalog-bundled` 运行 `:app:assembleDebug -PheadwearCatalogDir=... --offline --no-daemon` 与 `:app:testDebugUnitTest -PheadwearCatalogDir=... --offline --no-daemon`，均通过；重新编译并运行 `BetterEndfield.FirstPersonMeshTests` 通过。为补齐 D 盘 Gradle 缓存中的依赖，首次准备阶段曾通过本机代理联网；最终构建与单元测试均离线运行。APK 签名验证通过（v2）。
 
 新 Debug APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`，大小 79,217,894 字节，SHA-256 为 `3ad742562e0659496433bf699e9e2371cf70fbdc48e912cce86b8cb486d3bb9a`。`output-metadata.json` 标明 `debug`、versionCode `30401`、versionName `3.4.1`；该版本号沿用项目配置，不代表已经发布 3.4.1 新版。包内有 `assets/headwear-v3/manifest.tsv`、834 个 `.behw`、两个 Better Endfield ARM64 原生库和一个 AndroidX ARM64 库，没有其他 ABI 的原生库。本轮未运行设备测试，实机中的悬浮窗、第一人称、头饰与模型功能仍需验证。
+
+## 悬浮窗预览闪退修复（2026-10-05）
+
+在 HLK-AL00 设备上安装当前 Debug 包后，设置页“工具 → 预览悬浮窗”能打开面板，但点“结束预览”会使设置应用退出。崩溃日志显示 `NoClassDefFoundError: io.github.libxposed.api.XposedModule`，调用链到 `MainActivity.showOverlayPreview`。预览运行于普通设置应用进程，没有 libxposed API 类；`GameOverlay.remove()` 却无条件调用只在游戏 Hook 进程可用的 `XposedEntry.clearVolumeKeyListener()`，而预览从未注册该监听器。预览中的日志导出也可能触达 `XposedEntry.activityResultRelayReady()`。现在两处仅在游戏内面板路径调用框架入口；预览关闭只清理其实际注册的状态，预览导出使用已有分享路径。
+
+`testOverlayPreviewLifecycleWithoutFramework` 在修改前于设备上稳定失败，异常同为 `NoClassDefFoundError`；修改后通过。重新运行 `testOverlayAppearance` 通过。设备上连续两次打开并结束预览后，设置应用 PID 保持不变、页面仍可操作；截图保存于 `D:/CodexData/bem-preview-diagnosis-20261004/preview-fixed.png`。设备没有游戏资源，因此这些证据只覆盖设置应用中的预览，不覆盖游戏内悬浮窗或模型、Hook、第一人称运行时。
+
+重新运行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --offline --no-daemon` 通过。新 Debug APK 大小 79,217,894 字节，SHA-256 为 `67a55c76e9602f9fd9e9595a501a347629bb2f3b5df4bbc1417b9d8371f003c7`；v2 签名有效，包内有资源清单和 834 个 `.behw`。设备上原有的 3.3.21 安装与当前 Debug 包签名不同，按用户授权卸载后安装新包；旧 APK 备份在 `D:/CodexData/bem-device-backups/HLK-AL00-20261004/betterendfield-3.3.21-installed.apk`，原应用数据随卸载清除。
