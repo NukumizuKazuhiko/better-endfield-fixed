@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -684,6 +685,10 @@ class SettingsState(private val context: Context) {
     // The in-game panel.
     var overlayEnabled by mutableStateOf(false)
         private set
+    var overlayTransparency by mutableFloatStateOf(0f)
+        private set
+    var overlayAutoSnap by mutableStateOf(false)
+        private set
 
     private fun loadEnhancement() {
         hideUid = ModuleSettings.isHideUidEnabled(context)
@@ -743,11 +748,15 @@ class SettingsState(private val context: Context) {
         dashAglina = ModuleSettings.isDashCharacterEnabled(context, "aglina")
         dashLiino = ModuleSettings.isDashCharacterEnabled(context, "liino")
         overlayEnabled = ModuleSettings.isOverlayEnabled(context)
+        overlayTransparency = ModuleSettings.getOverlayTransparency(context)
+        overlayAutoSnap = ModuleSettings.isOverlayAutoSnap(context)
     }
 
     /** Re-reads the panel switch, which the settings Activity can leave and re-enter. */
     fun refreshOverlayFromStore() {
         overlayEnabled = ModuleSettings.isOverlayEnabled(context)
+        overlayTransparency = ModuleSettings.getOverlayTransparency(context)
+        overlayAutoSnap = ModuleSettings.isOverlayAutoSnap(context)
     }
 
     fun updateHideUid(value: Boolean) {
@@ -1131,6 +1140,16 @@ class SettingsState(private val context: Context) {
         status = context.getString(
             if (value) R.string.overlay_turned_on else R.string.overlay_turned_off,
         )
+    }
+
+    fun updateOverlayTransparency(value: Float) {
+        ModuleSettings.setOverlayTransparency(context, value)
+        overlayTransparency = ModuleSettings.getOverlayTransparency(context)
+    }
+
+    fun updateOverlayAutoSnap(value: Boolean) {
+        ModuleSettings.setOverlayAutoSnap(context, value)
+        overlayAutoSnap = value
     }
 
     private fun saveInterfaceSettings() {

@@ -74,6 +74,21 @@ private fun OverlayCard(state: SettingsState, onPreviewOverlay: () -> Unit) {
             checked = state.overlayEnabled,
             onCheckedChange = state::updateOverlayEnabled,
         )
+        SwitchRow(
+            title = stringResource(R.string.overlay_auto_snap),
+            description = stringResource(R.string.overlay_auto_snap_hint),
+            checked = state.overlayAutoSnap,
+            onCheckedChange = state::updateOverlayAutoSnap,
+        )
+        SliderRow(
+            label = stringResource(R.string.overlay_transparency),
+            value = state.overlayTransparency,
+            onValueChange = state::updateOverlayTransparency,
+            valueRange = 0f..ModuleSettings.OVERLAY_TRANSPARENCY_MAXIMUM,
+            unit = "%",
+            steps = 80,
+            decimals = 0,
+        )
         GhostButton(
             text = stringResource(R.string.overlay_preview),
             onClick = onPreviewOverlay,

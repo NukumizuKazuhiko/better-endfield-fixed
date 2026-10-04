@@ -24,6 +24,7 @@ class OverlaySurface(
         fun toggle()
         fun collapse()
         fun drag(dx: Float, dy: Float)
+        fun dragEnd()
         /**
          * A look-pad drag, in screen pixels: x to the right, y downwards - the
          * same axes the desktop mouse hook reports, so the shared native mouse
@@ -50,10 +51,10 @@ class OverlaySurface(
     private var journal by mutableStateOf("")
     private var compositionInitialized = false
 
-    val handle: View = ComposeView(activity).apply {
+    val handle: ComposeView = ComposeView(activity).apply {
         setViewTreeOwners(this)
     }
-    val panel: View = ComposeView(activity).apply {
+    val panel: ComposeView = ComposeView(activity).apply {
         setViewTreeOwners(this)
     }
 
@@ -70,21 +71,21 @@ class OverlaySurface(
     fun composeNow() {
         if (compositionInitialized) return
         check(handle.isAttachedToWindow && panel.isAttachedToWindow)
-        (handle as ComposeView).setContent {
-            OverlayTheme { FloatingHandle(callbacks::toggle, callbacks::drag) }
+        handle.setContent {
+            OverlayTheme { FloatingHandle(callbacks::toggle, callbacks::drag, callbacks::dragEnd) }
         }
-        (panel as ComposeView).setContent {
+        panel.setContent {
             OverlayTheme { OverlayPanel(features, preview, journal, callbacks) }
         }
-        (handle as ComposeView).createComposition()
-        (panel as ComposeView).createComposition()
+        handle.createComposition()
+        panel.createComposition()
         compositionInitialized = true
     }
     fun resumed() { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME) }
     fun paused() { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE) }
     fun dispose() {
-        (handle as ComposeView).disposeComposition()
-        (panel as ComposeView).disposeComposition()
+        handle.disposeComposition()
+        panel.disposeComposition()
         owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         owner.viewModelStore.clear()
     }
