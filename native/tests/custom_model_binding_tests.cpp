@@ -281,6 +281,20 @@ void ProbeDllStartup(const std::filesystem::path& dll,const std::filesystem::pat
 }
 }
 int main(int argc,char** argv) {
+    BemComponent alias_component;
+    alias_component.bone_names.push_back("canonical");
+    alias_component.bone_aliases_by_resource.push_back({
+        std::vector<std::string>{"world_alias"}, std::vector<std::string>{"ui_alias"}});
+    Check(alias_component.BoneNameMatchesForResource(0,"canonical",0) &&
+        alias_component.BoneNameMatchesForResource(0,"canonical",1),"canonical bone rejected");
+    Check(alias_component.BoneNameMatchesForResource(0,"world_alias",0) &&
+        !alias_component.BoneNameMatchesForResource(0,"world_alias",1) &&
+        alias_component.BoneNameMatchesForResource(0,"ui_alias",1) &&
+        !alias_component.BoneNameMatchesForResource(0,"ui_alias",0),"resource alias leaked");
+    if (argc==2 && std::string_view(argv[1])=="--resource-alias") {
+        std::cout<<"PASS: world and UI bone aliases remain resource-scoped\n";
+        return 0;
+    }
     if(argc==3 && std::string_view(argv[1])=="--index32") {
         std::ifstream file(argv[2],std::ios::binary);
         std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});

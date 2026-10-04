@@ -57,3 +57,9 @@ Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`，79,204,939 字
 `origin` 已有 `v3.4.1`，尚无 `v3.4.2`，因此 Android 版本调整为 `versionName=3.4.2`、`versionCode=30402`；发布工作流的手动触发默认值同步为 3.4.2。版本调整不改变已发布的 3.4.1 下载入口。本分支构建与验收后推送，以工作流的 `build_only` 模式验证正式签名 APK，不创建标签或 GitHub Release。
 
 在 JDK 21、D 盘 Gradle 主缓存和固定 834 份头饰输入下执行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --no-daemon --quiet` 成功。原离线临时缓存出现 Kotlin DSL 类解析错误；D 盘主缓存联网补齐缺少的构建依赖后成功，源码无需为缓存问题改动。`output-metadata.json` 显示 3.4.2 / 30402；Debug APK SHA-256 为 `C44C6845088BA8E64D57BFF1BDCA8991DDF18CC0E9279F7686A74CB97277BA71`，含清单与 834 个 `.behw`。在 HLK-AL00 上覆盖安装主 APK 和测试 APK 后，`testOverlayPreviewLifecycleWithoutFramework`、`testOverlayAppearance` 均通过。设备仍没有游戏资源，模型、Hook 和第一人称运行时无法据此宣称通过。
+
+## 上游 3.5.0 骨骼别名范围修复（2026-10-05）
+
+BEM 1.2 的 `bone_name_aliases` 已声明所属资源，但原解析结果把 world 与 UI 别名合为同一组。现保留原集合供现有通用绑定流程使用，同时在解析时记录每个别名的资源。Android 场景路径查找和名称校验只接受 world 别名，详情资源读回只接受 UI 别名。场景从 UI 骨骼路径查找时，先尝试包声明的标准骨名，再尝试 world 别名，因此 UI 专属别名不会误导场景搜索。
+
+本轮 `:app:assembleDebug -PheadwearCatalogDir=D:/CodexData/headwear-audit/all-characters/catalog-bundled --offline --no-daemon --quiet` 成功；`BetterEndfield.CustomModelBindingTests.exe --resource-alias` 通过，覆盖同一骨骼的标准名、world 别名、UI 别名和跨资源拒绝。APK SHA-256 为 `660CC35687896AE00B8B11370D2C6570E4B35BF2AC64BAB6C26292521D8969F2`，含 1 份清单、834 份 `.behw` 和两个 Better Endfield ARM64 库。设备没有游戏资源，真实 BEM 场景和详情替换仍待验收。已有 Visual Studio 17 构建目录在当前机器不可用，改用原有 Visual Studio 18 测试目录完成编译；MinHook 第三方代码仍有既有 C4701 警告。

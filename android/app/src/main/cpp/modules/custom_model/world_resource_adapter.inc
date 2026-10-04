@@ -112,14 +112,20 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
                 auto found=world_bones.find(path);
                 // BEM 1.2 aliases: the world skeleton may name this bone differently
                 // at the same parent path; accept only a declared alias there.
-                if (found==world_bones.end() && static_cast<size_t>(b)<component.bone_aliases.size()) {
+                if (found==world_bones.end()) {
                     const auto parent=path.rfind('/');
-                    for (const auto& alias:component.bone_aliases[b]) {
-                        found=world_bones.find(parent==path.npos?alias:path.substr(0,parent+1)+alias);
-                        if (found!=world_bones.end()) break;
+                    const auto prefix=parent==path.npos?std::string{}:path.substr(0,parent+1);
+                    // The UI bone itself may use a UI-only alias. Try the
+                    // package's canonical name before the world aliases.
+                    found=world_bones.find(prefix+component.bone_names[b]);
+                    if (found==world_bones.end() && static_cast<size_t>(b)<component.bone_aliases_by_resource.size()) {
+                        for (const auto& alias:component.bone_aliases_by_resource[b][0]) {
+                            found=world_bones.find(prefix+alias);
+                            if (found!=world_bones.end()) break;
+                        }
                     }
                 }
-                if (found==world_bones.end() || !component.BoneNameMatches(static_cast<size_t>(b),ObjectName(found->second))) {
+                if (found==world_bones.end() || !component.BoneNameMatchesForResource(static_cast<size_t>(b),ObjectName(found->second),0)) {
                     Log("Android world bone path missing: "+path); return false;
                 }
                 Matrix4x4Raw ui_matrix{},world_matrix{};
