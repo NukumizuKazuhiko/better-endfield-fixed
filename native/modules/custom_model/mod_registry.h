@@ -8,6 +8,14 @@
 #include <memory>
 
 namespace BetterEndfield::CustomModel {
+// Unity appends (Clone), and the Android model pool may append #<serial>.
+// Only a trailing decimal pool serial is removed; other resource names remain exact.
+inline std::string_view ResourceBaseName(std::string_view name) {
+    if (const auto hash=name.rfind('#'); hash!=std::string_view::npos && hash+1<name.size() &&
+        name.find_first_not_of("0123456789",hash+1)==std::string_view::npos) name=name.substr(0,hash);
+    if (name.ends_with("(Clone)")) name.remove_suffix(7);
+    return name;
+}
 struct ComponentIdentity { const char* name; uint32_t indices; };
 struct CharacterAdapter {
     const char* id;

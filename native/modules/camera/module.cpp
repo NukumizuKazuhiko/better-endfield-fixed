@@ -9,6 +9,9 @@
 #include "first_person_transition.h"
 #include "first_person_scale.h"
 #include "first_person_mesh.h"
+#if defined(__ANDROID__)
+#include "first_person_profiles.h"
+#endif
 #include "first_person_shadow.h"
 #include "first_person_retry.h"
 #include "first_person_head_attachment.h"
@@ -355,6 +358,9 @@ struct HeadPartProbe {
 };
 
 struct FirstPersonSession {
+#if defined(__ANDROID__)
+    std::string model_id;
+#endif
     void* character = nullptr;
     void* head = nullptr;
     uint32_t head_handle = 0;
@@ -1223,6 +1229,9 @@ void* FindModelTransform() {
 #include "free_camera_runtime.inc"
 
 void ReleaseHeadTransform() {
+#if defined(__ANDROID__)
+    g_first_person.model_id.clear();
+#endif
     if (g_first_person.head_handle && g_host && g_host->gchandle_free) {
         g_host->gchandle_free(g_host->context, g_first_person.head_handle);
     }
@@ -1408,10 +1417,8 @@ void FpRefreshHiddenParts(bool hide) {
 }
 
 // Rewrites the CameraState that Cinemachine is about to push to the Unity
-// camera. The orientation is kept exactly as the game produced it (so aim
-// offsets and look input stay authoritative) and only the position is moved to
-// the eye anchor. The corrections are cleared so the pushed pose equals the raw
-// pose instead of being nudged back by the collider/damping stages.
+// camera. Android uses the final game orientation; Windows retains its existing
+// raw-orientation calculation and correction behavior.
 void ApplyFirstPersonState(void* state) {
     if (!g_state_layout.ready || !IsObjectAlive(g_first_person.head)) {
         FpFacingUpdate(false, {}, 60);
@@ -1419,6 +1426,43 @@ void ApplyFirstPersonState(void* state) {
         return;
     }
 
+#if defined(__ANDROID__)
+    Quaternion orientation{}, game_correction{};
+    float dutch=0;
+    if (!ReadBytes(state, g_state_layout.raw_orientation, &orientation,sizeof(orientation)) ||
+        !ReadBytes(state, g_state_layout.orientation_correction,&game_correction,sizeof(game_correction)) ||
+        !ReadBytes(state,g_state_layout.lens+g_state_layout.lens_dutch,&dutch,sizeof(dutch)) ||
+        !FpMath::Unit({orientation.x,orientation.y,orientation.z,orientation.w}) ||
+        !FpMath::Unit({game_correction.x,game_correction.y,game_correction.z,game_correction.w}) ||
+        !std::isfinite(dutch)) {
+        FpFacingUpdate(false, {}, 60);
+        FpMotionReset();
+        return;
+    }
+    const FpMath::Quat control{orientation.x,orientation.y,orientation.z,orientation.w};
+    const FpMath::Quat correction{game_correction.x,game_correction.y,game_correction.z,game_correction.w};
+    const auto roll=FpMath::AxisAngle({0,0,1},dutch);
+    FpMath::Quat basis=control*correction*roll;
+    FpMath::Quat applied_correction=correction;
+    if (g_first_person_extend_look_range.load(std::memory_order_relaxed)) {
+        const float extra_pitch=FpMath::ExpandLookPitch(basis,
+            kFirstPersonLookUpRange,kFirstPersonLookDownRange);
+        if (extra_pitch!=0.f) {
+            applied_correction=correction*FpMath::AxisAngle({1,0,0},extra_pitch);
+            basis=control*applied_correction*roll;
+        }
+    }
+    FpFacingUpdate(!g_free_camera_active && g_first_person_movement.load(std::memory_order_relaxed),
+        FpMath::Rotate(basis,{0,0,1}),g_first_person_side_look_limit.load(std::memory_order_relaxed));
+    // Facing may rotate the actor and therefore move the head in this push.
+    Vector3 head{};
+    if (!GetValue(Contract("unity.transform.position.get"),
+            g_first_person.head, head) || !IsFinite(head)) {
+        FpFacingUpdate(false, {}, 60);
+        FpMotionReset();
+        return;
+    }
+#else
     Quaternion orientation{};
     if (!ReadBytes(state, g_state_layout.raw_orientation, &orientation,
             sizeof(orientation)) || !FpMath::Unit({orientation.x,orientation.y,orientation.z,orientation.w})) {
@@ -1433,12 +1477,18 @@ void ApplyFirstPersonState(void* state) {
         FpMotionReset();
         return;
     }
+#endif
 
     // Eye anchor, ported from the upstream enhancer. The forward offset is
     // applied along the horizontal projection of the view direction, so looking
     // down moves the eye towards the face without dragging it downwards; the
     // height offset stays world-vertical.
+#if defined(__ANDROID__)
+    const auto final_forward=FpMath::Rotate(basis,{0,0,1});
+    const Vector3 forward{final_forward.x,final_forward.y,final_forward.z};
+#else
     const Vector3 forward = RotateVector(orientation, Vector3{0.0f, 0.0f, 1.0f});
+#endif
     const float planar_length =
         std::sqrt(forward.x * forward.x + forward.z * forward.z);
     const Vector3 planar = planar_length > 0.001f
@@ -1449,9 +1499,21 @@ void ApplyFirstPersonState(void* state) {
     const Vector3 eye = Add(head, Add(Vector3{0.0f, eye_height, 0.0f},
         Scale(planar, eye_forward)));
 
-    // The vertical look range is widened past the game's own pitch clamp by
-    // folding the upstream delta into the orientation correction. Disabled by
-    // default, which leaves the pushed correction at identity.
+#if defined(__ANDROID__)
+    // Preserve the game correction unless Android's optional animation replaces
+    // it with a measured final world orientation.
+    const int animation_mode = g_first_person_animation_mode.load(std::memory_order_relaxed);
+    if (animation_mode != 0 && FpFacingAnimationAllowed()) {
+        const auto animated = FpMotionApply(basis,animation_mode,
+            g_first_person_animation_strength.load(std::memory_order_relaxed));
+        const float norm=control.x*control.x+control.y*control.y+control.z*control.z+control.w*control.w;
+        const auto inverse_roll=FpMath::Quat{-roll.x,-roll.y,-roll.z,roll.w};
+        applied_correction=FpMath::Quat{-control.x/norm,-control.y/norm,-control.z/norm,control.w/norm} * animated * inverse_roll;
+    } else FpMotionReset();
+    const Quaternion rotation_correction{applied_correction.x,applied_correction.y,
+        applied_correction.z,applied_correction.w};
+#else
+    // Preserve the existing Windows first-person pose behavior.
     Quaternion rotation_correction{0.0f, 0.0f, 0.0f, 1.0f};
     if (g_first_person_extend_look_range.load(std::memory_order_relaxed)) {
         const FpMath::Quat view{orientation.x, orientation.y, orientation.z,
@@ -1459,13 +1521,11 @@ void ApplyFirstPersonState(void* state) {
         const float extra_pitch = FpMath::ExpandLookPitch(view,
             kFirstPersonLookUpRange, kFirstPersonLookDownRange);
         if (extra_pitch != 0.0f) {
-            // Degrees to half-angle radians (pi / 360), applied around local X.
             const float half = extra_pitch * 0.008726646259971648f;
             rotation_correction = Quaternion{std::sin(half), 0.0f, 0.0f,
                 std::cos(half)};
         }
     }
-
     const FpMath::Quat control{orientation.x,orientation.y,orientation.z,orientation.w};
     const FpMath::Quat pitch{rotation_correction.x,rotation_correction.y,rotation_correction.z,rotation_correction.w};
     const auto view = control * pitch;
@@ -1479,6 +1539,7 @@ void ApplyFirstPersonState(void* state) {
         const auto correction = FpMath::Quat{-control.x/norm,-control.y/norm,-control.z/norm,control.w/norm} * animated;
         rotation_correction = {correction.x,correction.y,correction.z,correction.w};
     } else FpMotionReset();
+#endif
 
     const float field_of_view = g_first_person_fov.load(std::memory_order_relaxed);
     const float near_clip = g_first_person_near_clip.load(std::memory_order_relaxed);

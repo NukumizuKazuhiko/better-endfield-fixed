@@ -156,6 +156,37 @@ final class FrameworkSettings {
             return !java.util.Arrays.asList(remoteService.listRemoteFiles()).contains(name);
         } catch(RuntimeException error) {Log.e("BetterEndfield.Install","Removing shared package failed",error);return false;}
     }
+    /** A failed listing must not be mistaken for an empty remote store during cleanup. */
+    static synchronized String[] listBem() throws java.io.IOException {
+        return checkedBemNames(remoteService!=null,()->remoteService.listRemoteFiles());
+    }
+    static String[] checkedBemNames(boolean connected,java.util.function.Supplier<String[]> source) throws java.io.IOException {
+        if(!connected) throw new java.io.IOException("框架服务未连接");
+        try {
+            String[] listed=source.get();
+            if(listed==null) throw new java.io.IOException("框架模型文件列表不可用");
+            java.util.ArrayList<String> names=new java.util.ArrayList<>();
+            for(String name:listed)
+                if(name!=null && name.matches("bem-[a-f0-9-]{36}\\.bem")) names.add(name);
+            return names.toArray(new String[0]);
+        } catch(RuntimeException error) {
+            Log.e("BetterEndfield.Install","Listing shared packages failed",error);
+            throw new java.io.IOException("框架模型文件列举失败",error);
+        }
+    }
+    /** A missing package is -1; opening a remote name directly may create an empty file. */
+    static synchronized long bemSize(String name) {
+        if(remoteService==null || !name.matches("bem-[a-f0-9-]{36}\\.bem")) return -1;
+        try {
+            if(!java.util.Arrays.asList(remoteService.listRemoteFiles()).contains(name)) return -1;
+            try(ParcelFileDescriptor descriptor=remoteService.openRemoteFile(name)) {return descriptor.getStatSize();}
+        } catch(RuntimeException | java.io.IOException error) {return -1;}
+    }
+    static synchronized java.io.InputStream openBem(String name) throws java.io.IOException {
+        if(bemSize(name)<=0) throw new java.io.IOException("框架中缺少模型包文件，请重新导入");
+        try {return new ParcelFileDescriptor.AutoCloseInputStream(remoteService.openRemoteFile(name));}
+        catch(RuntimeException error) {throw new java.io.IOException("模型包读取失败："+error.getMessage(),error);}
+    }
     static synchronized boolean publishBem(java.io.File file,String name) {
         if(remoteService==null || !name.matches("bem-[a-f0-9-]+\\.bem")) return false;
         try(ParcelFileDescriptor descriptor=remoteService.openRemoteFile(name);

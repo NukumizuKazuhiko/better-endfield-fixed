@@ -295,7 +295,7 @@ public final class XposedEntry extends XposedModule {
                         try {
                             BemInstalledResources.configuration=BemInstalledResources.prepare(context,
                                 settings.getString(BemInstaller.INDEX,"[]"),
-                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report);
+                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report,true);
                         } catch(Exception error) {report("Installed BEM preparation failed: "+error);}
                         // The imported .vmd rides the same remote file space the
                         // packages do; its declared length comes from the same

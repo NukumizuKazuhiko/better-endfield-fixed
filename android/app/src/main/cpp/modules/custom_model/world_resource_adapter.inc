@@ -27,14 +27,12 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
     void* transforms=Invoke(Contract("game_object.renderers"),asset,transform_args);
     const int transform_count=ArrayLength(transforms);
     if (transform_count<=0 || transform_count>8192) return false;
-    auto relative=[](void* object) {
-        auto path=BuildTransformPath(object);
-        const auto slash=path.find('/');
-        return slash==path.npos?std::string{}:path.substr(slash+1);
-    };
     std::unordered_map<std::string,void*> world_bones;
     for (int i=0;i<transform_count;++i) {
-        void* bone=ArrayValue(transforms,i); const auto path=relative(bone);
+        void* bone=ArrayValue(transforms,i); std::string path;
+        if (!ResourceRelativePath(asset,bone,path)) {
+            Log("Android world Transform outside resource root"); return false;
+        }
         if (!path.empty() && !world_bones.emplace(path,bone).second) return false;
     }
     for (size_t i=0;i<sources.size();++i) {
@@ -45,12 +43,15 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
         void* renderer=nullptr;
         for (int j=0;j<count;++j) {
             void* candidate=ArrayValue(renderers,j);
-            if (ObjectName(candidate)!=target_name || relative(candidate)!=std::string("Mesh_all/lod1/")+target_name) continue;
+            std::string path;
+            if (!ResourceRelativePath(asset,candidate,path)) return false;
+            if (ObjectName(candidate)!=target_name || path!=std::string("Mesh_all/lod1/")+target_name) continue;
             if (renderer) return false;
             renderer=candidate;
         }
-        if (!renderer || !SameMeshSpace(source.renderer,renderer)) {
-            Log("Android world renderer missing or mesh space differs: "+target_name); return false;
+        if (!renderer) { Log("Android world renderer missing: "+target_name); return false; }
+        if (!SameMeshSpace(source.renderer,renderer)) {
+            Log("Android world renderer mesh space differs: "+target_name); return false;
         }
         PreparedBinding target;
         target.component_id=source.component_id; target.renderer=renderer;
@@ -104,7 +105,10 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
             const auto& component=bem.components[source.component_id];
             for (int b=0;b<bones;++b) {
                 void* ui_bone=ArrayValue(source.custom_bones,b);
-                const auto path=relative(ui_bone);
+                std::string path;
+                if (!ResourceRelativePath(donor,ui_bone,path)) {
+                    Log("Android UI bone outside resource root"); return false;
+                }
                 auto found=world_bones.find(path);
                 // BEM 1.2 aliases: the world skeleton may name this bone differently
                 // at the same parent path; accept only a declared alias there.
@@ -146,8 +150,10 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
         const auto proxy_name=stem+"_shadowProxyMobile";
         for (int j=0;j<count;++j) {
             void* renderer=ArrayValue(renderers,j);
+            std::string path;
+            if (!ResourceRelativePath(asset,renderer,path)) return false;
             if (ObjectName(renderer)!=proxy_name ||
-                relative(renderer)!=std::string("Shadow_Proxy/SP_Mobile/")+proxy_name) continue;
+                path!=std::string("Shadow_Proxy/SP_Mobile/")+proxy_name) continue;
             PreparedBinding proxy;
             proxy.component_id=source.component_id; proxy.renderer=renderer;
             proxy.original_mesh=proxy.custom_mesh=Invoke(Contract("skinned.get_shared_mesh"),renderer,nullptr);

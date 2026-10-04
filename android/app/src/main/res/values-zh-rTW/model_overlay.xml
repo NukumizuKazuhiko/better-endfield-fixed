@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bem_disable_all">關閉全部模型</string>
+    <string name="bem_disable_all_saved">已關閉全部模型，重新啟動遊戲後生效。</string>
+    <string name="bem_disable_all_failed">關閉全部模型失敗：%1$s</string>
+    <string name="bem_filter_character">按角色篩選</string>
+    <string name="bem_all_characters">全部角色</string>
+    <string name="bem_storage_title">儲存空間</string>
+    <string name="bem_keep_local_copies">保留本機副本</string>
+    <string name="bem_keep_local_copies_hint">關閉後，若框架中有相同模型包，會移除應用程式內的副本。</string>
+    <string name="bem_clean_unused">清理未使用資料</string>
+    <string name="bem_storage_setting_failed">儲存設定儲存失敗。</string>
+    <string name="bem_operation_busy">請等待目前操作完成。</string>
+    <string name="overlay_auto_snap">拖動後自動貼邊</string>
+    <string name="overlay_auto_snap_hint">放開懸浮按鈕後貼近左邊或右邊。</string>
+    <string name="overlay_transparency">懸浮窗透明度</string>
+</resources>

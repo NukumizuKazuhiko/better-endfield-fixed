@@ -18,7 +18,11 @@ bool Boolean(std::string_view s,bool& out) {
 }
 std::span<const CharacterAdapter> CharacterAdapters() { return {}; }
 const EnabledMod* ModRegistry::Match(std::string_view resource) const {
+#if defined(__ANDROID__)
+    resource=ResourceBaseName(resource);
+#else
     if(resource.ends_with("(Clone)")) resource.remove_suffix(7);
+#endif
     for(const auto& mod:enabled) if(resource==mod.adapter->world_resource||resource==mod.adapter->ui_resource) return &mod;
     return nullptr;
 }

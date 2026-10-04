@@ -97,6 +97,29 @@ fun BemInstallScreen(state: BemInstallState) {
                 )
 
                 PanelCard {
+                    ListCaption(stringResource(R.string.bem_storage_title))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.bem_keep_local_copies),
+                            color = Be.Colors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = state.keepLocalCopies,
+                            onCheckedChange = state::changeLocalCopies,
+                            enabled = !state.busy,
+                        )
+                    }
+                    BodyText(stringResource(R.string.bem_keep_local_copies_hint))
+                    GhostButton(
+                        text = stringResource(R.string.bem_clean_unused),
+                        onClick = state::cleanUnused,
+                        enabled = !state.busy && state.indexBroken == null,
+                        modifier = Modifier.fillMaxWidth().padding(top = Be.Space.l),
+                    )
+                }
+
+                PanelCard {
                     ListCaption("处理状态")
                     BodyText(state.status, Modifier.padding(top = 9.dp))
                     if (state.busy) {
@@ -141,11 +164,18 @@ fun BemInstallScreen(state: BemInstallState) {
                         )
                     }
                 } else {
+                    val characterIds = state.characterIds
+                    FieldLabel(stringResource(R.string.bem_filter_character))
+                    SelectField(
+                        options = listOf(stringResource(R.string.bem_all_characters)) + characterIds.map(state::characterLabel),
+                        selectedIndex = (characterIds.indexOf(state.selectedCharacter) + 1).coerceAtLeast(0),
+                        onSelect = { state.selectCharacter(if (it == 0) "" else characterIds[it - 1]) },
+                    )
                     Column(
                         Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(Be.Space.l),
                     ) {
-                        state.packages.forEach { pkg ->
+                        state.visiblePackages.forEach { pkg ->
                             PackageCard(
                                 pkg = pkg,
                                 busy = state.busy,

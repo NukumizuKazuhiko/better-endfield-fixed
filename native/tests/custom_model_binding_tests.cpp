@@ -164,6 +164,10 @@ void RegistryTests(const std::filesystem::path& path) {
     ModRegistry moved=std::move(registry);
     Check(moved.standalone_lod && moved.enabled.size()==1 && moved.enabled[0].appearance=="hidden","appearance/LOD selection lost");
     Check(moved.Match("world(Clone)") && std::string(moved.Match("ui")->adapter->components[1].name)=="mesh1","owned adapter invalid after move");
+    Check(ResourceBaseName("world(Clone)#27")=="world" && ResourceBaseName("world#27")=="world",
+        "Android pooled resource name did not normalize");
+    Check(ResourceBaseName("world(Clone)#27suffix")!="world" && ResourceBaseName("world#")!="world",
+        "non-decimal pool suffix was accepted");
     Check(ParseModRegistry(config+"[Mod.duplicate]\nenabled=true\npackage="+
         std::string(reinterpret_cast<const char*>(filename.data()),filename.size())+"\n",path.parent_path(),registry,error),error.c_str());
     Check(registry.enabled.empty(),"conflicting enabled packages were not disabled");

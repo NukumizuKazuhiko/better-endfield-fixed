@@ -155,7 +155,8 @@ BE_Result LoginModelModule::CreateHookCallback(
     }
     void* stub = nullptr;
     std::string error;
-    if (!self->hook_broker_.Install(target, detour, original, stub, error)) {
+    if (!self->hook_broker_.Install(module_id == nullptr ? self->Id() : module_id,
+            target, detour, original, stub, error)) {
         LogError(self->Id(), error.c_str());
         return BE_Result_Failed;
     }
@@ -169,16 +170,17 @@ BE_Result LoginModelModule::ReleaseHooksCallback(void* context, const char* modu
         return BE_Result_InvalidArgument;
     }
     const std::string requested = module_id == nullptr ? std::string{} : module_id;
+    bool failed = false;
     for (HookRecord& hook : self->hooks_) {
         if (requested.empty() || hook.module_id == requested) {
-            self->hook_broker_.Remove(hook.stub);
+            if (!self->hook_broker_.Remove(hook.stub)) failed = true;
         }
     }
     self->hooks_.erase(
         std::remove_if(self->hooks_.begin(), self->hooks_.end(),
             [](const HookRecord& hook) { return hook.stub == nullptr; }),
         self->hooks_.end());
-    return BE_Result_Ok;
+    return failed ? BE_Result_Failed : BE_Result_Ok;
 }
 
 int LoginModelModule::CopyConfigurationCallback(

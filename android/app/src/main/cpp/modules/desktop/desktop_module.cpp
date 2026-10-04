@@ -151,7 +151,8 @@ BE_Result DesktopModule::CreateHookCallback(
     }
     void* stub = nullptr;
     std::string error;
-    if (!self->hook_broker_.Install(target, detour, original, stub, error)) {
+    if (!self->hook_broker_.Install(module_id == nullptr ? self->id_ : module_id,
+            target, detour, original, stub, error)) {
         LogError(self->id_, error.c_str());
         return BE_Result_Failed;
     }
@@ -165,17 +166,17 @@ BE_Result DesktopModule::ReleaseHooksCallback(void* context, const char* module_
         return BE_Result_InvalidArgument;
     }
     const std::string requested = module_id == nullptr ? std::string{} : module_id;
+    bool failed = false;
     for (HookRecord& hook : self->hooks_) {
         if (requested.empty() || hook.module_id == requested) {
-            self->hook_broker_.Remove(hook.stub);
-            hook.stub = nullptr;
+            if (!self->hook_broker_.Remove(hook.stub)) failed = true;
         }
     }
     self->hooks_.erase(
         std::remove_if(self->hooks_.begin(), self->hooks_.end(),
             [](const HookRecord& hook) { return hook.stub == nullptr; }),
         self->hooks_.end());
-    return BE_Result_Ok;
+    return failed ? BE_Result_Failed : BE_Result_Ok;
 }
 
 int DesktopModule::CopyConfigurationCallback(

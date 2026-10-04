@@ -28,6 +28,7 @@ class BemOptionGroup(
  */
 class BemPackage(
     val generation: String,
+    val characterId: String,
     val name: String,
     val textureMode: String,
     val minorVersion: Int,
@@ -114,6 +115,18 @@ class BemInstallState(private val context: Context) {
         private set
     var indexBroken by mutableStateOf<String?>(null)
         private set
+    var selectedCharacter by mutableStateOf("")
+        private set
+    var keepLocalCopies by mutableStateOf(FrameworkSettings.open(context).getBoolean(BemInstaller.KEEP_LOCAL_COPIES, true))
+        private set
+    private val characterNames: JSONObject = try {
+        context.assets.open("character-names.json").bufferedReader().use { JSONObject(it.readText()) }
+    } catch (_: Exception) { JSONObject() }
+
+    val characterIds: List<String> get() = packages.map { it.characterId }.distinct().sorted()
+    val visiblePackages: List<BemPackage> get() = packages.filter { selectedCharacter.isEmpty() || it.characterId == selectedCharacter }
+    fun characterLabel(id: String): String = characterNames.optString(id, id)
+    fun selectCharacter(id: String) { selectedCharacter = id }
 
     private var displayedIndex = ""
 
@@ -131,6 +144,7 @@ class BemInstallState(private val context: Context) {
             0L
         }
         val index = FrameworkSettings.open(context).getString(BemInstaller.INDEX, "[]") ?: "[]"
+        keepLocalCopies = FrameworkSettings.open(context).getBoolean(BemInstaller.KEEP_LOCAL_COPIES, true)
         if (index != displayedIndex) {
             displayedIndex = index
             rebuild(index)
@@ -151,6 +165,7 @@ class BemInstallState(private val context: Context) {
         }
         if (list.isNotEmpty()) indexBroken = null
         packages = list
+        if (selectedCharacter.isNotEmpty() && list.none { it.characterId == selectedCharacter }) selectedCharacter = ""
     }
 
     private fun parse(entry: JSONObject): BemPackage {
@@ -187,6 +202,7 @@ class BemInstallState(private val context: Context) {
 
         val pkg = BemPackage(
             generation = generation,
+            characterId = entry.getString("character_id"),
             name = entry.getString("name"),
             textureMode = entry.optString("texture_mode", "converted"),
             minorVersion = minor,
@@ -247,6 +263,26 @@ class BemInstallState(private val context: Context) {
         BemInstaller.status = context.getString(R.string.bem_disable_all_failed, error.message ?: "")
         status = BemInstaller.status
         false
+    }
+
+    fun cleanUnused() {
+        if (!BemInstaller.cleanUnused(context)) status = context.getString(R.string.bem_operation_busy)
+    }
+
+    fun changeLocalCopies(keep: Boolean) {
+        if (busy) return
+        val settings = FrameworkSettings.open(context)
+        if (!settings.edit().putBoolean(BemInstaller.KEEP_LOCAL_COPIES, keep).commit()) {
+            status = context.getString(R.string.bem_storage_setting_failed)
+            return
+        }
+        if (!BemInstaller.applyLocalCopies(context, keep)) {
+            settings.edit().putBoolean(BemInstaller.KEEP_LOCAL_COPIES, !keep).commit()
+            status = context.getString(R.string.bem_operation_busy)
+            return
+        }
+        keepLocalCopies = keep
+        refresh()
     }
 
     fun convert(generation: String) {

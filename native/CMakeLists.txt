@@ -226,6 +226,10 @@ add_executable(BetterEndfield.AndroidWorldBindingTests EXCLUDE_FROM_ALL
     tests/android_world_binding_tests.cpp)
 better_endfield_target_defaults(BetterEndfield.AndroidWorldBindingTests)
 
+add_executable(BetterEndfield.GenericModelMatchingTests EXCLUDE_FROM_ALL
+    tests/generic_model_matching_tests.cpp)
+better_endfield_target_defaults(BetterEndfield.GenericModelMatchingTests)
+
 better_endfield_target_defaults(BetterEndfield.BemValidate)
 
 # Read-only research utility. It is deliberately excluded from the default

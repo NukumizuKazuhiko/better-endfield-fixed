@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bem_disable_all">すべてのモデルを無効化</string>
+    <string name="bem_disable_all_saved">すべてのモデルを無効化しました。ゲームの再起動後に反映されます。</string>
+    <string name="bem_disable_all_failed">モデルを無効化できませんでした：%1$s</string>
+    <string name="bem_filter_character">キャラクターで絞り込み</string>
+    <string name="bem_all_characters">すべてのキャラクター</string>
+    <string name="bem_storage_title">ストレージ</string>
+    <string name="bem_keep_local_copies">ローカルコピーを保持</string>
+    <string name="bem_keep_local_copies_hint">オフにすると、フレームワーク側に同じモデルがある場合にアプリ内のコピーを削除します。</string>
+    <string name="bem_clean_unused">未使用データを削除</string>
+    <string name="bem_storage_setting_failed">ストレージ設定を保存できませんでした。</string>
+    <string name="bem_operation_busy">現在の処理が終わるまでお待ちください。</string>
+    <string name="overlay_auto_snap">ドラッグ後に画面端へ吸着</string>
+    <string name="overlay_auto_snap_hint">ボタンを離すと左右どちらかの端に吸着します。</string>
+    <string name="overlay_transparency">オーバーレイの透明度</string>
+</resources>

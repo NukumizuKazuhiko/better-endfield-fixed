@@ -1,6 +1,51 @@
 // Included inside CameraModule's anonymous namespace, after the model scanner.
 // Engine bindings are resolved by name; no Unity native object layouts are read.
 namespace FpMesh = BetterEndfield::FirstPersonMesh;
+#if defined(__ANDROID__)
+namespace FpProfiles = BetterEndfield::FirstPersonProfiles;
+
+std::string FpModelName(std::string name) {
+    const auto hash=name.rfind('#');
+    if(hash!=name.npos && hash+1<name.size() &&
+        name.find_first_not_of("0123456789",hash+1)==name.npos) name.resize(hash);
+    while(name.ends_with("(Clone)")) name.resize(name.size()-7);
+    return name;
+}
+const FpProfiles::Profile* FpCurrentProfile() {
+    return FpProfiles::LookupProfile(g_first_person.model_id);
+}
+void FpRefreshProfile() {
+    auto* model=FindModelObject();
+    const std::string name=model&&IsObjectAlive(model)?FpModelName(ObjectName(model)):std::string{};
+    const std::string id=FpProfiles::LookupProfile(name)?name:std::string{};
+    if(id!=g_first_person.model_id) {
+        g_first_person.model_id=id;
+        if(!id.empty()) Log("First person bone profile: "+id);
+    }
+}
+uint8_t FpBoneKind(void* bone,void* model_root) {
+    if(!bone||!model_root||!IsObjectAlive(bone)) return 0;
+    if(bone==g_first_person.neck) return 2;
+    const auto* profile=FpCurrentProfile();
+    std::vector<std::string> reverse;
+    for(int depth=0;bone&&depth<64;++depth) {
+        if(bone==g_first_person.head && bone!=model_root) return 1;
+        if(bone==model_root) {
+            if(!profile) return 0;
+            std::string path;
+            for(auto it=reverse.rbegin();it!=reverse.rend();++it) {
+                if(!path.empty()) path+='/';
+                path+=*it;
+            }
+            return static_cast<uint8_t>(FpProfiles::MatchBonePath(profile,path).semantic);
+        }
+        if(!IsObjectAlive(bone)) return 0;
+        if(profile) reverse.push_back(FpModelName(ObjectName(bone)));
+        bone=Invoke(Contract("unity.transform.parent.get"),bone,nullptr);
+    }
+    return 0; // Detached bones and nested foreign actors are never inferred.
+}
+#endif
 
 // Structured exception handling is a Windows-only facility and clang/AArch64 has
 // no equivalent. On Android these calls run unguarded, like every other managed
@@ -83,18 +128,43 @@ FpHeadBoneArray g_fp_head_bones;
 
 bool FpIsHeadAttachment(const HeadPartProbe& part) {
     if (!part.renderer || !g_first_person.head) return false;
-    const auto parent = [](void* bone) {
-        return Invoke(Contract("unity.transform.parent.get"), bone, nullptr);
+#if defined(__ANDROID__)
+    // Shadow proxies carry the original full silhouette. Never hide them as a
+    // visible head accessory, even if their palette contains only head bones.
+    for(const auto* name:{&part.object_name,&part.mesh_name}) {
+        const auto lower=LowerAscii(*name);
+        if(lower.find("shadowproxy")!=std::string::npos ||
+           lower.find("shadow_proxy")!=std::string::npos) return false;
+    }
+#endif
+    const auto parent=[](void* bone) {
+        return Invoke(Contract("unity.transform.parent.get"),bone,nullptr);
     };
     if (part.skinned) {
         std::vector<void*> bones;
-        return g_fp_head_bones.Read(part.renderer, bones) &&
-            BetterEndfield::FirstPerson::AllBonesUnderHead(bones, g_first_person.head, parent);
+#if defined(__ANDROID__)
+        if(!g_fp_head_bones.Read(part.renderer, bones)) return false;
+        void* model_root=FindModelTransform();
+        if(!model_root) return BetterEndfield::FirstPerson::AllBonesUnderHead(
+            bones,g_first_person.head,parent);
+        return model_root && std::all_of(bones.begin(),bones.end(),[&](void* bone) {
+            return FpBoneKind(bone,model_root)==1;
+        });
+#else
+        return g_fp_head_bones.Read(part.renderer,bones) &&
+            BetterEndfield::FirstPerson::AllBonesUnderHead(bones,g_first_person.head,parent);
+#endif
     }
     void* game_object = Invoke(Contract("unity.component.game_object"), part.renderer, nullptr);
     void* transform = game_object
         ? Invoke(Contract("unity.game_object.transform"), game_object, nullptr) : nullptr;
-    return BetterEndfield::FirstPerson::IsUnderHead(transform, g_first_person.head, parent);
+#if defined(__ANDROID__)
+    void* model_root=FindModelTransform();
+    return model_root ? FpBoneKind(transform,model_root)==1 :
+        BetterEndfield::FirstPerson::IsUnderHead(transform,g_first_person.head,parent);
+#else
+    return BetterEndfield::FirstPerson::IsUnderHead(transform,g_first_person.head,parent);
+#endif
 }
 #if defined(__ANDROID__)
 bool FpIsPrimaryCharacterPart(const HeadPartProbe& part, void* model) {
@@ -316,15 +386,22 @@ bool FpPalette(void* renderer,void* mesh,std::vector<void*>& bones,std::vector<u
     std::vector<FpMatrix> matrices;
     if(!bone_array||!bind_array||!FpArray(bone_array.object,bones)||!FpArray(bind_array.object,matrices)||matrices.size()!=bones.size())return false;
     kinds.resize(bones.size());int head=-1,neck=-1;
+#if defined(__ANDROID__)
+    void* model_root=FindModelTransform();
+#endif
     for(size_t i=0;i<bones.size();++i) {
         if(bones[i]==g_first_person.head)head=int(i);
         if(bones[i]==g_first_person.neck)neck=int(i);
+#if defined(__ANDROID__)
+        kinds[i]=FpBoneKind(bones[i],model_root);
+#else
         auto current=bones[i];
         for(int depth=0;current&&depth<32;++depth) {
             if(current==g_first_person.head){kinds[i]=1;break;}
             current=Invoke(Contract("unity.transform.parent.get"),current,nullptr);
         }
         if(bones[i]==g_first_person.neck)kinds[i]=2;
+#endif
     }
     if(head>=0&&neck>=0) {
         FpMesh::Point h,n;
@@ -605,6 +682,9 @@ bool FpBuildPatch(const HeadPartProbe& part,FpPatch& patch,bool fill,float range
     return true;
 }
 void EnsureNeckCap() {
+#if defined(__ANDROID__)
+    FpRefreshProfile();
+#endif
     // The mesh-patch engine depends on icalls that do not all exist on every
     // platform (Android's icall table is partial). When it fails to init the
     // shadow-only fallback below still covers every matched part by itself,

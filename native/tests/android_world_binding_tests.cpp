@@ -55,6 +55,15 @@ void Log(const std::string& value) { logs.push_back(value); }
 void* RootTemporary(void* value) { return value; }
 std::string ObjectName(void* value) { return value?static_cast<Object*>(value)->name:std::string{}; }
 std::string BuildTransformPath(void* value) { return value?static_cast<Object*>(value)->path:std::string{}; }
+bool ResourceRelativePath(void* asset,void* component,std::string& path) {
+    if (!asset || !component) return false;
+    const auto& full=static_cast<Object*>(component)->path;
+    const auto root=static_cast<Object*>(asset)->name+"/";
+    const auto at=full.find(root);
+    if (at==std::string::npos || (at && full[at-1]!='/')) return false;
+    path=full.substr(at+root.size());
+    return !path.empty();
+}
 int ArrayLength(void* value) { return value?static_cast<int>(static_cast<Object*>(value)->array.size()):0; }
 void* ArrayValue(void* value,int index) { return static_cast<Object*>(value)->array.at(index); }
 const char* Contract(const char* key) { return key; }
@@ -137,6 +146,11 @@ int main() {
         g_skinned_renderer_class.type_object=renderer_type;
         { Fixture f; Check(f.Run(),"baseline world binding failed");
           Check(ArrayValue(f.bindings[0].custom_bones,0)==f.world_bone,"world binding retained UI bone"); }
+        { Fixture f; f.world_renderer->path="Scene/Party/chr_test_postmodel/Mesh_all/lod1/Body_lod1";
+          f.world_bone->path="Scene/Party/chr_test_postmodel/Root/Bone";
+          Check(f.Run(),"scene parent polluted resource-relative world identity"); }
+        { Fixture f; f.world_renderer->path="Scene/Unrelated/Mesh_all/lod1/Body_lod1";
+          Check(!f.Run(),"renderer outside world root was accepted"); }
         { Fixture f; f.KeepTexture(); f.world_material->slots.push_back(f.world_material->slots.front());
           Check(f.Run(),"shared texture in two shader properties was rejected"); }
         { Fixture f; f.KeepTexture(); f.world_material->slots.push_back({Make("OriginalTexture")});

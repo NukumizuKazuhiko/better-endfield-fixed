@@ -5,6 +5,7 @@
 #include "bem.h"
 #include "native_mesh_layout.h"
 #include "mod_registry.h"
+#include "generic_model_matcher.h"
 #include "resource_policy.h"
 #include "texture_binding_policy.h"
 #if defined(__ANDROID__)
@@ -172,6 +173,7 @@ MethodContract g_methods[]{
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Renderer",
             "set_enabled", "System.Boolean", "System.Void", 1}, true},
 #if defined(__ANDROID__)
+    {"game_object.get_transform", {"UnityEngine.CoreModule.dll","UnityEngine","GameObject","get_transform",nullptr,"UnityEngine.Transform",0},true},
     {"android.shadow_get", {"UnityEngine.CoreModule.dll","UnityEngine","Renderer","get_shadowCastingMode",nullptr,"UnityEngine.Rendering.ShadowCastingMode",0},true},
     {"android.all_renderers", {"UnityEngine.CoreModule.dll","UnityEngine","Resources","FindObjectsOfTypeAll","System.Type","UnityEngine.Object[]",1},true},
     {"android.renderer_visible", {"UnityEngine.CoreModule.dll","UnityEngine","Renderer","get_isVisible",nullptr,"System.Boolean",0},true},
@@ -480,6 +482,19 @@ std::string BuildTransformPath(void* component) {
     }
     return path;
 }
+
+#if defined(__ANDROID__)
+bool ResourceRelativePath(void* asset,void* component,std::string& path) {
+    const auto result=GenericMatching::CheckedRelativePath(
+        Invoke(Contract("game_object.get_transform"),asset,nullptr),
+        Invoke(Contract("component.get_transform"),component,nullptr),
+        [](void* transform) { return Invoke(Contract("transform.get_parent"),transform,nullptr); },
+        [](void* transform) { return ObjectName(transform); });
+    if (result.status!=GenericMatching::PathStatus::Valid) return false;
+    path=result.path;
+    return true;
+}
+#endif
 
 std::filesystem::path Utf8Path(std::string_view value) {
     if (value.empty()) return {};
@@ -1804,9 +1819,57 @@ bool PrepareResource(const CharacterAdapter& adapter,const BemPocData& bem,void*
     void* renderers=Invoke(Contract("game_object.renderers"),asset,args);
     const int count=ArrayLength(renderers);
     if (!renderers || count<=0 || count>4096) return false;
+#if defined(__ANDROID__)
+    const std::string resource_name(ResourceBaseName(ObjectName(asset)));
+    std::vector<GenericMatching::Candidate> candidates;
+    candidates.reserve(static_cast<size_t>(count));
+    std::vector<void*> used_receivers;
+    for (int i=0;i<count;++i) {
+        void* renderer=ArrayValue(renderers,i);
+        std::string path;
+        if (!renderer || !ResourceRelativePath(asset,renderer,path) || path.empty()) {
+            Log("Android resource renderer lies outside its root"); return false;
+        }
+        GenericMatching::Candidate candidate;
+        candidate.key={adapter.id,resource_name,path,
+            GenericMatching::ClassifyReceiver(path)};
+        candidate.renderer=renderer;
+        void* mesh=Invoke(Contract("skinned.get_shared_mesh"),renderer,nullptr);
+        if (mesh) {
+            int32_t submeshes=0;
+            if (InvokeValue(Contract("mesh.get_sub_mesh_count"),mesh,nullptr,submeshes) &&
+                submeshes>0 && submeshes<=256) {
+                uint64_t indices=0;
+                bool valid=true;
+                for (int32_t sub=0;sub<submeshes;++sub) {
+                    uint32_t size=0; void* index[]{&sub};
+                    if (!InvokeValue(Contract("mesh.get_index_count"),mesh,index,size)) {valid=false;break;}
+                    indices+=size;
+                }
+                if (valid) candidate.pristine={GenericMatching::DonorOrigin::Pristine,mesh,
+                    ObjectName(mesh),indices,true,{}};
+            }
+        }
+        candidates.push_back(std::move(candidate));
+    }
+#endif
     for (const auto& component:bem.components) {
         const auto& identity=adapter.components[component.info.component_id];
         void* matched=nullptr;
+#if defined(__ANDROID__)
+        const GenericMatching::Request request{adapter.id,resource_name,
+            identity.name,GenericMatching::Region::Lod0,identity.indices,true,{}};
+        const auto match=GenericMatching::SelectUnique(candidates,request,[](const auto&) { return true; });
+        if (match.status!=GenericMatching::MatchStatus::Matched) {
+            Log("Android UI renderer identity unavailable or ambiguous: "+std::string(identity.name));
+            return false;
+        }
+        matched=candidates[match.index].renderer;
+        used_receivers.push_back(matched);
+        if (!GenericMatching::DistinctReceivers(used_receivers)) {
+            Log("Android UI components share a renderer"); return false;
+        }
+#else
         for (int i=0;i<count;++i) {
             void* renderer=ArrayValue(renderers,i);
             if (ObjectName(renderer)!=identity.name) continue;
@@ -1817,6 +1880,7 @@ bool PrepareResource(const CharacterAdapter& adapter,const BemPocData& bem,void*
             if (matched) { Log("Ambiguous renderer identity: "+std::string(identity.name)); return false; }
             matched=renderer;
         }
+#endif
         if (!matched) { Log("Required component missing: "+std::string(identity.name)); return false; }
         PreparedBinding binding;
         binding.component_id=component.info.component_id; binding.renderer=matched;
@@ -2316,7 +2380,11 @@ RetireHooksFn g_retire_hooks=nullptr;
 
 bool ProcessResource(void* asset,ConstructionScope& construction) {
     if (!RootTemporary(asset)) return false;
+#if defined(__ANDROID__)
+    const auto name=std::string(ResourceBaseName(ObjectName(asset)));
+#else
     const auto name=ObjectName(asset);
+#endif
     const EnabledMod* mod=g_registry.Match(name);
     if (!mod) return false;
 #if defined(__ANDROID__)

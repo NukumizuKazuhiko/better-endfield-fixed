@@ -127,6 +127,69 @@ public final class BemInstallerTest extends Instrumentation {
         entry.put("generation","../../bad");
         try {BemInstalledResources.prepare(getInstrumentation().getTargetContext(),new JSONArray().put(entry).toString(),name->new FileInputStream(input),x->{});fail("Accepted path traversal");}catch(IOException expected){}
     }
+    public void testGameStartupPrunesOnlyUnusedGenerations() throws Exception {
+        android.content.Context base=getTargetContext();
+        File isolated=new File(base.getCacheDir(),"game-prune-"+java.util.UUID.randomUUID());isolated.mkdirs();
+        android.content.Context game=new android.content.ContextWrapper(base) {
+            @Override public File getFilesDir(){return isolated;}
+        };
+        String active="00000000-0000-0000-0000-000000000011",stale="00000000-0000-0000-0000-000000000012";
+        File root=new File(isolated,"betterendfield/installed-models");root.mkdirs();
+        Files.writeString(new File(root,stale+".bem").toPath(),"old");
+        Files.writeString(new File(root,"keep.txt").toPath(),"other data");
+        File source=fixture();
+        JSONObject entry=new JSONObject().put("generation",active).put("remote","bem-"+active+".bem")
+                .put("bytes",source.length()).put("package_id","test.package").put("default_appearance","hidden");
+        BemInstalledResources.prepare(game,new JSONArray().put(entry).toString(),name->new FileInputStream(source),x->{},true);
+        assertTrue(new File(root,active+".bem").isFile());
+        assertFalse(new File(root,stale+".bem").exists());
+        assertTrue(new File(root,"keep.txt").isFile());
+        deleteTree(isolated);
+    }
+    public void testCleanupRetainsIndexedGenerationsAndUnknownFiles() throws Exception {
+        File isolated=new File(getTargetContext().getCacheDir(),"cleanup-"+java.util.UUID.randomUUID());isolated.mkdirs();
+        String active="00000000-0000-0000-0000-000000000021",stale="00000000-0000-0000-0000-000000000022";
+        File keep=new File(isolated,active),remove=new File(isolated,stale),stage=new File(isolated,"stage-00000000-0000-0000-0000-000000000023");
+        keep.mkdir();remove.mkdir();stage.mkdir();
+        Files.writeString(new File(keep,"installed.bem").toPath(),"keep");
+        Files.writeString(new File(remove,"installed.bem").toPath(),"remove");
+        Files.writeString(new File(stage,"source.bem").toPath(),"stage");
+        Files.writeString(new File(isolated,"unrelated.txt").toPath(),"leave");
+        java.util.Set<String> referenced=BemInstaller.referencedGenerations(new JSONArray().put(new JSONObject().put("generation",active)));
+        assertTrue(BemInstaller.cleanLocalUnused(isolated,referenced)>0);
+        assertTrue(keep.isDirectory());assertFalse(remove.exists());assertFalse(stage.exists());
+        assertTrue(new File(isolated,"unrelated.txt").isFile());
+        try {BemInstaller.referencedGenerations(new JSONArray().put(new JSONObject().put("generation","../../bad")));fail("Accepted malformed index");}
+        catch(IOException expected) { }
+        deleteTree(isolated);
+    }
+    public void testCleanupReportsDeletionFailure() throws Exception {
+        File isolated=new File(getTargetContext().getCacheDir(),"cleanup-failure-"+java.util.UUID.randomUUID());isolated.mkdirs();
+        File stale=new File(isolated,"00000000-0000-0000-0000-000000000024");stale.mkdir();
+        Files.writeString(new File(stale,"installed.bem").toPath(),"old");
+        try {
+            BemInstaller.cleanLocalUnused(isolated,java.util.Collections.emptySet(),file->{});
+            fail("Deletion failure was reported as success");
+        } catch(IOException expected) {
+            assertTrue(expected.getMessage().contains("删除失败"));
+            assertTrue(stale.isDirectory());
+        } finally {deleteTree(isolated);}
+    }
+    public void testRemoteListingFailureIsNotEmptyList() throws Exception {
+        try {
+            FrameworkSettings.checkedBemNames(false,()->new String[0]);
+            fail("Disconnected remote was reported as empty");
+        } catch(IOException expected) {assertTrue(expected.getMessage().contains("未连接"));}
+        try {
+            FrameworkSettings.checkedBemNames(true,()->{throw new IllegalStateException("remote failed");});
+            fail("Failed remote listing was reported as empty");
+        } catch(IOException expected) {assertTrue(expected.getMessage().contains("列举失败"));}
+        assertEquals(0,FrameworkSettings.checkedBemNames(true,()->new String[0]).length);
+    }
+    private static void deleteTree(File file) {
+        File[] children=file.listFiles();if(children!=null) for(File child:children) deleteTree(child);
+        file.delete();
+    }
     public void testRealPackageConversionWhenProvided() throws Exception {
         File input=new File(getInstrumentation().getTargetContext().getFilesDir(),realInput);
         if(!input.isFile()) {if(method.equals("testRealPackageConversionWhenProvided")) fail("Missing real package");return;}
