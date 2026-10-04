@@ -237,6 +237,18 @@ class BemInstallState(private val context: Context) {
         false
     }
 
+    fun disableAll(): Boolean = try {
+        BemInstaller.disableAll(context)
+        packages.forEach { it.enabled = false }
+        BemInstaller.status = context.getString(R.string.bem_disable_all_saved)
+        status = BemInstaller.status
+        true
+    } catch (error: Exception) {
+        BemInstaller.status = context.getString(R.string.bem_disable_all_failed, error.message ?: "")
+        status = BemInstaller.status
+        false
+    }
+
     fun convert(generation: String) {
         BemInstaller.convert(context, generation)
     }

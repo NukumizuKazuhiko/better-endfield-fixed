@@ -9,6 +9,32 @@ public final class BemInstallerTest extends Instrumentation {
     public void testCameraSettingsRoundTrip() {
         CameraSettingsTest.run(this);
     }
+    public void testOverlayAppearance() {
+        OverlaySettingsTest.run(this);
+    }
+    public void testDisableAllModelsPreservesSelections() throws Exception {
+        android.content.Context isolated = new android.content.ContextWrapper(getTargetContext()) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) {
+                return super.getSharedPreferences("bem-disable-all-test-" + name, mode);
+            }
+        };
+        android.content.SharedPreferences preferences = FrameworkSettings.open(isolated);
+        try {
+            JSONObject first = new JSONObject().put("generation", "11111111-1111-1111-1111-111111111111")
+                    .put("enabled", true).put("selected_appearance", "alternate");
+            JSONObject second = new JSONObject().put("generation", "22222222-2222-2222-2222-222222222222")
+                    .put("enabled", true).put("selected_options", "shirt:blue");
+            preferences.edit().putString(BemInstaller.INDEX, new JSONArray().put(first).put(second).toString()).commit();
+            BemInstaller.disableAll(isolated);
+            JSONArray stored = BemInstaller.index(isolated);
+            assertFalse(stored.getJSONObject(0).getBoolean("enabled"));
+            assertFalse(stored.getJSONObject(1).getBoolean("enabled"));
+            assertTrue("alternate".equals(stored.getJSONObject(0).getString("selected_appearance")));
+            assertTrue("shirt:blue".equals(stored.getJSONObject(1).getString("selected_options")));
+        } finally {
+            preferences.edit().clear().commit();
+        }
+    }
     public void testRuntimeJournalTransport() {
         android.content.Context context = getTargetContext();
         android.net.Uri uri = android.net.Uri.parse("content://dev.betterendfield.android.journal");

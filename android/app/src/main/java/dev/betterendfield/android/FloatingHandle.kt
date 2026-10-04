@@ -26,7 +26,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-internal fun FloatingHandle(onClick: () -> Unit, onDrag: (Float, Float) -> Unit) {
+internal fun FloatingHandle(
+    onClick: () -> Unit,
+    onDrag: (Float, Float) -> Unit,
+    onDragEnd: () -> Unit,
+) {
     var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var lastWindowPoint by remember { mutableStateOf(Offset.Zero) }
     Box(
@@ -35,9 +39,13 @@ internal fun FloatingHandle(onClick: () -> Unit, onDrag: (Float, Float) -> Unit)
             .border(2.dp, Be.Colors.accent, RoundedCornerShape(15.dp))
             .onGloballyPositioned { coordinates = it }
             .pointerInput(Unit) {
-                detectDragGestures(onDragStart = { point ->
-                    lastWindowPoint = coordinates?.localToWindow(point) ?: point
-                }) { change, _ ->
+                detectDragGestures(
+                    onDragStart = { point ->
+                        lastWindowPoint = coordinates?.localToWindow(point) ?: point
+                    },
+                    onDragEnd = onDragEnd,
+                    onDragCancel = onDragEnd,
+                ) { change, _ ->
                     change.consume()
                     // The Android touch target is moved by the controller. Local
                     // deltas would lose that movement and make the handle lag.

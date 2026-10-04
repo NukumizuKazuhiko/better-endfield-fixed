@@ -89,6 +89,12 @@ fun BemInstallScreen(state: BemInstallState) {
                     enabled = !state.busy && state.packages.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                GhostButton(
+                    text = stringResource(R.string.bem_disable_all),
+                    onClick = { state.disableAll() },
+                    enabled = !state.busy && state.indexBroken == null && state.packages.any { it.enabled },
+                    modifier = Modifier.fillMaxWidth(),
+                )
 
                 PanelCard {
                     ListCaption("处理状态")

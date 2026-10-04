@@ -186,6 +186,12 @@ final class BemInstaller {
         for(int i=0;i<entries.length();++i) {JSONObject entry=entries.getJSONObject(i);if(entry.getString("generation").equals(generation)) {entry.put("selected_appearance",appearance);entry.put("enabled",enabled);}}
         if(!FrameworkSettings.open(app).edit().putString(INDEX,entries.toString()).commit()) throw new IOException("保存失败");
     }
+    static synchronized void disableAll(Context app) throws Exception {
+        if(busy) throw new IOException("请等待当前操作完成后修改");
+        JSONArray entries=index(app);
+        for(int i=0;i<entries.length();++i) entries.getJSONObject(i).put("enabled",false);
+        if(!FrameworkSettings.open(app).edit().putString(INDEX,entries.toString()).commit()) throw new IOException("保存失败");
+    }
     static synchronized void saveAll(Context app,JSONArray changes) throws Exception {
         if(busy) throw new IOException("请等待当前操作完成后保存");
         JSONArray entries=index(app);

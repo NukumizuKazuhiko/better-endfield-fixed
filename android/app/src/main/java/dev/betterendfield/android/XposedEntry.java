@@ -286,10 +286,9 @@ public final class XposedEntry extends XposedModule {
                                 // new snapshot. Re-acquire it when an Activity
                                 // resumes instead of caching the old values.
                                 try {
-                                    return OverlayFeatures.read(
-                                            getRemotePreferences("module_settings"));
+                                    return getRemotePreferences("module_settings");
                                 } catch (RuntimeException unavailable) {
-                                    return OverlayFeatures.read(settings);
+                                    return settings;
                                 }
                             });
                     new Thread(() -> {

@@ -3,6 +3,7 @@ package dev.betterendfield.android;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,10 +19,11 @@ final class GameOverlay {
     private final View panel;
     private final OverlaySurface ui;
     private final boolean preview;
-    private final Supplier<OverlayFeatures> features;
+    private final Supplier<SharedPreferences> settings;
     private boolean closed;
     private float xFraction = 0.02f;
     private float yFraction = 0.28f;
+    private boolean autoSnap;
     private OverlayFeatures shown = OverlayFeatures.off();
     private boolean bridgeMissing;
     private boolean removedByUs;
@@ -91,7 +93,7 @@ final class GameOverlay {
     /** Registered with the journal so the runtime's playback events arrive here. */
     private final RuntimeLog.Observer journalLines = this::observeJournalLine;
 
-    static void install(Application app, ClassLoader loader, Supplier<OverlayFeatures> features) {
+    static void install(Application app, ClassLoader loader, Supplier<SharedPreferences> settings) {
         RuntimeLog.record("overlay install: checking UnityPlayer");
         try {
             Class.forName("com.unity3d.player.UnityPlayer", false, loader);
@@ -112,7 +114,7 @@ final class GameOverlay {
                 XposedEntry.hookConcreteActivityKeys(activity.getClass());
                 OverlayFeatures current;
                 try {
-                    current = features.get();
+                    current = OverlayFeatures.read(settings.get());
                 } catch (RuntimeException unavailable) {
                     current = OverlayFeatures.off();
                 }
@@ -131,7 +133,7 @@ final class GameOverlay {
                 }
                 if (current.panel() && surface == null) {
                     try {
-                        surface = new GameOverlay(activity, false, features);
+                        surface = new GameOverlay(activity, false, settings);
                         surfaces.put(activity, surface);
                         RuntimeLog.record("overlay panel attached to "
                                 + activity.getClass().getName());
@@ -194,13 +196,13 @@ final class GameOverlay {
     }
 
     GameOverlay(Activity activity, boolean preview) {
-        this(activity, preview, () -> OverlayFeatures.read(FrameworkSettings.open(activity)));
+        this(activity, preview, () -> FrameworkSettings.open(activity));
     }
 
-    private GameOverlay(Activity activity, boolean preview, Supplier<OverlayFeatures> features) {
+    private GameOverlay(Activity activity, boolean preview, Supplier<SharedPreferences> settings) {
         this.activity = activity;
         this.preview = preview;
-        this.features = features;
+        this.settings = settings;
         host = new FrameLayout(activity);
         host.setClipChildren(false);
         host.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -227,6 +229,7 @@ final class GameOverlay {
                 if (preview) remove(); else collapsePanel();
             }
             @Override public void drag(float dx, float dy) { dragBy(dx, dy); }
+            @Override public void dragEnd() { snapToEdge(); }
             @Override public void look(float dx, float dy) { accumulateLook(dx, dy); }
             @Override public void pulse(int key, String description) {
                 GameOverlay.this.pulse(key, description);
@@ -293,8 +296,11 @@ final class GameOverlay {
 
     private void refresh() {
         OverlayFeatures current;
-        try { current = features.get(); }
-        catch (RuntimeException unavailable) { current = OverlayFeatures.off(); }
+        try {
+            SharedPreferences preferences = settings.get();
+            current = OverlayFeatures.read(preferences);
+            applyAppearance(ModuleSettings.getOverlayAppearance(preferences));
+        } catch (RuntimeException unavailable) { current = OverlayFeatures.off(); }
         if (preview) {
             current = new OverlayFeatures(true, current.hideHud(), current.freeCamera(),
                     current.worldPause(), current.firstPerson(), current.vmdCamera());
@@ -807,6 +813,20 @@ final class GameOverlay {
         int h = Math.max(1, host.getHeight() - top - host.getPaddingBottom() - dp(58));
         xFraction = clamp((handle.getX() + dx - left) / w);
         yFraction = clamp((handle.getY() + dy - top) / h);
+        layout();
+    }
+
+    private void applyAppearance(ModuleSettings.OverlayAppearance appearance) {
+        host.setAlpha(appearance.alpha());
+        boolean newlyEnabled = appearance.autoSnap() && !autoSnap;
+        autoSnap = appearance.autoSnap();
+        if (newlyEnabled) snapToEdge();
+    }
+
+    private void snapToEdge() {
+        if (!autoSnap || closed) return;
+        xFraction = xFraction < 0.5f ? 0f : 1f;
+        if (panel.getVisibility() == View.VISIBLE) collapsePanel();
         layout();
     }
 
