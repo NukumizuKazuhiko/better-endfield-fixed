@@ -69,14 +69,25 @@ bool PrepareAndroidWorldResource(const CharacterAdapter& adapter,const BemPocDat
                 override.material_slot>=static_cast<uint32_t>(ArrayLength(source.original_materials))) return false;
             void* world_material=ArrayValue(target.original_materials,override.material_slot);
             void* ui_material=ArrayValue(source.original_materials,override.material_slot);
-            if (!world_material || !ui_material ||
-                ObjectName(world_material)!=bem.components[i].keep_material_names[k] ||
-                ObjectName(ui_material)!=ObjectName(world_material)) return false;
+            if (!world_material || !ui_material) return false;
+            const auto ui_name=ObjectName(ui_material),world_name=ObjectName(world_material);
+            constexpr std::string_view ui_prefix="M_actor_",world_prefix="M_actor_lod_";
+            const bool world_lod_variant=ui_name.starts_with(ui_prefix) && world_name.starts_with(world_prefix) &&
+                std::string_view(ui_name).substr(ui_prefix.size())==std::string_view(world_name).substr(world_prefix.size());
+            if (ui_name!=bem.components[i].keep_material_names[k] ||
+                (ui_name!=world_name && !world_lod_variant)) {
+                Log("Android world keep material identity differs: "+ui_name+" -> "+world_name); return false;
+            }
+            if (world_lod_variant) {
+                // The validated UI copy is published to world LOD1. Its native
+                // counterpart may omit properties present in the UI shader.
+                Log("Android world keep material LOD counterpart accepted: "+ui_name+" -> "+world_name);
+                continue;
+            }
             const auto pins=ReadMaterialTextureSlots(world_material);
             for (size_t t=0;t<bem.textures.size();++t) if (override.textures&(uint64_t{1}<<t)) {
-                size_t matches=0;
-                for (const auto& pin:pins) matches+=ObjectName(pin.texture)==bem.textures[t].original_name;
-                if (matches!=1) return false;
+                if (MatchTexturePins(pins,bem.textures[t].original_name,ObjectName).status!=TexturePinStatus::Matched)
+                    return false;
             }
         }
         target.custom_materials=source.custom_materials;

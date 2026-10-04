@@ -6,6 +6,7 @@
 #include "native_mesh_layout.h"
 #include "mod_registry.h"
 #include "resource_policy.h"
+#include "texture_binding_policy.h"
 #if defined(__ANDROID__)
 #include "modules/custom_model/android_mesh_builder.h"
 #endif
@@ -1018,7 +1019,7 @@ bool MatchesDeclaration(
         return false;
     }
     if (!DeclarationsEqual(actual, expected)) {
-        Log("  " + label + ": declaration differs from the source");
+        Log("  " + label + ": declaration differs from the BEM package");
         Log("    expected:");
         LogVertexDeclaration(expected);
         Log("    actual:");
@@ -1033,7 +1034,7 @@ bool MatchesDeclaration(
     }
     if (actual_strides != expected_strides) {
         Log("  " + label + ": strides " + StrideText(actual_strides) +
-            " differ from the source's " + StrideText(expected_strides));
+            " differ from the BEM package's " + StrideText(expected_strides));
         return false;
     }
     return true;
@@ -1132,7 +1133,6 @@ bool ValidateRendererSkin(const BemComponent& component, void* renderer, void* s
     return true;
 }
 
-uint32_t Crc32(std::string_view text);
 bool BuildMeshFromComponent(
     const BemComponent& component, void* source_mesh, void*& new_mesh, void* prepared_bindposes=nullptr) {
     new_mesh = nullptr;
@@ -1145,33 +1145,24 @@ bool BuildMeshFromComponent(
     }
 
     VertexDeclaration declaration;
-    if (!ReadVertexDeclaration(source_mesh, declaration)) {
-        Log(label + " source declaration is unreadable; refusing.");
+    // The replacement owns its vertex declaration. The original mesh still
+    // supplies its bones, bindposes and materials, but Android can use a
+    // different vertex layout from the profile used to author the BEM.
+    if (component.attributes.empty() || component.attributes.size()>declaration.entries.size()) {
+        Log(label + " replacement declaration is missing or too large; refusing.");
         return false;
     }
-    if (component.attributes.size()!=static_cast<size_t>(declaration.count) ||
-        std::memcmp(component.attributes.data(),declaration.entries.data(),component.attributes.size()*16)!=0 ||
-        (component.layout_crc && Crc32(std::string_view(
-        reinterpret_cast<const char*>(declaration.entries.data()),declaration.count*sizeof(VertexAttributeDescriptorRaw)))!=component.layout_crc)) {
-        Log(label+" native vertex declaration differs from verified profile."); return false;
-    }
-    std::vector<int32_t> source_strides;
-    if (!ReadMeshStrides(source_mesh, source_strides)) {
-        Log(label + " source strides are unreadable; refusing.");
-        return false;
-    }
+    declaration.count=static_cast<int32_t>(component.attributes.size());
+    std::memcpy(declaration.entries.data(),component.attributes.data(),component.attributes.size()*16);
+    VertexDeclaration source_declaration;
+    if (ReadVertexDeclaration(source_mesh,source_declaration) &&
+        !DeclarationsEqual(source_declaration,declaration))
+        Log(label + " native vertex layout differs; rebuilding from the BEM declaration.");
 
     const std::vector<int32_t> payload_strides{
         static_cast<int32_t>(info.stride0),
         static_cast<int32_t>(info.stride1),
         static_cast<int32_t>(info.stride2)};
-    if (source_strides != payload_strides) {
-        Log(label + " payload strides " + StrideText(payload_strides) +
-            " do not match the live mesh's " + StrideText(source_strides) +
-            "; refusing so the bytes cannot land on the wrong channels.");
-        LogVertexDeclaration(declaration);
-        return false;
-    }
 
     void* bindposes = prepared_bindposes ? prepared_bindposes : Invoke(
         Contract("mesh.get_bindposes"), source_mesh, nullptr);
@@ -1254,7 +1245,7 @@ bool BuildMeshFromComponent(
         return false;
     }
 
-    // The source declaration already exposes the packed BlendWeight and
+    // The BEM declaration already exposes the packed BlendWeight and
     // BlendIndices fields in stream 2. Keep that one authoritative storage:
     // InternalSetBoneWeights creates a second Unity skinning representation,
     // then the former second SetVertexBufferParams call replaced its layout
@@ -1359,9 +1350,9 @@ bool BuildMeshFromComponent(
     // Verify before assigning. The writer signatures are inferred from Unity's
     // published bindings, so a wrong one shows up here as a refusal rather
     // than as a corrupted renderer.
-    if (!MatchesDeclaration(mesh, declaration, source_strides, label +
+    if (!MatchesDeclaration(mesh, declaration, payload_strides, label +
             " built")) {
-        Log(label + " does not reproduce the source declaration; refusing.");
+        Log(label + " does not reproduce the BEM declaration; refusing.");
         DestroyUnityObject(mesh);
         return false;
     }
@@ -1552,19 +1543,6 @@ void* CreateTextureFromBem(const BemTexture& texture) {
     return object;
 }
 
-// CRC-32 (the IEEE polynomial), matching zlib.crc32 that the converter uses.
-uint32_t Crc32(std::string_view text) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (char character : text) {
-        crc ^= static_cast<unsigned char>(character);
-        for (int bit = 0; bit < 8; ++bit) {
-            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-        }
-    }
-    return ~crc;
-}
-
-
 bool SetRendererEnabled(void* renderer, bool enabled) {
     MethodContract* setter = Contract("renderer.set_enabled");
     if (!setter || !setter->resolved) return false;
@@ -1703,24 +1681,28 @@ bool ApplyTextureMask(void* copy,uint64_t mask,const BemPocData& bem,
         const auto slots=ReadMaterialTextureSlots(copy);
         std::vector<int32_t> assigned;
         for (size_t t=0;t<bem.textures.size();++t) if (mask&(uint64_t{1}<<t)) {
-            const auto& tex=bem.textures[t]; const MaterialTextureSlot* match=nullptr;
-            for (const auto& slot:slots) if (ObjectName(slot.texture)==tex.original_name) {
-                if (match) { Log("Ambiguous v25 texture name pin."); return false; } match=&slot;
+            const auto& tex=bem.textures[t];
+            const auto pins=MatchTexturePins(slots,tex.original_name,ObjectName);
+            if (pins.status==TexturePinStatus::Ambiguous) {
+                Log("Ambiguous v25 texture name pin."); return false;
             }
-            if (!match || std::find(assigned.begin(),assigned.end(),match->slot_id)!=assigned.end()) return false;
-            assigned.push_back(match->slot_id);
-            void*& texture=texture_cache[{t,match->texture}];
+            if (pins.status==TexturePinStatus::Missing) return false;
+            void*& texture=texture_cache[{t,pins.slots.front()->texture}];
             if (!texture) {
                 texture=CreateTextureFromBem(tex);
-                if (!texture || !CopySamplerState(match->texture,texture)) return false;
+                if (!texture || !CopySamplerState(pins.slots.front()->texture,texture)) return false;
 #if defined(__ANDROID__)
-                betterendfield::AndroidAuditTextureColorSpace(match->texture,texture,tex.original_name);
-                betterendfield::AndroidAuditNormalTexture(match->texture,tex.original_name);
+                betterendfield::AndroidAuditTextureColorSpace(pins.slots.front()->texture,texture,tex.original_name);
+                betterendfield::AndroidAuditNormalTexture(pins.slots.front()->texture,tex.original_name);
 #endif
             }
-            int32_t slot=match->slot_id; void* args[]{&slot,texture}; void* read[]{&slot};
-            if (!InvokeVoid(Contract("material.set_texture_by_id"),copy,args) ||
-                Invoke(Contract("material.get_texture_by_id"),copy,read)!=texture) return false;
+            for (const auto* pin:pins.slots) {
+                if (std::find(assigned.begin(),assigned.end(),pin->slot_id)!=assigned.end()) return false;
+                assigned.push_back(pin->slot_id);
+                int32_t slot=pin->slot_id; void* args[]{&slot,texture}; void* read[]{&slot};
+                if (!InvokeVoid(Contract("material.set_texture_by_id"),copy,args) ||
+                    Invoke(Contract("material.get_texture_by_id"),copy,read)!=texture) return false;
+            }
         }
     return true;
 }

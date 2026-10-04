@@ -1,6 +1,7 @@
 #include "android_mesh_builder.h"
 #include "core/log.h"
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 
@@ -306,6 +307,8 @@ bool AndroidReadMeshSubmeshes(void* mesh, std::vector<std::array<int64_t,4>>& su
 bool AndroidSubmitMesh(void* mesh, const BetterEndfield::CustomModel::BemComponent& component) {
     if (!mesh || !AndroidMeshBuilderReady()) return false;
     try {
+        using Clock = std::chrono::steady_clock;
+        const auto started = Clock::now();
         Calls calls;
         MeshDataScope writable{calls}; writable.Init();
         int32_t vertices = static_cast<int32_t>(component.info.vertex_count);
@@ -339,6 +342,7 @@ bool AndroidSubmitMesh(void* mesh, const BetterEndfield::CustomModel::BemCompone
         }
         void* apply_args[]{runtime->Unbox(writable.box),mesh,&flags};
         calls.Call(api.apply,nullptr,apply_args); writable.consumed = true;
+        const auto applied = Clock::now();
         if (calls.Value<int32_t>(api.attribute_count,mesh) != attr_count)
             throw std::runtime_error("submitted attribute count differs");
         for (int32_t i = 0; i < attr_count; ++i) {
@@ -349,6 +353,7 @@ bool AndroidSubmitMesh(void* mesh, const BetterEndfield::CustomModel::BemCompone
         // Acquire a fresh read-only snapshot from the submitted Mesh, not the
         // writable staging storage. Verify bytes and every draw before publish.
         MeshDataScope readback{calls}; readback.Init(mesh);
+        const auto acquired = Clock::now();
         void* get_args[]{&readback.data};
         if (calls.Value<int32_t>(api.vertex_count,nullptr,get_args) != vertices ||
             calls.Value<int32_t>(api.sub_count,nullptr,get_args) != subs)
@@ -363,6 +368,11 @@ bool AndroidSubmitMesh(void* mesh, const BetterEndfield::CustomModel::BemCompone
             if (sub.start != start || sub.count != count || sub.topology != 0 || sub.base != 0)
                 throw std::runtime_error("submitted draw differs");
         }
+        const auto verified = Clock::now();
+        LogInfo(kLog,("submit timing C"+std::to_string(component.info.component_id)+
+            " write_apply_ms="+std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(applied-started).count())+
+            " acquire_ms="+std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(acquired-applied).count())+
+            " verify_ms="+std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(verified-acquired).count())).c_str());
         LogInfo(kLog,("submit/readback PASS C"+std::to_string(component.info.component_id)+
             " vertices="+std::to_string(vertices)+" indices="+std::to_string(indices)+
             " submeshes="+std::to_string(subs)).c_str());

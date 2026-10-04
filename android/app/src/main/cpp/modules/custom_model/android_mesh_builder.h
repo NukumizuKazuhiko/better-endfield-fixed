@@ -8,6 +8,7 @@ namespace betterendfield {
 // Private, same-binary platform boundary; does not extend BE_HostApiV1.
 void ConfigureAndroidMeshBuilder(Il2CppRuntime& runtime, bool rollback_test = false, bool pipeline_lod = false, bool npc_parameters = false, bool inspect = false);
 void ConfigureHeadwearCanary(Il2CppRuntime& runtime);
+void AndroidWarmHeadwearLayout();
 bool AndroidMeshRollbackTest();
 bool AndroidPipelineLodEnabled();
 bool AndroidNpcParametersEnabled();
@@ -29,6 +30,7 @@ void AndroidPruneHeadwearFixtures(void* const* renderers, size_t count);
 bool AndroidProbeHeadwearFixture(void* renderer, void* source_mesh);
 bool AndroidHeadwearFixtureOwns(void* renderer, void* mesh);
 bool AndroidRestoreHeadwearFixture();
+void AndroidDiscardHeadwearFixtures();
 // Retains the game's resource handle until Release; does not instantiate or
 // display the donor prefab. Only called inside a main-thread delivery scope.
 void* AndroidLoadUiDonor(const std::string& resource, void*& handle, uint32_t& root);

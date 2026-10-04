@@ -94,6 +94,33 @@ int main() {
             "downward look range not extended by 1.5");
         Check(std::abs(ExpandLookPitch(AxisAngle({1,0,0},-80.f),2.f,2.f)+9.f)<1e-3f,
             "extended pitch not clamped to 89 degrees");
+        const auto pitch_degrees=[](Quat q) {
+            const auto forward=Rotate(q,{0,0,1});
+            return -std::atan2(forward.y,std::hypot(forward.x,forward.z))*57.295779513f;
+        };
+        const Quat tilted=AxisAngle({1,0,0},-75.f);
+        Check(LimitViewPitch(tilted,89.f,89.f).x==tilted.x,
+            "default limits changed the original view");
+        Check(pitch_degrees(LimitViewPitch(tilted,60.f,89.f))>-60.f,
+            "upward limit did not contain the final pitch");
+        Check(pitch_degrees(LimitViewPitch(AxisAngle({1,0,0},75.f),89.f,50.f))<50.f,
+            "downward limit did not contain the final pitch");
+        Check(std::abs(pitch_degrees(LimitViewPitch(tilted,0.f,89.f)))<1e-3f,
+            "zero upward limit did not level the view");
+        Check(std::abs(pitch_degrees(LimitViewPitch(AxisAngle({1,0,0},75.f),89.f,0.f)))<1e-3f,
+            "zero downward limit did not level the view");
+        const auto yawed=AxisAngle({0,1,0},45.f)*tilted;
+        const auto limited_yaw=Rotate(LimitViewPitch(yawed,60.f,89.f),{0,0,1});
+        Check(std::abs(limited_yaw.x-limited_yaw.z)<1e-4f,
+            "pitch limit changed horizontal view direction");
+        const auto near_top=AxisAngle({0,1,0},45.f)*AxisAngle({1,0,0},-89.f);
+        const auto top_limited=Rotate(LimitViewPitch(near_top,30.f,89.f),{0,0,1});
+        Check(std::abs(top_limited.x-top_limited.z)<1e-3f &&
+            pitch_degrees(LimitViewPitch(near_top,30.f,89.f))>-30.f,
+            "near-vertical upward look rotated sideways");
+        Check(pitch_degrees(LimitViewPitch(AxisAngle({1,0,0},-70.f),60.f,89.f))>
+            pitch_degrees(LimitViewPitch(tilted,60.f,89.f)),
+            "reversing at the upward limit did not move immediately");
         Check(std::abs(LateralFacingYaw({1,0,0},{0,0,1})-45.f)<1e-3f,"strafe right did not turn 45");
         Check(std::abs(LateralFacingYaw({-1,0,0},{0,0,1})+45.f)<1e-3f,"strafe left did not turn -45");
         Check(LateralFacingYaw({0,0,1},{0,0,1})==0.f,"forward input turned the body");

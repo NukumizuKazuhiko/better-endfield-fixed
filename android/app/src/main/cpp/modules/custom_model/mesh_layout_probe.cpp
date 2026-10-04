@@ -1,13 +1,17 @@
 #include "mesh_layout_probe.h"
+#include "core/log.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <link.h>
 #include <map>
 #include <set>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -247,20 +251,37 @@ MeshLayoutEvidence ProbeLoadedUnityMeshLayout() {
     };
     std::map<uintptr_t, AccessSummary> access_by_function;
     std::map<uintptr_t, std::vector<FieldAccess>> ordered_accesses;
+    // Only functions that access the named candidate can contribute evidence.
+    // Indexing every memory access in libunity allocates millions of map/set
+    // nodes on the first first-person mesh patch and stalls the render thread.
     for (auto& segment : image.segments) {
         if (!(segment.flags & PF_X) || segment.start % 4) continue;
         for (size_t at = 0; at + 4 <= segment.bytes.size(); at += 4) {
             const FieldAccess any_access = DecodeMemoryAccess(Word(segment, at));
-            if ((!any_access.load && !any_access.store) || any_access.base == 31) continue;
+            if ((!any_access.load && !any_access.store) || any_access.base == 31 ||
+                    any_access.offset != result.candidate_offset) continue;
             const uintptr_t function = FunctionFor(image, segment.start + at);
             if (!function) continue;
             auto& summary = access_by_function[function];
-            summary.offsets_by_base[any_access.base].insert(any_access.offset);
-            ordered_accesses[function].push_back(any_access);
-            if (any_access.offset == result.candidate_offset) {
-                summary.load = summary.load || any_access.load;
-                summary.store = summary.store || any_access.store;
-                summary.candidate_bases.insert(any_access.base);
+            summary.load = summary.load || any_access.load;
+            summary.store = summary.store || any_access.store;
+            summary.candidate_bases.insert(any_access.base);
+        }
+    }
+    for (auto& segment : image.segments) {
+        if (!(segment.flags & PF_X) || segment.start % 4) continue;
+        const uintptr_t segment_end = segment.start + segment.bytes.size();
+        for (auto& [function, summary] : access_by_function) {
+            const auto next = std::upper_bound(image.functions.begin(), image.functions.end(), function);
+            const uintptr_t function_end = next == image.functions.end() ? UINTPTR_MAX : *next;
+            if (function >= segment_end || function_end <= segment.start) continue;
+            const size_t begin = std::max(function, segment.start) - segment.start;
+            const size_t end = std::min(function_end, segment_end) - segment.start;
+            for (size_t at = begin; at + 4 <= end; at += 4) {
+                const FieldAccess any_access = DecodeMemoryAccess(Word(segment, at));
+                if ((!any_access.load && !any_access.store) || any_access.base == 31) continue;
+                summary.offsets_by_base[any_access.base].insert(any_access.offset);
+                ordered_accesses[function].push_back(any_access);
             }
         }
     }
@@ -352,5 +373,29 @@ MeshLayoutEvidence ProbeLoadedUnityMeshLayout() {
         }
     }
     return result;
+}
+namespace {
+std::once_flag layout_warmup_once;
+std::shared_future<MeshLayoutEvidence> layout_warmup;
+}
+void WarmLoadedUnityMeshLayout() {
+    std::call_once(layout_warmup_once, [] {
+        layout_warmup = std::async(std::launch::async, [] {
+            const auto start = std::chrono::steady_clock::now();
+            MeshLayoutEvidence result;
+            try { result = ProbeLoadedUnityMeshLayout(); }
+            catch (...) { result = Failure("Unity ELF layout scan failed"); }
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            const std::string message = "Unity Mesh layout warmup completed in " +
+                std::to_string(elapsed) + " ms; " + result.status;
+            LogInfo("mesh_layout_probe", message.c_str());
+            return result;
+        }).share();
+    });
+}
+const MeshLayoutEvidence& CachedLoadedUnityMeshLayout() {
+    WarmLoadedUnityMeshLayout();
+    return layout_warmup.get();
 }
 }
