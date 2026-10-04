@@ -439,7 +439,7 @@ ModuleResult CustomModelModule::Start(Il2CppRuntime& runtime) {
     shared_mesh_ = runtime.ResolveMethodExact("UnityEngine.CoreModule.dll", "UnityEngine", "SkinnedMeshRenderer",
         "get_sharedMesh", "", "UnityEngine.Mesh", 0);
     cached_ptr_ = runtime.ResolveField("UnityEngine.CoreModule.dll", "UnityEngine", "Object", "m_CachedPtr");
-    mesh_layout_ = ProbeLoadedUnityMeshLayout();
+    mesh_layout_ = CachedLoadedUnityMeshLayout();
     mesh_metadata_ = std::make_unique<MeshSkinMetadataAdapter>(mesh_layout_);
     LogInfo(Id(), ("Mesh layout paths: "+mesh_layout_.status).c_str());
     AuditMeshMethodAddresses(runtime);

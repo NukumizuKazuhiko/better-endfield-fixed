@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [简体中文](README.md)
 
-Better Endfield is a modular extension project for *Arknights: Endfield*, with a Windows controller and an Android/LSPosed module. Features are implemented by separate modules, and the Android build reuses the relevant native module sources. Check the [changelog](CHANGELOG.md) and each release note for platform support and validation status.
+Better Endfield is an Android LSPosed module for *Arknights: Endfield*, with a settings app and an in-game control panel. Features are implemented by separate modules. Android is the project's only current development and release target. Windows code and build scripts remain in the repository as legacy material; they are outside the current product and acceptance scope. See the [product boundary](docs/PRODUCT_BOUNDARY.md), the [changelog](CHANGELOG.md), and release notes for validation status.
 
 > This is an independently maintained derivative of [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield). It is not an official release of the upstream project or the game publisher.
 
@@ -10,20 +10,11 @@ Better Endfield is a modular extension project for *Arknights: Endfield*, with a
 
 | Platform | Main capabilities | Entry point |
 | --- | --- | --- |
-| Windows 10/11 x64 | Models and BEM appearances, character voice, OmniMix music, combat statistics, display enhancements, free camera and touch UI | WinUI controller; built-in injector by default |
 | Android ARM64 | Models and BEM appearances, character voice, free camera, first person, camera motion, gyroscope and in-game control panel | LSPosed module and companion settings app |
 
-Both platforms use the same standard `.bem` package format. See the [BEM creator guide](docs/BEM_CREATOR_GUIDE.md) for format and conversion limits. Validation on one platform does not establish validation on the other.
+Appearance packages use the standard BEMv1 `.bem` format. See the [BEM creator guide](docs/BEM_CREATOR_GUIDE.md) for format and conversion limits.
 
 ## Get started
-
-### Windows
-
-1. Use Windows 10/11 x64 and a compatible game client. Build from source with the commands below, or follow the instructions for a published package.
-2. Select the game path and features in the Better Endfield controller. The default injector does not place loader files in the game directory.
-3. Start the game from the controller. The optional XInput autostart mode is installed and removed from the controller settings.
-
-### Android
 
 1. Download the APK from the [Android 3.4.1 release](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.1), and check its compatibility notes and checksum.
 2. Install it, enable the module in LSPosed, and select the Endfield package you play.
@@ -32,13 +23,6 @@ Both platforms use the same standard `.bem` package format. See the [BEM creator
 See the [Android guide](android/README.md) for setup, compatibility and troubleshooting. Bundled headwear assets target the native Android game at versionCode 50; other client versions need separate verification.
 
 ## Build from source
-
-The Windows build requires Visual Studio 2022 with the C++ workload, .NET 9 SDK and CMake. Packaging an installer also requires Inno Setup 6. From the repository root:
-
-```powershell
-pwsh -File .\scripts\BuildBetterEndfield.ps1
-pwsh -File .\scripts\BuildInstaller.ps1
-```
 
 The Android build requires JDK 21, Android SDK 37, NDK 27.2.12479018, CMake 3.22.1, Dobby v1.0.5 and the complete headwear catalog. Follow the [Android build guide](android/README.md#从源码构建); the build fails when that catalog is missing.
 

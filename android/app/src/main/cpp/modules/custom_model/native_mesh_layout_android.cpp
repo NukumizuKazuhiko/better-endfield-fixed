@@ -6,7 +6,7 @@ namespace BetterEndfield::CustomModel {
 bool ResolveNativeMeshLayout(std::span<const uint8_t>, NativeMeshLayout& layout,
     std::string& error) {
     const betterendfield::MeshLayoutEvidence evidence =
-        betterendfield::ProbeLoadedUnityMeshLayout();
+        betterendfield::CachedLoadedUnityMeshLayout();
     layout = {};
     if (evidence.candidate_offset == 0 || evidence.archive_functions < 2 ||
             evidence.descriptor_paths == 0 || evidence.reader_paths == 0) {

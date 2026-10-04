@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Better Endfield 是面向《明日方舟：终末地》的模块化扩展项目，提供 Windows 控制器和 Android/LSPosed 模块。角色外观、语音、相机、音乐与战斗数据等能力由独立模块提供；Android 端复用对应的原生模块源码。功能按平台和游戏版本分别验证，具体状态以[更新日志](CHANGELOG.md)与发行说明为准。
+Better Endfield 是面向《明日方舟：终末地》Android 端的 LSPosed 模块，提供设置应用与游戏内悬浮面板。角色外观、语音、相机、音乐与战斗数据等能力由独立模块提供。当前项目只开发和发行 Android 端；仓库中的 Windows 代码与构建脚本属于历史遗留，不是当前产品目标或验收范围。完整边界见[产品边界](docs/PRODUCT_BOUNDARY.md)，功能状态以[更新日志](CHANGELOG.md)与发行说明为准。
 
 > 本仓库独立维护，派生自 [Dr-hydra/Better-Endfield](https://github.com/Dr-hydra/Better-Endfield)，并非原项目或游戏发行商的官方版本。
 
@@ -10,20 +10,11 @@ Better Endfield 是面向《明日方舟：终末地》的模块化扩展项目�
 
 | 平台 | 主要能力 | 入口 |
 | --- | --- | --- |
-| Windows 10/11 x64 | 模型与 BEM 外观、角色配音、OmniMix 音乐、战斗数据、显示增强、自由相机与触控布局 | WinUI 控制器；默认使用内置注入器 |
 | Android ARM64 | 模型与 BEM 外观、角色配音、自由相机、第一人称、运镜、陀螺仪及游戏内悬浮面板 | LSPosed 模块与配套设置应用 |
 
-`.bem` 外观包在两端使用同一标准格式；具体能力边界与制作流程见 [BEM 创作者指南](docs/BEM_CREATOR_GUIDE.md)。各平台的功能与验证范围可能不同，不能把一端的验收当作另一端的验收。
+`.bem` 外观包使用标准 BEMv1 格式；具体能力边界与制作流程见 [BEM 创作者指南](docs/BEM_CREATOR_GUIDE.md)。
 
 ## 开始使用
-
-### Windows
-
-1. 准备 Windows 10/11 x64 和游戏客户端。从源码构建时使用下方命令；已有发行包请按对应发行说明安装。
-2. 在 Better Endfield 控制器中选择游戏路径与功能。默认加载方式为内置注入器，不向游戏目录写入加载器文件。
-3. 从控制器启动游戏。需要随官方启动器启动时，可在设置中选择 XInput 自启动方式；其安装和卸载由控制器管理。
-
-### Android
 
 1. 从 [Android 3.4.1 发行页](https://github.com/NukumizuKazuhiko/better-endfield-fixed/releases/tag/v3.4.1)取得 APK，核对发行说明中的适用版本与校验值。
 2. 安装 APK，在 LSPosed 中启用模块并勾选实际游玩的 Endfield 包名。
@@ -32,13 +23,6 @@ Better Endfield 是面向《明日方舟：终末地》的模块化扩展项目�
 详细步骤、兼容范围和排障入口见 [Android 快速开始](android/README.md)。内置头饰资源面向原生 Android 游戏 versionCode 50；其他客户端版本需要单独验证。
 
 ## 从源码构建
-
-Windows 构建需要 Visual Studio 2022 C++ 工具集、.NET 9 SDK、CMake；安装包另需 Inno Setup 6。在仓库根目录运行：
-
-```powershell
-pwsh -File .\scripts\BuildBetterEndfield.ps1
-pwsh -File .\scripts\BuildInstaller.ps1
-```
 
 Android 构建需要 JDK 21、Android SDK 37、NDK 27.2.12479018、CMake 3.22.1、Dobby v1.0.5 与完整头饰目录。请按 [Android 构建说明](android/README.md#从源码构建)准备输入；缺少头饰目录时构建会失败。
 

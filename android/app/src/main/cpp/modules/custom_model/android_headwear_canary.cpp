@@ -1,5 +1,6 @@
 #include "android_mesh_builder.h"
 #include "mesh_skin_metadata_adapter.h"
+#include "mesh_layout_probe.h"
 #include "core/log.h"
 #include "first_person_headwear_fixture.h"
 
@@ -21,7 +22,11 @@ struct ActivePatch {
     void* source = nullptr;
     void* copy = nullptr;
     void* prior_shadow = nullptr;
+    uintptr_t renderer_native = 0;
+    uintptr_t source_native = 0;
+    uintptr_t copy_native = 0;
     bool prior_offscreen = false;
+    bool assigned = false;
     unsigned restore_failures = 0;
     size_t fixture_bytes = 0;
     std::array<uint32_t, 4> roots{};
@@ -89,7 +94,7 @@ std::vector<uint8_t> ReadFixture(const char* path) {
     return bytes;
 }
 
-bool Restore(Il2CppRuntime& runtime, ActivePatch& active) {
+bool Restore(Il2CppRuntime& runtime, ActivePatch& active, bool retain = false) {
     if (!active.copy) return true;
     auto get_mesh = Method(runtime, "SkinnedMeshRenderer", "get_sharedMesh", "", "UnityEngine.Mesh", 0);
     auto set_mesh = Method(runtime, "SkinnedMeshRenderer", "set_sharedMesh", "UnityEngine.Mesh", "System.Void", 1);
@@ -99,7 +104,9 @@ bool Restore(Il2CppRuntime& runtime, ActivePatch& active) {
     auto set_offscreen = Method(runtime, "SkinnedMeshRenderer", "set_updateWhenOffscreen", "System.Boolean", "System.Void", 1);
     auto cached = runtime.ResolveField("UnityEngine.CoreModule.dll", "UnityEngine", "Object", "m_CachedPtr");
     if (!cached.info) throw std::runtime_error("renderer liveness field unavailable on restore");
-    if (NativePointer(runtime, cached, active.renderer)) {
+    const bool renderer_alive = active.renderer_native &&
+        NativePointer(runtime, cached, active.renderer) == active.renderer_native;
+    if (renderer_alive && active.assigned) {
         void* current = Call(runtime, get_mesh, active.renderer);
         if (current == active.copy) {
             void* args[]{active.source};
@@ -125,6 +132,15 @@ bool Restore(Il2CppRuntime& runtime, ActivePatch& active) {
             }
         }
     }
+    if (retain && renderer_alive &&
+        Call(runtime, get_mesh, active.renderer) == active.source &&
+        NativePointer(runtime, cached, active.source) == active.source_native &&
+        NativePointer(runtime, cached, active.copy) == active.copy_native) {
+        active.assigned = false;
+        active.restore_failures = 0;
+        LogInfo(kLog, "source renderer restored; detached mesh retained for next entry");
+        return true;
+    }
     auto destroy = Method(runtime, "Object", "DestroyImmediate",
         "UnityEngine.Object|System.Boolean", "System.Void", 2);
     bool allow = false;
@@ -136,12 +152,65 @@ bool Restore(Il2CppRuntime& runtime, ActivePatch& active) {
     return true;
 }
 
+void BindRetained(Il2CppRuntime& runtime, ActivePatch& active) {
+    auto get_mesh = Method(runtime, "SkinnedMeshRenderer", "get_sharedMesh", "", "UnityEngine.Mesh", 0);
+    auto set_mesh = Method(runtime, "SkinnedMeshRenderer", "set_sharedMesh", "UnityEngine.Mesh", "System.Void", 1);
+    auto get_shadow = Method(runtime, "Renderer", "get_shadowProxyMesh", "", "UnityEngine.Mesh", 0);
+    auto set_shadow = Method(runtime, "Renderer", "set_shadowProxyMesh", "UnityEngine.Mesh", "System.Void", 1);
+    auto get_offscreen = Method(runtime, "SkinnedMeshRenderer", "get_updateWhenOffscreen", "", "System.Boolean", 0);
+    auto set_offscreen = Method(runtime, "SkinnedMeshRenderer", "set_updateWhenOffscreen", "System.Boolean", "System.Void", 1);
+    const auto cached = runtime.ResolveField("UnityEngine.CoreModule.dll", "UnityEngine", "Object", "m_CachedPtr");
+    if (!cached.info || !active.renderer_native || !active.source_native || !active.copy_native ||
+        NativePointer(runtime, cached, active.renderer) != active.renderer_native ||
+        NativePointer(runtime, cached, active.source) != active.source_native ||
+        NativePointer(runtime, cached, active.copy) != active.copy_native ||
+        Call(runtime, get_mesh, active.renderer) != active.source)
+        throw std::runtime_error("retained patch source or renderer changed");
+    void* prior_shadow = Call(runtime, get_shadow, active.renderer);
+    const bool prior_offscreen = Value<bool>(runtime, get_offscreen, active.renderer);
+    const uint32_t shadow_root = prior_shadow ? runtime.NewGcHandle(prior_shadow, false) : 0;
+    if (prior_shadow && !shadow_root)
+        throw std::runtime_error("retained shadow proxy root unavailable");
+    if (active.roots[3]) runtime.FreeGcHandle(active.roots[3]);
+    active.roots[3] = shadow_root;
+    active.prior_shadow = prior_shadow;
+    active.prior_offscreen = prior_offscreen;
+    active.assigned = true;
+    void* shadow_args[]{active.source};
+    Call(runtime, set_shadow, active.renderer, shadow_args);
+    if (Call(runtime, get_shadow, active.renderer) != active.source)
+        throw std::runtime_error("retained shadow proxy assignment rejected");
+    bool on = true;
+    void* offscreen_args[]{&on};
+    Call(runtime, set_offscreen, active.renderer, offscreen_args);
+    if (!Value<bool>(runtime, get_offscreen, active.renderer))
+        throw std::runtime_error("retained offscreen assignment rejected");
+    void* mesh_args[]{active.copy};
+    Call(runtime, set_mesh, active.renderer, mesh_args);
+    if (Call(runtime, get_mesh, active.renderer) != active.copy ||
+        Call(runtime, get_shadow, active.renderer) != active.source)
+        throw std::runtime_error("retained renderer assignment rejected");
+}
+
 bool Probe(Il2CppRuntime& runtime, void* renderer, void* source, bool bind) {
     for (auto it = patches.begin(); it != patches.end(); ++it) {
         if (it->renderer != renderer) continue;
-        if (it->source == source &&
-            Call(runtime, Method(runtime, "SkinnedMeshRenderer", "get_sharedMesh", "",
-                "UnityEngine.Mesh", 0), renderer) == it->copy) return true;
+        if (it->source == source) {
+            if (it->assigned &&
+                Call(runtime, Method(runtime, "SkinnedMeshRenderer", "get_sharedMesh", "",
+                    "UnityEngine.Mesh", 0), renderer) == it->copy) return true;
+            if (!it->assigned) {
+                try {
+                    BindRetained(runtime, *it);
+                    LogInfo(kLog, "retained patch rebound without mesh reconstruction");
+                    return true;
+                } catch (...) {
+                    Restore(runtime, *it);
+                    patches.erase(it);
+                    throw;
+                }
+            }
+        }
         Restore(runtime, *it);
         patches.erase(it);
         break;
@@ -231,7 +300,7 @@ bool Probe(Il2CppRuntime& runtime, void* renderer, void* source, bool bind) {
         throw std::runtime_error("renderer bone palette count differs");
     const auto cached = runtime.ResolveField("UnityEngine.CoreModule.dll", "UnityEngine", "Object", "m_CachedPtr");
     if (!cached.info) throw std::runtime_error("native Mesh pointer field unavailable");
-    MeshSkinMetadataAdapter skin(ProbeLoadedUnityMeshLayout());
+    MeshSkinMetadataAdapter skin(CachedLoadedUnityMeshLayout());
     uint32_t influences = 0;
     if (!skin.LayoutVerified() || !skin.Read(NativePointer(runtime, cached, source), influences))
         throw std::runtime_error("source skin metadata unavailable");
@@ -364,6 +433,16 @@ bool Probe(Il2CppRuntime& runtime, void* renderer, void* source, bool bind) {
         pending.renderer = renderer;
         pending.source = source;
         pending.copy = detached;
+        pending.renderer_native = NativePointer(runtime, cached, renderer);
+        pending.source_native = NativePointer(runtime, cached, source);
+        pending.copy_native = NativePointer(runtime, cached, detached);
+        if (!pending.renderer_native || !pending.source_native || !pending.copy_native) {
+            bool allow = false;
+            void* args[]{detached, &allow};
+            Call(runtime, destroy, nullptr, args);
+            throw std::runtime_error("patch native identity unavailable");
+        }
+        pending.assigned = true;
         pending.prior_shadow = prior_shadow;
         pending.prior_offscreen = prior_offscreen;
         pending.fixture_bytes = bytes.size();
@@ -414,6 +493,10 @@ bool Probe(Il2CppRuntime& runtime, void* renderer, void* source, bool bind) {
 }
 
 void ConfigureHeadwearCanary(Il2CppRuntime& runtime) { canary_runtime = &runtime; }
+void AndroidWarmHeadwearLayout() {
+    if (canary_runtime && std::getenv("BETTER_ENDFIELD_HEADWEAR_DIRECTORY"))
+        WarmLoadedUnityMeshLayout();
+}
 
 bool AndroidHeadwearFixtureAvailable(void* renderer, void* source_mesh) {
     const char* directory = std::getenv("BETTER_ENDFIELD_HEADWEAR_DIRECTORY");
@@ -444,9 +527,12 @@ void AndroidPruneHeadwearFixtures(void* const* renderers, size_t count) {
                 const auto cached = canary_runtime->ResolveField("UnityEngine.CoreModule.dll",
                     "UnityEngine", "Object", "m_CachedPtr");
                 if (!cached.info) throw std::runtime_error("prune liveness field unavailable");
-                if (NativePointer(*canary_runtime, cached, it->renderer) &&
+                if (NativePointer(*canary_runtime, cached, it->renderer) == it->renderer_native &&
+                    NativePointer(*canary_runtime, cached, it->source) == it->source_native &&
+                    NativePointer(*canary_runtime, cached, it->copy) == it->copy_native &&
                     Call(*canary_runtime, Method(*canary_runtime, "SkinnedMeshRenderer", "get_sharedMesh",
-                        "", "UnityEngine.Mesh", 0), it->renderer) == it->copy) {
+                        "", "UnityEngine.Mesh", 0), it->renderer) ==
+                        (it->assigned ? it->copy : it->source)) {
                     ++it; continue;
                 }
             } catch (const std::exception& error) {
@@ -474,20 +560,37 @@ bool AndroidProbeHeadwearFixture(void* renderer, void* source_mesh) {
 }
 bool AndroidHeadwearFixtureOwns(void* renderer, void* mesh) {
     return std::any_of(patches.begin(), patches.end(), [&](const auto& patch) {
-        return patch.renderer == renderer && patch.copy && patch.copy == mesh;
+        return patch.assigned && patch.renderer == renderer && patch.copy && patch.copy == mesh;
     });
 }
 bool AndroidRestoreHeadwearFixture() {
     if (!canary_runtime) return true;
     for (auto it = patches.begin(); it != patches.end();) {
+        if (!it->assigned) { ++it; continue; }
         if (it->restore_failures >= 3) { ++it; continue; }
-        try { Restore(*canary_runtime, *it); it = patches.erase(it); }
+        try {
+            Restore(*canary_runtime, *it, true);
+            if (it->copy) ++it;
+            else it = patches.erase(it);
+        }
         catch (const std::exception& error) {
             ++it->restore_failures;
             LogError(kLog, error.what());
             ++it;
         }
     }
-    return patches.empty();
+    return std::none_of(patches.begin(), patches.end(),
+        [](const ActivePatch& patch) { return patch.assigned; });
+}
+void AndroidDiscardHeadwearFixtures() {
+    if (!canary_runtime) return;
+    for (auto it = patches.begin(); it != patches.end();) {
+        if (it->assigned) { ++it; continue; }
+        try { Restore(*canary_runtime, *it); it = patches.erase(it); }
+        catch (const std::exception& error) {
+            LogError(kLog, error.what());
+            ++it;
+        }
+    }
 }
 }

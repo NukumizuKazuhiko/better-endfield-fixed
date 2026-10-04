@@ -106,6 +106,22 @@ fun FirstPersonPage(state: SettingsState) {
                     onCheckedChange = state::updateFirstPersonExtendLookRange,
                     enabled = state.firstPersonExtendLookRangeAvailable,
                 )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_look_up_limit),
+                    value = state.firstPersonLookUpLimit,
+                    onValueChange = state::updateFirstPersonLookUpLimit,
+                    valueRange = 0f..89f,
+                    unit = stringResource(R.string.degree_suffix),
+                    enabled = state.firstPersonLookLimitAvailable,
+                )
+                SliderRow(
+                    label = stringResource(R.string.camera_fp_look_down_limit),
+                    value = state.firstPersonLookDownLimit,
+                    onValueChange = state::updateFirstPersonLookDownLimit,
+                    valueRange = 0f..89f,
+                    unit = stringResource(R.string.degree_suffix),
+                    enabled = state.firstPersonLookLimitAvailable,
+                )
                 SwitchRow(
                     title = stringResource(R.string.camera_fp_movement),
                     description = stringResource(R.string.camera_fp_movement_hint),

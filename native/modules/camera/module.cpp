@@ -36,6 +36,8 @@
 namespace betterendfield {
 bool AndroidProbeHeadwearFixture(void* renderer, void* source_mesh);
 bool AndroidHeadwearFixtureAvailable(void* renderer, void* source_mesh);
+void AndroidWarmHeadwearLayout();
+void AndroidDiscardHeadwearFixtures();
 void AndroidPruneHeadwearFixtures(void* const* renderers, size_t count);
 bool AndroidHeadwearFixtureOwns(void* renderer, void* mesh);
 bool AndroidRestoreHeadwearFixture();
@@ -75,6 +77,8 @@ struct CameraConfiguration {
     float first_person_near_clip = 0.03f;
     // Widens the vertical look range past the game's own pitch clamp.
     bool first_person_extend_look_range = false;
+    float first_person_look_up_limit = 89.0f;
+    float first_person_look_down_limit = 89.0f;
     bool first_person_movement = false;
     float first_person_side_look_limit = 60.0f;
     int first_person_animation_mode = 0;
@@ -177,6 +181,8 @@ std::atomic<float> g_first_person_eye_height{0.05f};
 std::atomic<float> g_first_person_eye_forward{0.03f};
 std::atomic<float> g_first_person_near_clip{0.03f};
 std::atomic_bool g_first_person_extend_look_range{false};
+std::atomic<float> g_first_person_look_up_limit{89.0f};
+std::atomic<float> g_first_person_look_down_limit{89.0f};
 std::atomic_bool g_first_person_movement{false};
 std::atomic<float> g_first_person_side_look_limit{60.0f};
 std::atomic_int g_first_person_animation_mode{0};
@@ -908,6 +914,10 @@ void PumpFreeCameraControl() {
         }
         return;
     }
+#if defined(__ANDROID__)
+    if (!g_first_person_active.load(std::memory_order_acquire))
+        betterendfield::AndroidWarmHeadwearLayout();
+#endif
 
     g_force_exit_request.store(false, std::memory_order_release);
     if (g_toggle_request.exchange(false, std::memory_order_acq_rel)) {
@@ -1383,7 +1393,7 @@ void TryBindHeadTransform() {
 #include "first_person_retract_runtime.inc"
 #include "first_person_scale_runtime.inc"
 
-void FpRefreshHiddenParts(bool hide) {
+void FpRefreshHiddenParts(bool hide, bool allow_mesh_work = true) {
     if (!hide || !g_first_person_hide_head.load(std::memory_order_relaxed)) {
         if (g_first_person.head_hide_applied || !g_fp_mesh_session.patches.empty() || !g_fp_shadow_hides.empty())
             ReleaseHeadPartHide();
@@ -1403,8 +1413,9 @@ void FpRefreshHiddenParts(bool hide) {
     if (!g_first_person.head_hide_applied) {
         ExitGameFirstPersonMode();
         ApplyHeadPartHide();
+        FpHideDedicatedHeadParts();
     }
-    EnsureNeckCap();
+    if (allow_mesh_work) EnsureNeckCap();
 }
 
 // Rewrites the CameraState that Cinemachine is about to push to the Unity
@@ -1479,6 +1490,21 @@ void ApplyFirstPersonState(void* state) {
         const auto correction = FpMath::Quat{-control.x/norm,-control.y/norm,-control.z/norm,control.w/norm} * animated;
         rotation_correction = {correction.x,correction.y,correction.z,correction.w};
     } else FpMotionReset();
+
+    // Apply the user's vertical boundary to the final visible orientation,
+    // after range expansion and animation. Keep the game's look state intact.
+    const float up_limit = g_first_person_look_up_limit.load(std::memory_order_relaxed);
+    const float down_limit = g_first_person_look_down_limit.load(std::memory_order_relaxed);
+    if (up_limit < 89.0f || down_limit < 89.0f) {
+        const FpMath::Quat current_correction{rotation_correction.x,
+            rotation_correction.y,rotation_correction.z,rotation_correction.w};
+        const auto limited = FpMath::LimitViewPitch(control * current_correction,
+            up_limit,down_limit);
+        const float norm=control.x*control.x+control.y*control.y+control.z*control.z+control.w*control.w;
+        const auto final_correction = FpMath::Quat{-control.x/norm,-control.y/norm,-control.z/norm,control.w/norm} * limited;
+        rotation_correction = {final_correction.x,final_correction.y,
+            final_correction.z,final_correction.w};
+    }
 
     const float field_of_view = g_first_person_fov.load(std::memory_order_relaxed);
     const float near_clip = g_first_person_near_clip.load(std::memory_order_relaxed);
@@ -1622,11 +1648,13 @@ void ExitFirstPerson(const char* reason, bool immediate) {
 
 // Follows leader switches and respawns: the head anchor and the game's own
 // first-person state belong to a character, so both are rebound.
-void RefreshFirstPersonTarget() {
+bool RefreshFirstPersonTarget() {
+    bool carry_hidden = false;
     void* character = Invoke(Contract("player_controller.get_main_character"),
         nullptr, nullptr);
     if (character && character != g_first_person.character) {
         if (g_first_person.character) {
+            carry_hidden = g_fp_perspective.applied || g_fp_perspective.transition.blending;
             FpFacingRelease();
             FpMotionReset();
             g_fp_external_scale.Release(true);
@@ -1643,6 +1671,7 @@ void RefreshFirstPersonTarget() {
         ReleaseHeadTransform();
     }
     TryBindHeadTransform();
+    return carry_hidden;
 }
 
 void PumpFirstPerson() {
@@ -1682,8 +1711,8 @@ void PumpFirstPerson() {
         if (!g_fp_shadow_hides.empty()) FpReleaseShadowHides();
         return;
     }
-    RefreshFirstPersonTarget();
-    FpRefreshHiddenParts(g_fp_perspective.applied || g_fp_perspective.transition.blending);
+    const bool carry_hidden = RefreshFirstPersonTarget();
+    FpRefreshHiddenParts(g_fp_perspective.applied || g_fp_perspective.transition.blending || carry_hidden);
     if (++g_first_person_pump_frames % 30 == 0) {
         FirstPersonHealthCheck();
     }
@@ -1956,6 +1985,13 @@ void __fastcall DetourRenderLoop(void* pipeline, void* loop_pointer,
 
 void __fastcall DetourPushState(void* instance, void* state, void* method) {
     g_push_state_calls.fetch_add(1, std::memory_order_relaxed);
+    // A character switch can arrive inside this camera update, before the
+    // tail-tick pump runs. Hide the new head before Cinemachine pushes a frame.
+    if (state && !g_free_camera_active &&
+        g_first_person_active.load(std::memory_order_acquire) &&
+        RefreshFirstPersonTarget()) {
+        FpRefreshHiddenParts(true, false);
+    }
     if (state && !g_free_camera_active && (g_first_person_camera_enabled.load(std::memory_order_acquire) ||
         g_fp_perspective.visual_exit_deadline)) {
         FpCoordinateState(instance,state);
@@ -2128,6 +2164,8 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "first_person_eye_forward") config.first_person_eye_forward = ParseFloat(value, config.first_person_eye_forward);
         else if (key == "first_person_near_clip") config.first_person_near_clip = ParseFloat(value, config.first_person_near_clip);
         else if (key == "first_person_extend_look_range") config.first_person_extend_look_range = ParseBoolean(value, config.first_person_extend_look_range);
+        else if (key == "first_person_look_up_limit") config.first_person_look_up_limit = ParseFloat(value, config.first_person_look_up_limit);
+        else if (key == "first_person_look_down_limit") config.first_person_look_down_limit = ParseFloat(value, config.first_person_look_down_limit);
         else if (key == "first_person_movement") config.first_person_movement = ParseBoolean(value, config.first_person_movement);
         else if (key == "first_person_side_look_limit") config.first_person_side_look_limit = ParseFloat(value, config.first_person_side_look_limit);
         else if (key == "first_person_animation_mode") {
@@ -2499,6 +2537,10 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     g_first_person_near_clip.store(config.first_person_near_clip,
         std::memory_order_release);
     g_first_person_extend_look_range.store(config.first_person_extend_look_range,
+        std::memory_order_release);
+    g_first_person_look_up_limit.store(std::clamp(config.first_person_look_up_limit,0.0f,89.0f),
+        std::memory_order_release);
+    g_first_person_look_down_limit.store(std::clamp(config.first_person_look_down_limit,0.0f,89.0f),
         std::memory_order_release);
     g_first_person_movement.store(config.first_person_movement, std::memory_order_relaxed);
     g_first_person_side_look_limit.store(config.first_person_side_look_limit, std::memory_order_relaxed);

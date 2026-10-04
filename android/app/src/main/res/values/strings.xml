@@ -91,6 +91,8 @@
     <string name="camera_fp_extend_look_range">放宽俯仰范围</string>
     <string name="camera_fp_extend_look_range_hint">扩大第一人称上下观察范围；默认关闭。保存后立即生效。</string>
     <string name="camera_first_person">启用第一人称视角功能</string>
+    <string name="camera_fp_look_up_limit">向上观察角度上限</string>
+    <string name="camera_fp_look_down_limit">向下观察角度上限</string>
     <string name="camera_hide_head">隐藏头部（第一人称）</string>
     <string name="camera_hide_head_hint">保留身体、手臂和原始阴影。</string>
     <string name="camera_fill_neck">填补颈部开口</string>

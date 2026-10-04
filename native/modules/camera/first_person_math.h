@@ -48,6 +48,38 @@ inline float ExpandLookPitch(Quat view, float up, float down) {
   return range == 1.f ? 0.f : std::clamp(pitch * range, -89.f, 89.f) - pitch;
 }
 inline bool Finite(Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+// Compresses only the final rendered pitch, leaving the game's look input and
+// yaw state untouched. The mapping is monotone, so reversing at the edge takes
+// effect immediately rather than traversing an accumulated clamp dead zone.
+inline Quat LimitViewPitch(Quat view, float up_limit, float down_limit) {
+  up_limit = std::clamp(up_limit, 0.f, 89.f);
+  down_limit = std::clamp(down_limit, 0.f, 89.f);
+  if (up_limit >= 89.f && down_limit >= 89.f) return view;
+  const Vec3 forward = Rotate(view, {0, 0, 1});
+  const float planar = std::hypot(forward.x, forward.z);
+  if (!Finite(forward)) return view;
+  const float pitch = -std::atan2(forward.y, planar) * 57.295779513f;
+  const float limit = pitch < 0.f ? up_limit : down_limit;
+  const float magnitude = std::abs(pitch);
+  const float soft_start = limit * .75f;
+  if (magnitude <= soft_start) return view;
+  const float width = limit - soft_start;
+  const float mapped = width > 0.f
+      ? soft_start + width * std::tanh((magnitude - soft_start) / width)
+      : 0.f;
+  const float delta = std::copysign(mapped, pitch) - pitch;
+  // The forward vector's horizontal projection collapses near straight up or
+  // down. The camera's own right axis stays stable through that orientation.
+  Vec3 right = Rotate(view, {1, 0, 0});
+  const float right_length = std::hypot(right.x, right.z);
+  if (right_length < .0001f) {
+    if (planar < .0001f) return view;
+    right = {forward.z / planar, 0.f, -forward.x / planar};
+  } else {
+    right = {right.x / right_length, 0.f, right.z / right_length};
+  }
+  return AxisAngle(right, delta) * view;
+}
 
 // Yaw the body should gain while strafing, derived from the movement axis in
 // local space. 0.382683432f is cos(67.5 degrees): beyond that the input is
