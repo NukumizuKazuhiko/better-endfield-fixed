@@ -12,7 +12,6 @@
 | [第一人称执行记录](CAMERA_FIRST_PERSON_EXECUTION.md) | 相机阶段门禁与验证边界 |
 | [OmniMix 集成交接](OMNIMIX_INTEGRATION_HANDOFF.md) | 音乐后端协议与回退合同 |
 | [项目更新日志](../CHANGELOG.md) | 版本变化与发布状态 |
-| [上游 3.4.4 选择性移植记录](UPSTREAM_PORT_20261004.md) | 本分支已移植范围、对比和验收边界 |
 
 ## 历史记录
 

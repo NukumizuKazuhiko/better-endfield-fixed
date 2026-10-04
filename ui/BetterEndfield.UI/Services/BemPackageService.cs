@@ -299,12 +299,6 @@ internal sealed class BemPackageService
         package.Enabled = enabled;
         await SaveAsync();
     }
-
-    public async Task DisableAllAsync()
-    {
-        foreach (var package in Packages) package.Enabled = false;
-        await SaveAsync();
-    }
 }
 
 internal sealed class BemBundleImport(string directory) : IDisposable

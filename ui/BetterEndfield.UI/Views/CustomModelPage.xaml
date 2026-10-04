@@ -12,10 +12,6 @@
                 <Button Content="刷新" Click="Refresh_Click" />
                 <Button Content="打开包目录" Click="OpenFolder_Click" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <ComboBox x:Name="CharacterFilter" Header="按角色筛选" MinWidth="220" SelectionChanged="CharacterFilter_SelectionChanged" />
-                <Button x:Name="DisableAllButton" Content="关闭全部模型" Click="DisableAll_Click" VerticalAlignment="Bottom" />
-            </StackPanel>
             <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="8">
                     <ToggleSwitch x:Name="LodToggle" Header="锁定高精度 LOD" Toggled="Lod_Toggled" />

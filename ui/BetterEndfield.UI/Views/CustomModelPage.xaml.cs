@@ -12,9 +12,6 @@ public sealed partial class CustomModelPage : UserControl
 {
     private readonly BemPackageService _service = new();
     private bool _rendering;
-    private bool _importing;
-    private bool _disablingAll;
-    private string _selectedCharacter = "";
     private BemConverterWindow? _converter;
     public Func<string>? InstallRootProvider { get; set; }
     private string InstallRoot => InstallRootProvider?.Invoke() ?? (Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory);
@@ -49,7 +46,6 @@ public sealed partial class CustomModelPage : UserControl
                 ? $"已启用 Mod，强制锁定 LOD。全部停用后恢复独立开关：{(_service.StandaloneLod ? "开启" : "关闭")}。"
                 : "没有 Mod 启用时可独立锁定高精度模型；AI 角色也会保持高精度 LOD。";
             EmptyHint.Visibility = _service.Packages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            DisableAllButton.IsEnabled = !_importing && !_disablingAll && _service.Packages.Any(p => p.Enabled);
             PackageCards.Children.Clear();
             foreach (var p in _service.Packages.OrderBy(p => p.Character).ThenBy(p => p.Name))
             {
@@ -134,65 +130,20 @@ public sealed partial class CustomModelPage : UserControl
                     }
                     RefreshAvailability(); stack.Children.Add(optionPanel);
                 }
-                PackageCards.Children.Add(new Border { Tag = p.Character, Child = stack, Padding = new Thickness(16), CornerRadius = new CornerRadius(8), Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] });
+                PackageCards.Children.Add(new Border { Child = stack, Padding = new Thickness(16), CornerRadius = new CornerRadius(8), Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] });
             }
-            UpdateCharacterFilter();
         }
         finally { _rendering = false; }
     }
 
-    private void UpdateCharacterFilter()
-    {
-        var characters = _service.Packages.Select(p => p.Character).Distinct(StringComparer.Ordinal).OrderBy(id => id).ToArray();
-        if (!characters.Contains(_selectedCharacter, StringComparer.Ordinal)) _selectedCharacter = "";
-        CharacterFilter.Items.Clear();
-        CharacterFilter.Items.Add(new ComboBoxItem { Content = "全部角色", Tag = "" });
-        foreach (string id in characters)
-            CharacterFilter.Items.Add(new ComboBoxItem { Content = PresetOptions.GetCharacterName(id), Tag = id });
-        CharacterFilter.SelectedItem = CharacterFilter.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == _selectedCharacter);
-        CharacterFilter.IsEnabled = characters.Length > 0;
-        ApplyCharacterFilter();
-    }
-
-    private void CharacterFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_rendering || CharacterFilter.SelectedItem is not ComboBoxItem { Tag: string id }) return;
-        _selectedCharacter = id;
-        ApplyCharacterFilter();
-    }
-
-    private void ApplyCharacterFilter()
-    {
-        foreach (var card in PackageCards.Children.Cast<FrameworkElement>())
-            card.Visibility = _selectedCharacter.Length == 0 || Equals(card.Tag, _selectedCharacter)
-                ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private async void DisableAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (_importing || _disablingAll) return;
-        _disablingAll = true;
-        DisableAllButton.IsEnabled = false;
-        ImportButton.IsEnabled = false;
-        try { await _service.DisableAllAsync(); Render(); Message("已关闭全部模型", "下次启动游戏生效。", InfoBarSeverity.Success); }
-        catch (Exception ex) { Reload(); Message("保存失败", ex.Message, InfoBarSeverity.Error); }
-        finally
-        {
-            _disablingAll = false; ImportButton.IsEnabled = true;
-            DisableAllButton.IsEnabled = !_importing && _service.Packages.Any(p => p.Enabled);
-        }
-    }
-
     private async void Import_Click(object sender, RoutedEventArgs e)
     {
-        if (_importing || _disablingAll) return;
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".bem"); picker.FileTypeFilter.Add(".zip");
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(App.MainWindowInstance));
         try
         {
             var file = await picker.PickSingleFileAsync(); if (file == null) return;
-            _importing = true; ImportButton.IsEnabled = false; DisableAllButton.IsEnabled = false;
-            Busy.IsActive = true; Busy.Visibility = Visibility.Visible;
+            ImportButton.IsEnabled = false; Busy.IsActive = true; Busy.Visibility = Visibility.Visible;
             if (Path.GetExtension(file.Path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
             {
                 await ImportBundleAsync(file.Path); return;
@@ -202,12 +153,7 @@ public sealed partial class CustomModelPage : UserControl
             if (_service.Notices.Count > 0) Message("导入完成，需注意", string.Join("\n", _service.Notices), InfoBarSeverity.Warning);
         }
         catch (Exception ex) { Message("导入失败", ex.Message, InfoBarSeverity.Error); }
-        finally
-        {
-            _importing = false; ImportButton.IsEnabled = true;
-            DisableAllButton.IsEnabled = !_disablingAll && _service.Packages.Any(p => p.Enabled);
-            Busy.IsActive = false; Busy.Visibility = Visibility.Collapsed;
-        }
+        finally { ImportButton.IsEnabled = true; Busy.IsActive = false; Busy.Visibility = Visibility.Collapsed; }
     }
     private async Task ImportBundleAsync(string source)
     {
