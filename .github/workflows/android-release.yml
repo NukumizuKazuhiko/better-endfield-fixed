@@ -27,6 +27,11 @@ on:
         type: boolean
         required: false
         default: false
+      build_only:
+        description: 'Build and upload the signed release APK without creating a tag or GitHub Release'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -186,6 +191,7 @@ jobs:
           path: dist/*.apk
 
       - name: Publish GitHub Release
+        if: ${{ !inputs.build_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_VERSION: ${{ inputs.version }}
