@@ -21,7 +21,7 @@
 
 ## 三层机制
 
-1. **Perform 保持**：`_TryExit` 对 `SpDashEnd + ForceExit` 返回 false，`ShouldInterruptSpDash` / `InterruptSpDashPerform` / `_TickStatePerformInterrupt` 同步抑制，`_CheckTrackEnd` 延后 End 阶段清理。判断以启动时记录的 handle 为准。
+1. **Perform 保持**：`_TryExit` 对 `SpDashEnd + ForceExit` 返回 false，`ShouldInterruptSpDash` / `InterruptSpDashPerform` 同步抑制，`_CheckTrackEnd` 延后 End 阶段清理。`_TickStatePerformInterrupt` 可解析且可安装时也同步抑制；该方法缺失、成为静态方法或安装失败时只记录降级日志，不回滚其他必需 Hook。判断以启动时记录的 handle 为准。
 2. **Animator 状态保持**：到达 `begin` 时对同状态发带偏移的 `CrossFade` 回绕到 `target`，随后几帧确认落点，落点不符即中止。回绕点必须早于 0.85（出口过渡 Exit Time 约 0.9）。
 3. **骨骼姿态覆盖**：`TailLateTick` 之后按数据文件写入局部位移和旋转，独立时钟，进出各约 0.12 秒淡化。写入前记录原生基线，只回收自己写过且未被原生改动的值。不替换 Controller、不禁用 Animator、不动世界坐标、不写缩放。
 

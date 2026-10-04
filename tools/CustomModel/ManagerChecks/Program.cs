@@ -19,6 +19,30 @@ Check(manual.Title.Contains("不能自动转换") && !manual.AlreadyPackaged, "c
 var mapping = BemInspectionSummary.Read("""{"format":"hash-lod","automation":{"status":"requires_mapping","reasons":["Material mapping required"]},"analysis":{"components":[],"textures":0,"errors":[]}}""");
 Check(mapping.Title.Contains("暂不能承诺"), "hash/LOD support must not imply full automatic conversion");
 if (args is ["--presentation"]) { Console.WriteLine("PASS: source readiness, direct import, ambiguity and readable failure guidance"); return; }
+if (args is ["--disable-all"])
+{
+    var service = new BemPackageService { StandaloneLod = true };
+    try
+    {
+        service.Packages.Add(new BemPackage { Id = "one", Character = "first", File = "one.bem", Enabled = true });
+        service.Packages.Add(new BemPackage { Id = "two", Character = "second", File = "two.bem", Enabled = true });
+        await service.DisableAllAsync();
+        string ini = File.ReadAllText(Path.Combine(service.Root, "runtime.ini"));
+        Check(service.Packages.All(p => !p.Enabled) && service.StandaloneLod && service.EffectiveLod,
+            "disable all must preserve independent LOD preference");
+        Check(ini.Split("enabled=false", StringSplitOptions.None).Length == 3 && ini.Contains("standalone_lod=true"),
+            "disable all must persist both disabled packages and standalone LOD");
+        Console.WriteLine("PASS: disable all persists across characters and preserves standalone LOD");
+    }
+    finally
+    {
+        string temporary = Path.GetFullPath(ConfigurationService.SettingsDirectory);
+        if (temporary.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) &&
+            Path.GetFileName(temporary).StartsWith("BemManagerChecks-", StringComparison.Ordinal) && Directory.Exists(temporary))
+            Directory.Delete(temporary, true);
+    }
+    return;
+}
 if (args is ["--v11", var packagePath])
 {
     var package = BemPackageService.ReadMetadata(packagePath);
@@ -55,6 +79,10 @@ try
     Check(service.Packages.Count(p => p.Enabled) == 1, "same-role conflict");
     await service.SetEnabledAsync(second, false); Check(!service.EffectiveLod, "restore independent LOD");
     service.StandaloneLod = true; await service.SaveAsync(); service.Load(); Check(service.EffectiveLod, "standalone persistence");
+    first = service.Packages.Single(p => p.Id == "test.package"); await service.SetEnabledAsync(first, true);
+    await service.DisableAllAsync(); service.Load();
+    Check(service.Packages.All(p => !p.Enabled) && service.StandaloneLod && service.EffectiveLod,
+        "disable all must persist without changing standalone LOD preference");
     first = service.Packages.Single(p => p.Id == "test.package"); await service.SetEnabledAsync(first, true);
     await service.ImportAsync(args[3], args[0]);
     first = service.Packages.Single(p => p.Id == "test.package");
