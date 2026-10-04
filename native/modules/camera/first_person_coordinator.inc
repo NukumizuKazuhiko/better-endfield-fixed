@@ -98,6 +98,6 @@ void FpCoordinateState(void* brain,void* state) {
         if (applied) g_first_person.last_eye={output.position.x,output.position.y,output.position.z};
     }
     const bool keep_hidden=applied || owner.transition.blending;
-    FpRefreshHiddenParts(keep_hidden);
+    FpRefreshHiddenParts(keep_hidden, false);
     if (!keep_hidden) owner.visual_exit_deadline=0;
 }

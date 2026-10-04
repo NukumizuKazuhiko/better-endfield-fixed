@@ -35,3 +35,11 @@ HookInlineScan 辅助工具未移植。Windows 模型存储位置迁移不属于
 Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`，79,204,939 字节，SHA-256 `6fe7136f2dcd6352cc9f0ac028ac614459ef0c5221575f744785d90979a983c8`。包内有 `assets/headwear-v3/manifest.tsv`、834 个 `.behw` 和 ARM64 的两个原生库；`apksigner verify --verbose` 确认 v2 签名有效。测试 APK：`android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`，SHA-256 `adb78c97e521a0c93794cd8d8f1c400f658ff4eb771e369d4b0b5dc553d2dae0`。这是开发 Debug 包，不是 Release 发布物；当前独立工作树没有发布签名身份。
 
 构建日志仍有项目既有的 SDK XML/CMake、Gradle `srcDir` 和原生弃用提示，以及部分已有的未使用函数警告；这些不来自本次新增功能，后续工具链维护单独处理。当前分支没有设备侧性能、画面或数据清理证据。
+
+## 合入本地 Android 主线并重编 Debug 包（2026-10-04）
+
+仅在 `codex/android-upstream-344-port` 工作树合入本地 `F:\bem` 的 `main`（`038b40f`），未修改主线工作树。合并保留了本分支悬浮窗、模型管理和上游移植功能，同时纳入主线的第一人称上下观察角度限制、头饰处理与 Android 发布流程调整。`android/README.md` 的同位置文案冲突保留了双方说明。原生编译发现主线新增的角度限制需写回相机旋转，而本分支该变量原为只读；在本分支改为可写后构建通过。
+
+使用 JDK 21、现有 Android SDK/NDK/CMake 和 `D:/CodexData/headwear-audit/all-characters/catalog-bundled` 运行 `:app:assembleDebug -PheadwearCatalogDir=... --offline --no-daemon` 与 `:app:testDebugUnitTest -PheadwearCatalogDir=... --offline --no-daemon`，均通过；重新编译并运行 `BetterEndfield.FirstPersonMeshTests` 通过。为补齐 D 盘 Gradle 缓存中的依赖，首次准备阶段曾通过本机代理联网；最终构建与单元测试均离线运行。APK 签名验证通过（v2）。
+
+新 Debug APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`，大小 79,217,894 字节，SHA-256 为 `3ad742562e0659496433bf699e9e2371cf70fbdc48e912cce86b8cb486d3bb9a`。`output-metadata.json` 标明 `debug`、versionCode `30401`、versionName `3.4.1`；该版本号沿用项目配置，不代表已经发布 3.4.1 新版。包内有 `assets/headwear-v3/manifest.tsv`、834 个 `.behw`、两个 Better Endfield ARM64 原生库和一个 AndroidX ARM64 库，没有其他 ABI 的原生库。本轮未运行设备测试，实机中的悬浮窗、第一人称、头饰与模型功能仍需验证。

@@ -1,5 +1,35 @@
 # 第一人称 S0–S8 执行合同
 
+## 2026-10-04：第一人称进入性能（待实机复核）
+
+PJX110 上一版实机日志显示首次进入时，第一份头饰补丁从源网格校验通过到绑定耗时由约 3.65 秒降到约 1.32 秒；用户反馈首次卡顿和后续进入掉帧仅稍减轻。进一步检查发现：布局探测仍在首次补丁时同步扫描 `libunity.so`；退出第一人称会销毁本次已验证的头饰网格，下一次进入同一角色再读取夹具、构建并上传同一网格。
+
+本轮将布局只读扫描在游戏主线程进入相机功能且第一人称尚未激活时，启动一次后台预热；首次补丁仍等待同一份扫描结果，避免重复扫描。头饰补丁退出时先恢复原渲染器状态，同一渲染器、原网格、副本网格的托管对象与原生指针身份均未变化时，保留有上限的副本供再次进入绑定；角色变更、对象失效或预算超限时走原有销毁路径。保留的副本占用既有 16 租约、64 MiB 夹具预算，主线程继续负责 Unity 对象操作。`mesh_layout_probe` 记录预热耗时，`headwear_canary` 记录副本保留和复用，便于设备日志确认。此轮尚未完成覆盖安装与画面/帧率验收，不将构建通过写成卡顿已修好。
+
+用户随后反馈“只有首次还有一点卡顿，先记录吧”。据此暂停继续优化，将后续进入掉帧记为用户当前未再报告、首次进入轻微卡顿仍待定位。反馈未附设备日志或安装包身份；本轮构建的调试 APK SHA-256 为 `4055CB9EFBDBEBF8DD0F32981737DA28359780B3097F91CC90D1CD851D22F407`。当前 ADB 接入的 `MGFNW19822014904` 上模块为 3.3.21（versionCode 30321，安装时间 2026-09-29），不是此前测试的 PJX110，不能用该设备证明这份新包已安装或性能修改通过实机验收。
+
+## 2026-10-03：第一人称上下俯仰限位
+
+第一人称新增独立的向上、向下观察角度上限，均为 0–89°，默认 89°。Android 设置写入 `first_person_look_up_limit`、`first_person_look_down_limit` 配置键；关闭第一人称不会丢失已保存的角度。相机模块在观察范围扩展及动画叠加之后限制最终可见俯仰，保留游戏原始观察输入和水平朝向。默认值跳过角度修正，保持此前行为。数学测试覆盖两侧限位、默认行为、水平朝向与边缘反向输入。Windows 代码属于历史遗留，不进入本轮实现和验收。
+
+首次调试包在设备上以向上约 30°、向下约 60° 复测时，用户报告向上仍能超过上限，并在抬头到顶时相机偏向一侧。相机修正轴原先来自视线方向的水平投影，该投影在接近正上方时趋近于零。改用相机自身右方向的水平投影后，接近顶部的定向测试和 Android `assembleDebug` 通过；修正版调试包 SHA-256 为 `C494672EF57D32E88E76D2573F5FFB60C39893D2BA5982B2A5316E8388C2CDE4`，包含 834 份 `.behw` 和资源清单，`adb install -r` 返回 `Success`。设备设置读回向上 30.26°、向下 59.63°；用户复测回复“不侧偏，限位正常”。这证明该设备本次第一人称抬头场景通过，不扩展为其他角色、场景或发布版验收。
+
+## 2026-10-03：切换角色时头发短暂露出
+
+用户报告第一人称切换角色后，头发短暂出现，随后恢复正常。3.4.1 游戏日志记录了旧角色恢复、新角色眼位绑定、新角色衣物网格补丁、最后新角色头发设为仅投影阴影的顺序；日志转发时间不能作为画面持续时间。`EnsureNeckCap` 原先在专用头部渲染器的阴影模式设置前处理 Android 头饰资源及 GPU 网格补丁，切人时形成可见窗口。
+
+第一轮修改限定在头部隐藏 owner：扫描到新角色模型后，先为 `IsDedicatedHeadMesh` 识别的脸、头发等专用渲染器取得可恢复的 `ShadowsOnly` 租约，再执行资源补丁。原有退出、切人恢复与失败重试路径仍由同一租约负责；身体和衣物混合网格的补丁规则不变。旧日志重放检查给出 `RED`（新角色第一条补丁先于头发隐藏），新包日志确认头发早于补丁，但用户实机反馈“仍闪现”，因此该修改单独不足以通过验收。设备三次切人日志进一步确认：`First person perspective reason=first_person` 仍早于新角色头发隐藏，约相差 9–24 毫秒。
+
+第二轮在 Cinemachine `PushState` 调用原方法前检查主角色变化；若上一帧确实应用了第一人称视角，先重绑目标并保持头部隐藏，再让相机推送该帧。普通第三人称抑制场景不继承这个隐藏状态。`TailLateTick` 的原有刷新保留为兜底；这避免仅依赖相机帧尾才发现切人。Windows Camera 编译、FirstPersonMeshTests、FirstPersonRestoreTests 与 Android arm64 调试编译、`assembleDebug` 再次通过。构建中其他模块的既有原生告警和本机 `ndk.dir` 废弃告警未作为本轮修复处理。
+
+本机没有 release 签名材料。第一轮调试包 `D:/codexdata/betterendfield-hairflash-20261003-debug.apk`（SHA-256 `00D3F9A7C1EBE4EB749B81EE145608F225E0BE1B829D95C93A4F302675EB24BC`）已被用户实测否决。第二轮调试包 `D:/codexdata/betterendfield-hairflash-20261003-v2-debug.apk`（SHA-256 `2D569F7D2498C2267DD5D834E191BB339FF6711F929E15B5F957E6053F8A05ED`）的 arm64 原生库与本轮构建产物一致，包含 834 份头饰资源及清单。设备 PJX110 上 `adb install -r` 对两个 APK 均返回 `Success`，覆盖后读回 3.4.1（30401）；不能再依据本机缺少 release 密钥推断此设备无法覆盖。第一轮首次拉起游戏时 `UnityMain` 在 Android `Looper.loopOnce` 抛出 `ILooperExt.traceEnd()` 空引用并退出，第二次拉起后游戏进程存活、相机合同解析完成。第二轮用户确认头发不再闪现，但进入第一人称及切人通常卡约 10 秒，因此仍是阻断问题。该启动崩溃栈尚不能归因于本轮头部隐藏改动。
+
+卡顿实机日志显示，切人连续处理多份 LOD 网格，每份从源网格合同通过到补丁提交约 3 秒。第三轮把相机 `PushState` 中的即时头发隐藏与耗时网格补丁分离，并限制单次只处理一份头饰补丁；用户仍报告约 10 秒卡顿。第四轮分段计时确认 `AndroidSubmitMesh` 的写入、提交、回读阶段均在毫秒内；代码审计发现每份头饰补丁都重新运行 `ProbeLoadedUnityMeshLayout()`，对整个 `libunity.so` 做内存快照和指令扫描。布局探测改为进程内共享一次，所有调用方复用证据，每份网格仍独立验证源身份、骨骼、布局、字节和提交结果。
+
+共享探测包 `D:/codexdata/betterendfield-hairflash-20261003-cache-debug.apk`（SHA-256 `4DE67114E46ACC7CCA3CAF74BEBE16AC27EE25717858CDEB02BFA5133D3C4958`）经 `adb install -r` 覆盖成功。实机切人日志记录新角色头发先于视角写入变为 `ShadowsOnly`；同一次切人的六份头饰补丁在约 0.35 秒内完成，`AndroidSubmitMesh` 分段计时各为毫秒级。用户对当前包反馈“通过”，按本次进入第一人称、切人和退出场景记录为视觉与卡顿验收通过；不扩大为全角色、长时间运行或发布版验收。
+
+启动闪退作为独立未闭合问题：本机两次首次启动日志及设备 crash buffer 的多次历史记录均为 `UnityMain` 在 Android/Oplus `Looper.loopOnce` 调用空的 `ILooperExt.traceEnd()`；2026-10-03 17:53:14 这次发生在 `headwear packaged assets ready` 和 `waiting for first successful Unity frame` 之后，但在任何成功帧及 native runtime 加载之前。缓存资源已就绪，故“每次崩溃必由当次解压造成”与这次证据不符；仍需模块启用/停用启动对照，不能仅凭 framework 栈断言根因或做 Looper 补丁。
+
 ## 2026-10-02：Android 3.4.0 正式版与 CI 资源来源
 
 用户确认将已验收的 3.3.22-alpha.21 合成包递进为 Android 正式版 3.4.0（versionCode 30400），并允许公开 834 份头饰资源。完整 `catalog-bundled`（834 份 `.behw` 加 `coverage.json`）已作为 `headwear-catalog-v3-834.zip` 附在固定保留的 `v3.3.22-alpha.21` Release；归档 SHA-256 为 `BEAF2135063C962D382129098B65A3779D18ADF515EBDAC1FBD292E7B4644A78`。Android debug/release CI 与 CodeQL Java/Kotlin 编译共用 `tools/Camera/fetch_android_headwear_catalog.py` 下载、验摘要和限定解压，再将完整目录传给 Gradle `headwearCatalogDir`；Gradle 原有 834 份 coverage、摘要与已接受萤石 profile 校验继续是打包门禁。运行时仍只读 APK 内置资源，不访问 Release。用户明确后续 Release 保留；此前删除旧 Release 是为了移除未修复版本，不是通用清理规则。上游桌面版的本地同名 `v3.4.0` tag 已删除，以便本仓库 Android 正式版占用该 tag；上游仓库自身 tag 不在本次操作范围。

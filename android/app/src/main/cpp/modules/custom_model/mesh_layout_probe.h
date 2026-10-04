@@ -22,5 +22,10 @@ struct MeshLayoutEvidence {
     // verify object provenance, independent paths and lifecycle requirements.
 };
 MeshLayoutEvidence ProbeLoadedUnityMeshLayout();
+// Begin the read-only ELF scan from a gameplay tick before a mesh needs it.
+void WarmLoadedUnityMeshLayout();
+// libunity.so stays loaded for the game process lifetime. Share its verified
+// layout evidence across consumers instead of rescanning the image per mesh.
+const MeshLayoutEvidence& CachedLoadedUnityMeshLayout();
 bool ReadOwnMemory(uintptr_t address, void* output, size_t size);
 }

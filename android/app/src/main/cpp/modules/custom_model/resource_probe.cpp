@@ -79,7 +79,7 @@ ModuleResult CustomModelResourceProbe::Start(Il2CppRuntime& runtime) {
         "Mesh", "GetBonesPerVertexValue").c_str());
     LogInfo(Id(), mesh_observation_ready_ ? "Mesh observation contracts ready" : "Mesh observation contracts incomplete");
     LogGetterCode(Id(), runtime);
-    mesh_layout_ = ProbeLoadedUnityMeshLayout();
+    mesh_layout_ = CachedLoadedUnityMeshLayout();
     mesh_metadata_ = std::make_unique<MeshSkinMetadataAdapter>(mesh_layout_);
     LogInfo(Id(), ("dynamic Mesh layout: candidate=" + std::to_string(mesh_layout_.candidate_offset) +
         " archive_refs=" + std::to_string(mesh_layout_.named_references) +

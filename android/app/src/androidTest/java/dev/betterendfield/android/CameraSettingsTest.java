@@ -95,14 +95,16 @@ final class CameraSettingsTest {
         check(!defaults.movement() && defaults.animationMode() == 0 && !defaults.yieldDialogue()
                 && !defaults.thirdPersonInCombat()
                 && defaults.transitionSeconds() == 0 && !defaults.externalHeadScale(), "advanced defaults off");
-        check(defaults.sideLookLimit() == 60 && defaults.animationStrength() == 0.35, "advanced tuning defaults");
+        check(defaults.sideLookLimit() == 60 && defaults.lookUpLimit() == 89
+                && defaults.lookDownLimit() == 89 && defaults.animationStrength() == 0.35,
+                "advanced tuning defaults");
         ModuleSettings.setCameraSettings(context, false, false, false, true, true, true,
                 5, 60, 75, 0.03, 0.05, 0.03, false, defaults,
                 ModuleSettings.getCameraMotion(context));
         check(ModuleConfigurations.read(FrameworkSettings.open(context)).camera().contains(
                 "first_person_third_person_in_combat=false\n"), "combat INI default off");
         ModuleSettings.FirstPersonAdvanced configured = new ModuleSettings.FirstPersonAdvanced(
-                true, 42.5, 3, 0.1234, true, true, 0.2468, true);
+                true, 42.5, 35, 55, 3, 0.1234, true, true, 0.2468, true);
         ModuleSettings.setCameraSettings(context, false, false, false, true, true, true,
                 5, 60, 75, 0.03, 0.05, 0.03, false, configured,
                 ModuleSettings.getCameraMotion(context));
@@ -110,6 +112,7 @@ final class CameraSettingsTest {
         check(configured.equals(ModuleSettings.getFirstPersonAdvanced(context)), "advanced round trip");
         String ini = ModuleConfigurations.read(FrameworkSettings.open(context)).camera();
         for (String line : new String[]{"first_person_movement=true", "first_person_side_look_limit=42.5",
+                "first_person_look_up_limit=35", "first_person_look_down_limit=55",
                 "first_person_animation_mode=3", "first_person_animation_strength=0.1234",
                 "first_person_yield_dialogue=true", "first_person_third_person_in_combat=true",
                 "first_person_transition_seconds=0.2468",
@@ -126,15 +129,19 @@ final class CameraSettingsTest {
         check(ModuleConfigurations.read(FrameworkSettings.open(context)).camera().contains(
                 "first_person_third_person_in_combat=true\n"), "re-enabled combat INI retained");
         ModuleSettings.FirstPersonAdvanced bounded = new ModuleSettings.FirstPersonAdvanced(
-                true, 100, 99, -1, true, true, 2, true);
-        check(bounded.sideLookLimit() == 90 && bounded.animationMode() == 0
+                true, 100, 100, -1, 99, -1, true, true, 2, true);
+        check(bounded.sideLookLimit() == 90 && bounded.lookUpLimit() == 89
+                && bounded.lookDownLimit() == 0 && bounded.animationMode() == 0
                 && bounded.animationStrength() == 0 && bounded.transitionSeconds() == 1, "advanced bounds");
-        bounded = new ModuleSettings.FirstPersonAdvanced(false, -1, 2, 2, false, false, -1, false);
-        check(bounded.sideLookLimit() == 0 && bounded.animationMode() == 2
+        bounded = new ModuleSettings.FirstPersonAdvanced(false, -1, 0, 89, 2, 2, false, false, -1, false);
+        check(bounded.sideLookLimit() == 0 && bounded.lookUpLimit() == 0
+                && bounded.lookDownLimit() == 89 && bounded.animationMode() == 2
                 && bounded.animationStrength() == 1 && bounded.transitionSeconds() == 0, "opposite advanced bounds");
-        bounded = new ModuleSettings.FirstPersonAdvanced(false, Double.NaN, -1,
+        bounded = new ModuleSettings.FirstPersonAdvanced(false, Double.NaN,
+                Double.NaN, Double.POSITIVE_INFINITY, -1,
                 Double.POSITIVE_INFINITY, false, false, Double.NaN, false);
-        check(bounded.sideLookLimit() == 60 && bounded.animationMode() == 0
+        check(bounded.sideLookLimit() == 60 && bounded.lookUpLimit() == 89
+                && bounded.lookDownLimit() == 89 && bounded.animationMode() == 0
                 && bounded.animationStrength() == 0.35 && bounded.transitionSeconds() == 0, "advanced finite fallback");
     }
 

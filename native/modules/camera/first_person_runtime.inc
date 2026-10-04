@@ -546,6 +546,7 @@ void FpCloseNeckCap() {
 #if defined(__ANDROID__)
     for(unsigned attempt=0;attempt<3;++attempt)
         if(betterendfield::AndroidRestoreHeadwearFixture())break;
+    betterendfield::AndroidDiscardHeadwearFixtures();
 #endif
     for (auto& patch:g_fp_mesh_session.patches) patch.restore_failures=0;
     for (unsigned attempt=0;attempt<3&&!g_fp_mesh_session.patches.empty();++attempt) ReleaseNeckCap();
@@ -681,6 +682,18 @@ bool FpBuildPatch(const HeadPartProbe& part,FpPatch& patch,bool fill,float range
         ", cap="+std::to_string(result.cap_triangles)+", rings="+std::to_string(result.rings)+", GPU verified, original shadow retained.");
     return true;
 }
+void FpHideDedicatedHeadParts() {
+    if (!g_first_person.head) return;
+    auto model = FindModelTransform();
+    if (!model) return;
+    std::vector<HeadPartProbe> parts;
+    std::string tree;
+    int visited = 0;
+    int logged = kMaxPartLogEntries;
+    ScanPartNodes(model, 0, visited, parts, tree, logged);
+    for (const auto& part : parts)
+        if (part.renderer && part.dedicated_head) FpApplyShadowHide(part);
+}
 void EnsureNeckCap() {
 #if defined(__ANDROID__)
     FpRefreshProfile();
@@ -711,15 +724,22 @@ void EnsureNeckCap() {
     std::vector<HeadPartProbe> parts;std::string tree;int visited=0;
     // Log the part tree once per session: it names every renderer and mesh in
     // the model, which is how a head part that tokens miss gets diagnosed.
-    int logged=state.tree_logged?kMaxPartLogEntries:0;
+    int logged=state.tree_logged?kMaxPartLogEntries+1:0;
     state.tree_logged=true;
     ScanPartNodes(model,0,visited,parts,tree,logged);
     if(!tree.empty())Log("First person part tree:"+tree);
+    // Dedicated head renderers need no geometry readback to become invisible.
+    // Claim their shadow-only leases before catalog patches, which may take
+    // several frames on a newly selected character. Otherwise hair is visible
+    // between the character switch and the fallback pass below.
+    for(const auto& part:parts) if(part.renderer&&part.dedicated_head)
+        FpApplyShadowHide(part);
     // Dedicated head renderers keep their existing shadow-only owner. Only
     // mixed geometry needs a local triangle patch from the Android catalog.
     for(auto& part:parts) if(part.renderer&&!part.matched&&!part.dedicated_head)
         part.head_attached=FpIsHeadAttachment(part);
 #if defined(__ANDROID__)
+    bool catalog_processed = false;
     if(std::getenv("BETTER_ENDFIELD_HEADWEAR_DIRECTORY")) {
         std::vector<void*> renderers;
         for(const auto& part:parts) if(part.renderer) renderers.push_back(part.renderer);
@@ -730,9 +750,13 @@ void EnsureNeckCap() {
             auto* source=FpValue<void*>(nullptr,e.get_mesh,part.renderer);
             if(source && !betterendfield::AndroidHeadwearFixtureOwns(part.renderer,source) &&
                 betterendfield::AndroidHeadwearFixtureAvailable(part.renderer,source) &&
-                state.attempts.Try(part.renderer,source) &&
-                !betterendfield::AndroidProbeHeadwearFixture(part.renderer,source))
-                Log("First person headwear fixture: binding failed; source retained.");
+                state.attempts.Try(part.renderer,source)) {
+                if (!betterendfield::AndroidProbeHeadwearFixture(part.renderer,source))
+                    Log("First person headwear fixture: binding failed; source retained.");
+                catalog_processed = true;
+                state.last_scan = g_first_person_pump_frames - 30;
+                break;
+            }
         }
     }
 #endif
@@ -741,7 +765,11 @@ void EnsureNeckCap() {
             return part.renderer==renderer;
         });
     });
-    if(readback) for(const auto& part:parts) {
+    if(readback
+#if defined(__ANDROID__)
+        && !catalog_processed
+#endif
+    ) for(const auto& part:parts) {
         if(part.head_attached)continue;
         if(!part.renderer||part.vertex_count<=0)continue;
         if(std::any_of(state.patches.begin(),state.patches.end(),[&](const auto& p){return p.renderer.object==part.renderer;}))continue;

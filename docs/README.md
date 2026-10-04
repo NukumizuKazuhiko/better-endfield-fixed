@@ -6,7 +6,8 @@
 
 | 文档 | 用途 |
 | --- | --- |
-| [技术实现与配置参考](TECHNICAL_DETAILS.md) | 跨平台模块、加载、配置、日志与构建细节 |
+| [产品边界](PRODUCT_BOUNDARY.md) | Android 唯一目标平台及历史 Windows 代码的处理边界 |
+| [技术实现与配置参考](TECHNICAL_DETAILS.md) | Android 实现与历史桌面实现细节 |
 | [BEM 创作者指南](BEM_CREATOR_GUIDE.md) | 外观包制作、转换和验证 |
 | [BEM v1 规范](BEM_V1_SPEC.md) | 标准包字段与合同 |
 | [第一人称执行记录](CAMERA_FIRST_PERSON_EXECUTION.md) | 相机阶段门禁与验证边界 |

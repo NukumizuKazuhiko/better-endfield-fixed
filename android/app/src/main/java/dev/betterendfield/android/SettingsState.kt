@@ -575,6 +575,10 @@ class SettingsState(private val context: Context) {
         private set
     var firstPersonSideLookLimit by mutableStateOf(60f)
         private set
+    var firstPersonLookUpLimit by mutableStateOf(89f)
+        private set
+    var firstPersonLookDownLimit by mutableStateOf(89f)
+        private set
     var firstPersonAnimationMode by mutableStateOf(0)
         private set
     var firstPersonAnimationStrength by mutableStateOf(0.35f)
@@ -709,6 +713,8 @@ class SettingsState(private val context: Context) {
         val advanced = ModuleSettings.getFirstPersonAdvanced(context)
         firstPersonMovement = advanced.movement()
         firstPersonSideLookLimit = advanced.sideLookLimit().toFloat()
+        firstPersonLookUpLimit = advanced.lookUpLimit().toFloat()
+        firstPersonLookDownLimit = advanced.lookDownLimit().toFloat()
         firstPersonAnimationMode = advanced.animationMode()
         firstPersonAnimationStrength = advanced.animationStrength().toFloat()
         firstPersonYieldDialogue = advanced.yieldDialogue()
@@ -841,6 +847,16 @@ class SettingsState(private val context: Context) {
 
     fun updateFirstPersonSideLookLimit(value: Float) {
         firstPersonSideLookLimit = value
+        saveCameraSettings()
+    }
+
+    fun updateFirstPersonLookUpLimit(value: Float) {
+        firstPersonLookUpLimit = value
+        saveCameraSettings()
+    }
+
+    fun updateFirstPersonLookDownLimit(value: Float) {
+        firstPersonLookDownLimit = value
         saveCameraSettings()
     }
 
@@ -1176,6 +1192,8 @@ class SettingsState(private val context: Context) {
             ModuleSettings.FirstPersonAdvanced(
                 firstPersonMovement,
                 firstPersonSideLookLimit.toDouble(),
+                firstPersonLookUpLimit.toDouble(),
+                firstPersonLookDownLimit.toDouble(),
                 firstPersonAnimationMode,
                 firstPersonAnimationStrength.toDouble(),
                 firstPersonYieldDialogue,
@@ -1275,6 +1293,7 @@ class SettingsState(private val context: Context) {
     val firstPersonExtendLookRangeAvailable get() = firstPerson
     val firstPersonMovementAvailable get() = firstPerson
     val firstPersonSideLookLimitAvailable get() = firstPerson && firstPersonMovement
+    val firstPersonLookLimitAvailable get() = firstPerson
     val firstPersonAnimationModeAvailable get() = firstPerson
     val firstPersonAnimationStrengthAvailable get() = firstPerson && firstPersonAnimationMode != 0
     val firstPersonYieldDialogueAvailable get() = firstPerson

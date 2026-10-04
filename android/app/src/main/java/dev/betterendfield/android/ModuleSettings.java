@@ -270,11 +270,14 @@ final class ModuleSettings {
     }
 
     /** Advanced camera preferences share one normalized save/read contract. */
-    record FirstPersonAdvanced(boolean movement, double sideLookLimit, int animationMode,
+    record FirstPersonAdvanced(boolean movement, double sideLookLimit,
+            double lookUpLimit, double lookDownLimit, int animationMode,
             double animationStrength, boolean yieldDialogue, boolean thirdPersonInCombat, double transitionSeconds,
             boolean externalHeadScale) {
         FirstPersonAdvanced {
             sideLookLimit = bounded(sideLookLimit, 60, 0, 90);
+            lookUpLimit = bounded(lookUpLimit, 89, 0, 89);
+            lookDownLimit = bounded(lookDownLimit, 89, 0, 89);
             animationMode = animationMode >= 0 && animationMode <= 3 ? animationMode : 0;
             animationStrength = bounded(animationStrength, 0.35, 0, 1);
             transitionSeconds = bounded(transitionSeconds, 0, 0, 1);
@@ -283,6 +286,8 @@ final class ModuleSettings {
         String toIniLines() {
             return "first_person_movement=" + movement + "\n"
                     + "first_person_side_look_limit=" + number(sideLookLimit) + "\n"
+                    + "first_person_look_up_limit=" + number(lookUpLimit) + "\n"
+                    + "first_person_look_down_limit=" + number(lookDownLimit) + "\n"
                     + "first_person_animation_mode=" + animationMode + "\n"
                     + "first_person_animation_strength=" + number(animationStrength) + "\n"
                     + "first_person_yield_dialogue=" + yieldDialogue + "\n"
@@ -294,6 +299,8 @@ final class ModuleSettings {
         void store(SharedPreferences.Editor edit) {
             edit.putBoolean("camera_first_person_movement", movement)
                     .putString("camera_first_person_side_look_limit", number(sideLookLimit))
+                    .putString("camera_first_person_look_up_limit", number(lookUpLimit))
+                    .putString("camera_first_person_look_down_limit", number(lookDownLimit))
                     .putInt("camera_first_person_animation_mode", animationMode)
                     .putString("camera_first_person_animation_strength", number(animationStrength))
                     .putBoolean("camera_first_person_yield_dialogue", yieldDialogue)
@@ -308,6 +315,8 @@ final class ModuleSettings {
         return new FirstPersonAdvanced(
                 prefs.getBoolean("camera_first_person_movement", false),
                 parse(prefs.getString("camera_first_person_side_look_limit", "60"), 60),
+                parse(prefs.getString("camera_first_person_look_up_limit", "89"), 89),
+                parse(prefs.getString("camera_first_person_look_down_limit", "89"), 89),
                 prefs.getInt("camera_first_person_animation_mode", 0),
                 parse(prefs.getString("camera_first_person_animation_strength", "0.35"), 0.35),
                 prefs.getBoolean("camera_first_person_yield_dialogue", false),
