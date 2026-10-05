@@ -66,7 +66,9 @@
 | 原生 owner | `native/modules/camera/eiem/**`、`character_motion_runtime.inc`、`mmd_director_runtime.inc`、`mmd_library.h`、`camera_path.h`、`camera_file_worker.h`、`native/shared/motion/{vmd,character_pose,character_mapping,pose_lease_registry}.h`、`native/shared/host/pose_lease.cpp`、`native/modules/music/local_track.inc` |
 | Android 专属 | `android/app/src/main/cpp/core/local_music_android.cpp`；Windows 伴生悬浮窗（`overlay/*`、`.rc`、`.manifest`、`mmd_overlay_protocol.h`）**不得进 Android 目标** |
 | 构建接线 | `android/app/src/main/cpp/CMakeLists.txt`（eiem 目标 + include + `-fno-char8_t` + `pose_lease`） |
-| 前置阻断 | `module.cpp` 顶部 include 块无 `__ANDROID__` 守卫（`LONG` 缺失已修，见 §5.1）；合入时须逐个确认 Windows-only 头要么被 compat 满足、要么进守卫 |
+| **编译可行性（已实测）** | 补齐上游兼容层（`android_frame.cpp/h`、`android_camera.h`、`loaded_il2cpp.h`，我方缺这 4 件）并加 `-fno-char8_t` 后，用 NDK r27c clang 以 `--target=aarch64-linux-android21 -U_WIN32 -std=c++20 -fsyntax-only` 编译：**`eiem_body.cpp`、`eiem_slot0..3.cpp` 全部 5/5 OK**；MMD/motion 头 `mmd_overlay_protocol.h` / `mmd_library.h` / `camera_path.h` / `camera_file_worker.h` / `shared/motion/{vmd,character_pose,character_mapping,pose_lease_registry}.h` **8/8 OK**。 |
+| 阻断判定 | 该块**没有已证实的编译阻断**；`module.cpp` 顶部 include 守卫问题（§5.2）只在把 Windows 头拖进共享 TU 时才成立，eiem 独立 TU 不受影响。 |
+| 采样口径 | `eiem/**` 的 `.h` **不能**按单头 `-fsyntax-only` 逐个判定：它是「按固定顺序 include 的片段集合」，单测会因缺少前置声明报 `unknown type name 'VmdVec3'/'Quat'` 等（实测 34 头中 21 个此类假失败）。**唯一有效门禁是编译 `eiem_slot*.cpp` / `eiem_body.cpp` 这几个真实 TU**（上表即按此口径）。 |
 | 验收门槛 | ① ARM64 编译通过；② 设备上跑 `eiem/compat/tests`（`android_slot_tests`、`android_multislot_tests`，含 4 份 fixture VMD）；③ 真机 1/2/4 人同台、播放/暂停/跳转/循环、镜头模式、衣物物理三模式、地形贴合；④ 帧时与显存采样 + 切换回滚 |
 | 风险 | AGPL 合规；32k 行 EIEM 依赖大量按名解析的游戏接口，缺接口只能降级不能崩溃 |
 
@@ -108,11 +110,12 @@
 ## 5. 硬阻断与风险
 
 1. **`LONG` 未定义——已修**（`native/shared/android_compat/include/android_win32.h`）。NDK clang `--target=aarch64-linux-android21` 复核：修复前 `mmd_overlay_protocol.h` **5 处 error**（第 98/99/100/104/105 行），修复后 **0 error**。
-2. `module.cpp` 顶部 include 块无守卫：仍是 MMD 合入时最可能直接炸的点。
-3. `android/app/src/main/cpp/CMakeLists.txt` 双方都改：我方有 `third_party_host.cpp` 等，上游有 eiem 目标；合并必须人工处理，且**上游 MMD 伴生悬浮窗目标不得进 Android**。
-4. View→Compose 重写量：`MmdLibraryActivity` 含 Spinner/EditText/Button 混合控件与多组即时保存语义，等于重做一页设置。
-5. AGPL-3.0 义务：源码可得性与声明必须随移植同步。
-6. 上游无 CI、无设备画面/性能证据；我方设备侧也尚无游戏资源，**任何「已验收」结论都必须由真机证据支撑**。
+2. `module.cpp` 顶部 include 块无守卫：仍是把 Windows 专有头拖进共享翻译单元时最可能直接炸的点；eiem 独立 TU 不受影响（见 §4.A 实测）。
+3. **兼容层缺件**：上游 `native/shared/android_compat/` 有 `android_frame.cpp`、`android_frame.h`、`android_camera.h`、`loaded_il2cpp.h`，我方没有（我方多出 `android_panel_commands.h`）。其中 `loaded_il2cpp.h` 是 `eiem/compat/android_slot.inc` 用**相对路径**引用的，位置必须是 `native/shared/android_compat/loaded_il2cpp.h`，放进 `-I` 无效。
+4. `android/app/src/main/cpp/CMakeLists.txt` 双方都改：我方有 `third_party_host.cpp` 等，上游有 eiem 目标；合并必须人工处理，且**上游 MMD 伴生悬浮窗目标不得进 Android**。
+5. View→Compose 重写量：`MmdLibraryActivity` 含 Spinner/EditText/Button 混合控件与多组即时保存语义，等于重做一页设置。
+6. AGPL-3.0 义务：源码可得性与声明必须随移植同步。
+7. 上游无 CI、无设备画面/性能证据；我方设备侧也尚无游戏资源，**任何「已验收」结论都必须由真机证据支撑**。
 
 ## 6. 建议执行顺序
 
@@ -132,3 +135,37 @@
 2. 本 fork 是否保留上游 View 层（作为 MMD 页的临时载体）还是坚持全 Compose。
 3. MMD 是否纳入本 fork 的发布范围（影响 AGPL 声明与包体）。
 4. 委派边界：编码类杂活交 `zcode` CLI 的范围与验收责任划分。
+
+## 附录：可复现命令
+
+```bash
+# 差距量化
+BASE=$(git merge-base HEAD upstream/main)                 # 9b1e895
+git diff --name-only $BASE..HEAD | sort > /tmp/our.txt
+git diff --name-only $BASE..upstream/main | sort > /tmp/up.txt
+comm -12 /tmp/up.txt /tmp/our.txt                         # 冲突面 118
+comm -13 /tmp/our.txt /tmp/up.txt                         # 上游独有 412
+
+# 体量
+git ls-tree -r -l upstream/main -- native/modules/camera/eiem \
+  | awk '{n++; s+=$4} END {print n" files, "s" bytes"}'
+
+# 导出上游文件（保留相对布局，相对 include 才解析得到）
+git archive upstream/main native/modules/camera/eiem \
+  native/shared/android_compat native/shared/motion native/shared/host \
+  native/shared/include/BetterEndfield | tar -x -C /tmp/up
+
+# Android 目标编译校验（TU 口径，不是单头口径）
+CLANG=/d/android-toolchain/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe
+SYSROOT=/d/android-toolchain/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64/sysroot
+INC="-I /tmp/up/native/shared/android_compat/include -I /tmp/up/native/shared/android_compat \
+     -I /tmp/up/native/shared/include -I /tmp/up/native/shared/include/BetterEndfield \
+     -I /tmp/up/native/modules/camera/eiem -I /tmp/up/native/modules/camera/eiem/compat \
+     -I /tmp/up/native/modules/camera/eiem/upstream -I android/app/src/main/cpp"
+for tu in eiem_body eiem_slot0 eiem_slot1 eiem_slot2 eiem_slot3; do
+  "$CLANG" --target=aarch64-linux-android21 --sysroot="$SYSROOT" -U_WIN32 -fno-char8_t \
+    -std=c++20 -fsyntax-only $INC "/tmp/up/native/modules/camera/eiem/$tu.cpp" && echo "$tu OK"
+done
+```
+
+注意：`-U_WIN32` 必须加（否则替身层 `Windows.h` 的 `#if defined(_WIN32) #error` 会全部假失败）；`eiem/compat/android_slot.inc` 用相对路径引 `../../../../shared/android_compat/loaded_il2cpp.h`，所以兼容层必须落在与上游一致的相对位置。
