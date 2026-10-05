@@ -44,6 +44,10 @@
 
 using DWORD = std::uint32_t;
 using ULONG = std::uint32_t;
+// The MMD overlay protocol carries its sequence lock in LONG fields. Win32
+// defines LONG as a 32-bit signed value on every target, so the alias has to
+// follow the same width rather than the pointer width.
+using LONG = std::int32_t;
 using WORD = std::uint16_t;
 using USHORT = std::uint16_t;
 using SHORT = std::int16_t;
