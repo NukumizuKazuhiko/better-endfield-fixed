@@ -994,6 +994,15 @@ void PumpInputType() {
 
     const bool active = g_mobile_ui_enabled.load(std::memory_order_acquire);
 
+    // The default must preserve the game's own input choice.  A module which
+    // only hides the HUD/UID has no opinion about the layout, and pushing the
+    // fallback value here would silently select keyboard mode on a phone.
+    const int32_t restore = g_restore_input_type.load(std::memory_order_acquire);
+    if (!active && restore < 0) {
+        g_applied_generation.store(desired, std::memory_order_release);
+        return;
+    }
+
     int32_t current = 0;
     const bool have_current = TryReadInputType(current);
     if (active && have_current && current != kInputTypeTouch) {
@@ -1001,13 +1010,12 @@ void PumpInputType() {
         g_restore_input_type.store(current, std::memory_order_release);
     }
 
-    int32_t target = kInputTypeTouch;
-    if (!active) {
-        const int32_t restore = g_restore_input_type.load(std::memory_order_acquire);
-        target = restore >= 0 ? restore : 0;
-    }
+    int32_t target = active ? kInputTypeTouch : restore;
 
     if (have_current && current == target) {
+        if (!active) {
+            g_restore_input_type.store(-1, std::memory_order_release);
+        }
         g_applied_generation.store(desired, std::memory_order_release);
         return;
     }
@@ -1018,6 +1026,12 @@ void PumpInputType() {
         nullptr, parameters, &exception);
 
     g_applied_generation.store(desired, std::memory_order_release);
+    // The hand-back is one-shot: leaving the remembered value in place would
+    // let a later settings generation push it back over a layout the player
+    // picked in the meantime.
+    if (!active) {
+        g_restore_input_type.store(-1, std::memory_order_release);
+    }
 
     if (g_diagnostics_enabled.load(std::memory_order_relaxed)) {
         // Read back: the game can refuse a switch, so "sent" is not "applied".
