@@ -111,6 +111,10 @@ add_library(betterendfield_android SHARED
     core/runtime.cpp
     core/command_pump.cpp
     core/panel_commands.cpp
+    # Implements betterendfield::AndroidLocalMusicApi, which the MMD director
+    # calls for the local music track. Without this translation unit the
+    # director links against an undefined symbol.
+    core/local_music_android.cpp
     modules/custom_model/resource_probe.cpp
     modules/custom_model/mesh_layout_probe.cpp
     modules/custom_model/mesh_skin_metadata_adapter.cpp

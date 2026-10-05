@@ -129,6 +129,20 @@ int MultiByteToWideChar(unsigned code_page, unsigned flags, const char* input,
 #define VK_UP 0x26
 #define VK_RIGHT 0x27
 #define VK_DOWN 0x28
+// Modifiers, editing keys and the keypad arithmetic keys. The shared hotkey
+// binding tables (native/shared/input/hotkey.h) name these directly, so a
+// desktop hotkey string parses to the same code here.
+#define VK_MENU 0x12
+#define VK_LWIN 0x5B
+#define VK_RWIN 0x5C
+#define VK_RETURN 0x0D
+#define VK_SPACE 0x20
+#define VK_TAB 0x09
+#define VK_ESCAPE 0x1B
+#define VK_MULTIPLY 0x6A
+#define VK_ADD 0x6B
+#define VK_DECIMAL 0x6E
+#define VK_DIVIDE 0x6F
 #define VK_NUMPAD0 0x60
 #define VK_NUMPAD1 0x61
 #define VK_NUMPAD2 0x62

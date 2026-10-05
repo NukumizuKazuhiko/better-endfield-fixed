@@ -16,18 +16,42 @@
 #include "first_person_shadow.h"
 #include "first_person_retry.h"
 #include "first_person_head_attachment.h"
+// MMD playback and the EIEM DirectVmd body port. These are imported from
+// upstream unchanged; the camera module owns the wiring, not the implementations.
+#include "BetterEndfield/PoseLease.h"
+#include "BetterEndfield/CustomModelGeometry.h"
+#include "BetterEndfield/LocalMusic.h"
+#include "../../shared/motion/character_pose.h"
+#include "../../shared/motion/character_mapping.h"
+#include "../../shared/input/hotkey.h"
+#include "camera_file_worker.h"
+#include "mmd_library.h"
+#include "mmd_overlay_protocol.h"
+#include "eiem/eiem_body.h"
 
 #include <Windows.h>
+#if defined(__ANDROID__)
+#include "android_frame.h"
+#include "android_camera.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <mutex>
+#include <new>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -132,6 +156,37 @@ struct CameraConfiguration {
     float vmd_camera_scale = 0.07f;
     float vmd_camera_fov_bias = 5.0f;
     bool vmd_camera_loop = false;
+    // EIEM DirectVmd body motion (native/modules/camera/eiem) and MMD playback.
+    // The field names and defaults are upstream's so one config file means the
+    // same thing on both forks.
+    std::string vmd_motion_file;
+    bool vmd_body_enabled = false;
+    bool vmd_eyes_enabled = false;
+    bool vmd_face_enabled = false;
+    bool vmd_motion_loop = false;
+    bool vmd_terrain_enabled = false; // EIEM grounder terrain follow
+    int vmd_cloth_mode = 1;           // EiemBody::ClothMode: 0 game, 1 stable, 2 freeze
+    float vmd_motion_scale = 1.0f;    // EIEM displacement multiplier
+    float vmd_motion_weight = 1.0f;
+    int vmd_motion_key = 0;
+    int vmd_motion_pause_key = 0;
+    int vmd_motion_stop_key = 0;
+    // MMD playback: one clock for motion, the VMD camera and the music track.
+    bool mmd_enabled = true;
+    bool mmd_loop = false;
+    bool mmd_music_enabled = true;
+    float mmd_seek_seconds = 5.0f;
+    float mmd_music_gain = 1.0f;
+    float mmd_audio_offset = 0.0f;
+    std::string mmd_work;
+    std::string mmd_music_file;
+    std::string mmd_face_file;
+    int mmd_play_key = 0x100 | VK_RETURN; // numpad Enter
+    int mmd_stop_key = VK_ADD;
+    int mmd_seek_back_key = VK_NUMPAD4;
+    int mmd_seek_forward_key = VK_NUMPAD6;
+    int mmd_camera_mode_key = VK_NUMPAD5;
+    int mmd_overlay_key = VK_SUBTRACT;
     int roll_left_key = VK_NUMPAD7;
     int roll_right_key = VK_NUMPAD9;
     int fov_wide_key = VK_NUMPAD1;
@@ -204,6 +259,10 @@ std::atomic<float> g_field_of_view{60.0f};
 std::atomic_bool g_global_fov_enabled{false};
 std::atomic<float> g_global_fov{60.0f};
 std::atomic_bool g_free_camera_follow_character{false};
+#if defined(__ANDROID__)
+// Latest FOV the Android settings page asked for, applied on the Unity thread.
+std::atomic<float> g_android_fov_request{0.0f};
+#endif
 std::atomic<float> g_first_person_fov{75.0f};
 std::atomic<float> g_first_person_neck_plug_scale{1.0f};
 std::atomic_int g_toggle_key{'9'};
@@ -240,6 +299,48 @@ std::atomic_int g_keyframe_add_key{VK_NUMPAD0};
 std::atomic_int g_keyframe_play_key{VK_NUMPAD2};
 std::atomic_int g_keyframe_clear_key{VK_NUMPAD4};
 std::atomic_int g_vmd_play_key{VK_NUMPAD6};
+
+// ---------------------------------------------------------------------------
+// MMD director and EIEM body-motion state
+//
+// The values mirror upstream's so the two forks read one configuration file the
+// same way. The camera-file worker, the file generation counter and the
+// director flag are declared by free_camera_runtime.inc, which owns the
+// VMD camera path.
+// ---------------------------------------------------------------------------
+constexpr int kVkNumpadEnter = BetterEndfield::Input::kNumpadEnter | VK_RETURN;
+enum MmdRequest : uint32_t {
+    MmdRequestPlayPause = 1u << 0,
+    MmdRequestStop = 1u << 1,
+    MmdRequestCameraMode = 1u << 2,
+};
+std::atomic_bool g_mmd_enabled{true};
+std::atomic_bool g_mmd_loop_default{false};
+std::atomic_bool g_mmd_music_enabled{true};
+std::atomic<float> g_mmd_seek_seconds{5.0f};
+std::atomic<float> g_mmd_music_gain{1.0f};
+std::atomic<float> g_mmd_audio_offset{0.0f};
+std::string g_mmd_work;        // guarded by g_vmd_path_mutex
+std::string g_mmd_music_file;  // guarded by g_vmd_path_mutex
+std::string g_mmd_face_file;   // guarded by g_vmd_path_mutex
+std::string g_vmd_motion_file; // guarded by g_vmd_path_mutex
+std::string g_keyframe_file;   // guarded by g_vmd_path_mutex
+std::atomic_uint64_t g_asset_config_generation{0};
+std::atomic_uint64_t g_mmd_work_generation{0};
+std::atomic_uint32_t g_mmd_requests{0};
+std::atomic_int g_mmd_seek_steps{0};
+std::atomic_int g_mmd_play_key{kVkNumpadEnter};
+std::atomic_int g_mmd_stop_key{VK_ADD};
+std::atomic_int g_mmd_seek_back_key{VK_NUMPAD4};
+std::atomic_int g_mmd_seek_forward_key{VK_NUMPAD6};
+std::atomic_int g_mmd_camera_mode_key{VK_NUMPAD5};
+std::atomic_int g_mmd_overlay_key{VK_SUBTRACT};
+// Body-motion hotkeys (EIEM DirectVmd). Zero means unbound, which is the
+// upstream default: the character preview is switched on from the panel.
+std::atomic_bool g_character_preview_enabled{false};
+std::atomic_int g_character_play_key{0};
+std::atomic_int g_character_pause_key{0};
+std::atomic_int g_character_stop_key{0};
 
 using CameraTickFn = void(__fastcall*)(void* instance, void* method);
 CameraTickFn g_original_camera_tick = nullptr;
@@ -288,6 +389,12 @@ std::atomic_bool g_motion_request{false};
 std::atomic_bool g_keyframe_add_request{false};
 std::atomic_bool g_keyframe_play_request{false};
 std::atomic_bool g_keyframe_clear_request{false};
+// Save/load keyframe files. These are driven by the MMD director's keyframe
+// commands; the keys themselves stay unbound by default, as upstream.
+std::atomic_int g_keyframe_save_key{0};
+std::atomic_int g_keyframe_load_key{0};
+std::atomic_bool g_keyframe_save_request{false};
+std::atomic_bool g_keyframe_load_request{false};
 std::atomic_bool g_vmd_play_request{false};
 // Mouse look input, accumulated by the input thread's low-level mouse hook.
 std::atomic_bool g_free_camera_running{false};
@@ -1251,6 +1358,8 @@ void* FindModelTransform() {
 
 #include "first_person_runtime.inc"
 #include "free_camera_runtime.inc"
+#include "character_motion_runtime.inc"
+#include "mmd_director_runtime.inc"
 
 void ReleaseHeadTransform() {
 #if defined(__ANDROID__)
@@ -1992,6 +2101,11 @@ void PumpFromEngineTick(const char* source) {
         g_toggle_request.load(std::memory_order_acquire);
     t_in_engine_tick = true;
     PumpFreeCameraControl();
+    // MMD director and the EIEM DirectVmd body port. Both are thread pinned and
+    // re-entrancy guarded inside their own modules, so one pump here covers every
+    // tick that reaches this function.
+    PumpMmdDirector();
+    PumpCharacterMotion();
     if (g_free_camera_active) {
         ApplyFreeCameraHeartbeat();
     }
@@ -2590,6 +2704,15 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
         Log("Failed to install camera update hook.");
         return BE_Result_Failed;
     }
+    // The MMD/EIEM runtime. The camera file worker and the local music channel
+    // are optional: a build without them keeps the free camera and first person.
+    try {
+        g_camera_files.Start();
+    } catch (const std::exception& error) {
+        Log(std::string("Camera file worker unavailable: ") + error.what());
+    }
+    StartMmd();
+    StartCharacterMotion();
     g_input_thread_stop.store(false, std::memory_order_release);
     g_input_thread = std::thread(InputThreadMain);
     g_state.store(ModuleState::Ready, std::memory_order_release);
@@ -2599,6 +2722,12 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
 
 BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     const CameraConfiguration config = ParseConfiguration(raw_configuration);
+    // The character motion config is handed over whole, so the MMD director and
+    // the EIEM body port read exactly the values this fork parsed.
+    PublishCharacterConfiguration(config);
+    g_character_play_key.store(config.vmd_motion_key, std::memory_order_release);
+    g_character_pause_key.store(config.vmd_motion_pause_key, std::memory_order_release);
+    g_character_stop_key.store(config.vmd_motion_stop_key, std::memory_order_release);
     const bool free_camera = config.enabled && config.free_camera_enabled;
     const bool anti_dither = config.enabled && config.disable_dither_enabled;
     const bool first_person = config.enabled && config.first_person_camera_enabled;
@@ -2742,6 +2871,12 @@ void BE_CALL Shutdown() {
     FpResetPerspective();
     g_fp_retract=FpRetractSampler{};
     ExitFreeCamera("shutdown");
+    // The MMD/EIEM half. The pose lease has to be dropped before the file worker
+    // that feeds it stops, and the director releases its music channel here too.
+    g_character_preview_enabled.store(false, std::memory_order_release);
+    StopCharacterMotion();
+    StopMmd();
+    g_camera_files.Stop();
     ReleaseCameraRoot();
     if (g_host && g_host->release_module_hooks) {
         g_host->release_module_hooks(g_host->context, kModuleId);
