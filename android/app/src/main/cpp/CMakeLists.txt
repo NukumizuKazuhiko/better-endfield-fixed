@@ -47,10 +47,20 @@ target_link_options(betterendfield_installer PRIVATE -Wl,-z,max-page-size=16384 
 # runtime sources can never pick it up.
 add_library(betterendfield_desktop_features STATIC
     "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat/android_win32.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat/android_frame.cpp"
     "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat/touch_input_android.cpp"
     "${BETTER_ENDFIELD_ROOT}/native/modules/ui/module.cpp"
     "${BETTER_ENDFIELD_ROOT}/native/modules/camera/module.cpp"
-    "${BETTER_ENDFIELD_ROOT}/native/modules/actions/module.cpp")
+    "${BETTER_ENDFIELD_ROOT}/native/modules/actions/module.cpp"
+    # EIEM body motion (AGPL-3.0, see THIRD_PARTY_NOTICES.md). Ported from
+    # upstream's Android target; the desktop-only companion overlay is
+    # deliberately not part of this list.
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_body.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot0.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot1.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot2.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot3.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/shared/host/pose_lease.cpp")
 
 # Each desktop module exports the same BetterEndfield_GetModuleApiV1 entry point
 # because on Windows each one is its own DLL. Renaming per translation unit keeps
@@ -72,6 +82,9 @@ target_include_directories(betterendfield_desktop_features PRIVATE
     "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat/include"
     "${BETTER_ENDFIELD_ROOT}/native/shared/android_compat"
     "${BETTER_ENDFIELD_ROOT}/native/shared/include"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/compat"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/upstream"
     "${BETTER_ENDFIELD_ROOT}/native/modules/ui")
 target_compile_features(betterendfield_desktop_features PRIVATE cxx_std_20)
 # Shared desktop sources are not compiled with -Wpedantic on Windows either;
@@ -79,6 +92,16 @@ target_compile_features(betterendfield_desktop_features PRIVATE cxx_std_20)
 target_compile_options(betterendfield_desktop_features PRIVATE -Wall -O2)
 set_target_properties(betterendfield_desktop_features
     PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# The EIEM slot translation units consume their upstream fragments as byte
+# sequences and declare char8_t-sensitive literals; upstream builds exactly these
+# four files with the feature off, so the same four get the same treatment here.
+set_source_files_properties(
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot0.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot1.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot2.cpp"
+    "${BETTER_ENDFIELD_ROOT}/native/modules/camera/eiem/eiem_slot3.cpp"
+    PROPERTIES COMPILE_OPTIONS "-fno-char8_t")
 
 add_library(betterendfield_android SHARED
     native_bridge.cpp
