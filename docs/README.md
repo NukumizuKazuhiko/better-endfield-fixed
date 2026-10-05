@@ -16,6 +16,7 @@
 | [项目更新日志](../CHANGELOG.md) | 版本变化与发布状态 |
 | [Android 上游 3.4.4 移植记录](ANDROID_UPSTREAM_344_PORT_20261004.md) | 本分支 Android 功能范围与验收证据 |
 | [Android 上游同步与移植准备](ANDROID_UPSTREAM_SYNC_PREP_20261005.md) | 上游 3.5.0 差距清点、MMD/EIEM 移植合同与执行顺序 |
+| [Android 移植进度快照](ANDROID_PORT_PROGRESS_20261005.md) | 按功能块三档（代码/构建/设备）记录当前进度 |
 
 ## 历史记录
 
