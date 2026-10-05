@@ -18,7 +18,7 @@
 | 5 | 三方模块宿主（导入→dlopen→HTTP 桥） | 全链路已落地 | 通过 | **仅独立测试程序**，游戏内零验收 | 我方新增 |
 | 6 | Hook 链 / 动作诊断 | 部分 | 通过 | 未验 | 双方 |
 | 7 | MMD 播放（作品库 + 导演 + 相机路径） | **0 文件** | — | 无 | 上游已有，待移植 |
-| 8 | EIEM 身体动作（DirectVmd） | **0 文件** | 编译面已实测通过 | 无 | 上游已有，待移植 |
+| 8 | EIEM 身体动作（DirectVmd） | **文件已导入**（`ba18649`），但**未链入产物** | 5/5 TU OK（`-Werror`）；`.so` 逐字节未变 | 夹具：单槽 PASS；四槽 1 项子断言失败（见 §6） | 上游已有，待集成 |
 | 9 | 本地音轨时间轴 | **0 文件** | — | 无 | 上游已有，待移植 |
 | 10 | 数据与版本资源（F 块） | 未开始 | — | 无 | 双方 |
 
@@ -70,6 +70,46 @@
 
 `eiem/**` 的 `.h` **不能**按单头 `-fsyntax-only` 逐个判定：它是「按固定顺序 include 的片段集合」，单测会因缺前置声明报 `unknown type name 'VmdVec3'/'Quat'`（实测 34 头中 21 个此类假失败）。
 **唯一有效门禁 = 编译 `eiem_slot*.cpp` / `eiem_body.cpp` 真实 TU**，外加设备侧 `eiem/compat/tests/{android_slot_tests,android_multislot_tests}`（含 4 份 fixture VMD）。
+
+## 5. EIEM 原生层导入实测（`ba18649`，2026-10-05）
+
+**做法**：只新增、不覆盖。73 个新文件，0 个既有文件被改。严格不导入 Windows 伴生悬浮窗（`overlay/**`、`mmd_overlay_protocol.h`）。
+**不得覆盖的原因**：我方 `android_win32.cpp` / `android_virtual_keys.h` 是重写过的更强版本，含 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta`（陀螺仪与面板 look pad 的注入链路），上游版本没有。整文件覆盖会静默删掉这条链路。
+
+| 验证 | 结果 |
+| --- | --- |
+| 上游自带严格门禁（`--target=aarch64-linux-android24 -std=c++20 -fno-char8_t -Wall -Wextra -Werror`） | `eiem_body` + `eiem_slot0..3` **5/5 OK** |
+| `assembleDebug` + `assembleDebugAndroidTest`（834 份头饰目录） | **BUILD SUCCESSFUL**，0 error |
+| 静态库成员 | `libbetterendfield_desktop_features.a`（40,976,446 B）含全部 5 个 eiem 成员，`EiemBody::Initialize/LoadStatus/SetOptions` 为 `T` |
+| **最终 `.so`** | **未变**——`libbetterendfield_android.so` SHA-256 `8922461c…`，与本改动前**逐字节相同** |
+
+**根因**：`betterendfield_desktop_features` 是 `STATIC` 库，链接器只拉取被引用的成员。没有 TU 引用 `EiemBody` 符号时 5 个目标文件全被丢弃。
+**∴ `module.cpp` 集成是"代码进入产物"的前置条件。**
+
+## 6. EIEM 设备夹具实测（HLK-AL00 / arm64-v8a）
+
+设备无宿主编译器（无 `g++`），改为把上游夹具**交叉编译成 ARM64 可执行文件**并推到设备运行——比语法检查硬。
+
+| 夹具 | 结果 |
+| --- | --- |
+| `android_slot_tests`（单槽） | **PASS（EXIT=0）**：Avatar 自然绑定、衣物根锚点、SMC 姿态+快照还原、扭转骨、独立腿/趾 IK、盒装地形查询+可行走性+高度响应+暂停+异常能力状态、Stable/Freeze 衣物还原、异常门控、GC pin、CP932/UTF16 |
+| `android_multislot_tests`（四槽） | 四槽 VMD 加载/采样、导演 seek、FinalIK 抑制与放行、SMC、Stop/Start、GC 清理**全部通过**；**唯一失败项**：`floorQueries>100 && y > flatHeight+0.10` 的高度半边 |
+
+**四槽失败项的实测定位**（诊断副本，未改仓库源码）：
+
+```
+warmup pumps=1 baselineValid=1 baseline=0.000      ← 基线在首帧即建立于 y=0
+fq=6052 dy=0.0000 flat=1.0000 y=1.0000 avail=1 reason=[] 
+rootOffset=0.0000 baseline=0.300 baseValid=1 pelvisY=1.0000
+```
+
+- `floorQueries=6012~6052` → 地形探针**大量执行**，`>100` 半边通过。
+- `baseline` 由 **0.000 变为 0.300**：`baselineValid` 的**唯一**清零点就是 `ResetTerrain()`（`compat/android_terrain.inc:79-80`，同时清零 `rootOffset`）——∴ 90 次 seek 中**确实发生了一次地形重置**，基线按新地面 0.3 重新锚定。
+- 重置后相对偏移为 0 → `rootOffset=0` → 骨骼 Y 停在作者姿态 1.0000，未抬升。
+- 触发条件：`ApplyTerrain` 的 `step<-.001 || step>8`（`android_terrain.inc:115`，即帧号回跳或前跳超过 8 帧），以及显式 Stop/Start、`options.terrain` 变更路径。
+
+**结论边界**：适配层的地形**查询**链路在 ARM64 上工作正常（探针 6000+ 次、采到正确地面 0.300、契约解析无 reason）；夹具的抬升断言隐含「地面变更后不再发生重置」，本机运行不满足。
+**未决**：无宿主编译器 → 无法做 Windows 侧 A/B，**不能断言"仅设备侧复现"**。此项在集成 `module.cpp` 后须重测。
 
 ## 5. 下一步（顺序不变）
 

@@ -68,6 +68,7 @@
 | 构建接线 | `android/app/src/main/cpp/CMakeLists.txt`（eiem 目标 + include + `-fno-char8_t` + `pose_lease`） |
 | **编译可行性（已实测）** | 补齐上游兼容层（`android_frame.cpp/h`、`android_camera.h`、`loaded_il2cpp.h`，我方缺这 4 件）并加 `-fno-char8_t` 后，用 NDK r27c clang 以 `--target=aarch64-linux-android21 -U_WIN32 -std=c++20 -fsyntax-only` 编译：**`eiem_body.cpp`、`eiem_slot0..3.cpp` 全部 5/5 OK**；MMD/motion 头 `mmd_overlay_protocol.h` / `mmd_library.h` / `camera_path.h` / `camera_file_worker.h` / `shared/motion/{vmd,character_pose,character_mapping,pose_lease_registry}.h` **8/8 OK**。 |
 | 阻断判定 | 该块**没有已证实的编译阻断**；`module.cpp` 顶部 include 守卫问题（§5.2）只在把 Windows 头拖进共享 TU 时才成立，eiem 独立 TU 不受影响。 |
+| **落地阻断（2026-10-05 实测，已推翻"分阶段"假设）** | **EIEM 无法以"死代码"形式先落地。** `betterendfield_desktop_features` 是 `STATIC` 库，链接器只拉取被引用的成员；没有任何 TU 引用 `EiemBody` 符号时，5 个目标文件全被丢弃。实测：只加源文件与 CMake 目标后，`libbetterendfield_android.so` 与本改动前**逐字节相同**（SHA-256 `8922461c…`），而 `libbetterendfield_desktop_features.a` 里 5 个 eiem 成员与 `EiemBody::Initialize/LoadStatus/SetOptions` 均在。**∴ `module.cpp` 集成是"代码进入产物"的前置条件，不是后续可选项。** |
 | 采样口径 | `eiem/**` 的 `.h` **不能**按单头 `-fsyntax-only` 逐个判定：它是「按固定顺序 include 的片段集合」，单测会因缺少前置声明报 `unknown type name 'VmdVec3'/'Quat'` 等（实测 34 头中 21 个此类假失败）。**唯一有效门禁是编译 `eiem_slot*.cpp` / `eiem_body.cpp` 这几个真实 TU**（上表即按此口径）。 |
 | 验收门槛 | ① ARM64 编译通过；② 设备上跑 `eiem/compat/tests`（`android_slot_tests`、`android_multislot_tests`，含 4 份 fixture VMD）；③ 真机 1/2/4 人同台、播放/暂停/跳转/循环、镜头模式、衣物物理三模式、地形贴合；④ 帧时与显存采样 + 切换回滚 |
 | 风险 | AGPL 合规；32k 行 EIEM 依赖大量按名解析的游戏接口，缺接口只能降级不能崩溃 |
@@ -120,12 +121,13 @@
 ## 6. 建议执行顺序
 
 1. 三方模块设备闭环（代码已在，路径最短）
-2. MMD/EIEM **原生层**移植（无 UI）：eiem + motion + pose_lease + director + 本地音轨，先让 ARM64 编译与 `eiem/compat/tests` 通过
-3. MMD **Java 引擎 + Compose 页面**（先出键位对照表）
-4. 模型剩余链路（低峰值、热切换、阴影代理、分批贴图、原版恢复）
-5. Hook 诊断复核 + 设置页逐页回归
-6. 数据资源（F 块）单独提交
-7. 全面 Android 验收 + Release 签名环境
+2. MMD/EIEM **原生层导入**（文件 + CMake，**只增不覆**，**不得覆盖 `android_win32.*` / `android_virtual_keys.h`**）——已完成于 `ba18649`
+3. **`module.cpp` 集成**（把 EIEM 真正接进相机模块；这是第 2 步生效的前置条件，二者必须视为一件事）
+4. MMD **Java 引擎 + Compose 页面**（先出键位对照表）
+5. 模型剩余链路（低峰值、热切换、阴影代理、分批贴图、原版恢复）
+6. Hook 诊断复核 + 设置页逐页回归
+7. 数据资源（F 块）单独提交
+8. 全面 Android 验收 + Release 签名环境
 
 每步固定门槛：`assembleDebug` + `assembleDebugAndroidTest` + 相关宿主/Python 测试 + 真机证据；D 盘固定 834 份头饰目录构建。
 
