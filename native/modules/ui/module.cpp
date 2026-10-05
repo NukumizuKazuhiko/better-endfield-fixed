@@ -1,8 +1,12 @@
 #include "BetterEndfield/ModuleApi.h"
 
 #include "touch_input.h"
+#include "../../shared/input/hotkey.h"
 
 #include <Windows.h>
+#if defined(__ANDROID__)
+#include "android_frame.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -36,6 +40,7 @@ enum class ModuleState : uint8_t {
 struct UiConfiguration {
     bool enabled = false;
     bool mobile_ui_enabled = false;
+    bool pc_ui_enabled = false;
     bool hide_uid_enabled = false;
     bool hide_hud_enabled = false;
     int hide_hud_hotkey = '0';
@@ -59,6 +64,8 @@ std::atomic<ModuleState> g_state{ModuleState::Created};
 UiConfiguration g_configuration;
 std::mutex g_configuration_mutex;
 std::atomic_bool g_mobile_ui_enabled{false};
+std::atomic_bool g_pc_ui_enabled{false};
+int32_t g_keyboard_input_type = -1;
 std::atomic_bool g_hide_uid_enabled{false};
 std::atomic_bool g_hide_hud_enabled{false};
 std::atomic_int g_hide_hud_hotkey{'0'};
@@ -137,6 +144,7 @@ const void* g_input_type_field = nullptr;
 std::atomic_uint32_t g_desired_generation{0};
 std::atomic_uint32_t g_applied_generation{0};
 std::atomic_int32_t g_restore_input_type{-1};
+std::atomic_uint64_t g_next_input_type_check_tick{0};
 std::atomic_uint32_t g_uid_desired_generation{0};
 std::atomic_uint32_t g_uid_applied_generation{0};
 std::atomic_uint64_t g_next_uid_scan_tick{0};
@@ -718,9 +726,8 @@ std::string HudVisibilityStatus(const HudVisibilityResult& result) {
 
 void PumpHudVisibility() {
     const bool allowed = g_hide_hud_enabled.load(std::memory_order_acquire);
-    const bool hotkey_down = allowed &&
-        (GetAsyncKeyState(g_hide_hud_hotkey.load(std::memory_order_relaxed)) &
-            0x8000) != 0;
+    const bool hotkey_down = allowed && BetterEndfield::Input::IsDown(
+        g_hide_hud_hotkey.load(std::memory_order_relaxed));
     const bool hotkey_pressed = hotkey_down && !g_hud_hotkey_was_down;
     g_hud_hotkey_was_down = hotkey_down;
 
@@ -888,6 +895,7 @@ int32_t __fastcall DetourGetUserPlatform(void* method) {
 }
 
 void __fastcall DetourChangeInputType(int32_t type, void* method) {
+    if (g_pc_ui_enabled.load(std::memory_order_relaxed) && g_keyboard_input_type >= 0) type = g_keyboard_input_type;
     if (g_mobile_ui_enabled.load(std::memory_order_relaxed)) {
         type = kInputTypeTouch;
     }
@@ -973,7 +981,11 @@ bool TryReadInputType(int32_t& value) {
 // touch or desktop layout; overriding the getters cannot reach them.
 void PumpInputType() {
     const uint32_t desired = g_desired_generation.load(std::memory_order_acquire);
-    if (g_applied_generation.load(std::memory_order_relaxed) == desired) {
+    const bool mobile = g_mobile_ui_enabled.load(std::memory_order_acquire);
+    const bool pc = g_pc_ui_enabled.load(std::memory_order_acquire);
+    const bool active = mobile || pc;
+    const bool pending = g_applied_generation.load(std::memory_order_relaxed) != desired;
+    if (!pending && !active) {
         return;
     }
     // The switch re-enters through every UIStyleByState it refreshes; let the
@@ -987,56 +999,81 @@ void PumpInputType() {
         bool& flag;
         ~Guard() { flag = false; }
     } guard{in_progress};
+    // Initialization and direct field writes can change the real input state
+    // without a new settings generation. Recheck an enabled override, while
+    // bounding boxing and rejected requests to four per second.
+    const uint64_t now = GetTickCount64();
+    if (now < g_next_input_type_check_tick.load(std::memory_order_acquire)) return;
+    g_next_input_type_check_tick.store(now + 250, std::memory_order_release);
+    auto report_status = [&](const char* reason) {
+        static thread_local uint32_t reported_generation = 0;
+        static thread_local const char* reported_reason = nullptr;
+        if (!g_diagnostics_enabled.load(std::memory_order_relaxed) ||
+            (reported_generation == desired && reported_reason == reason)) return;
+        reported_generation = desired;
+        reported_reason = reason;
+        Log(std::string("UI layout request generation=") + std::to_string(desired) +
+            ", mode=" + (pc ? "Keyboard" : mobile ? "Touch" : "restore") + ": " + reason);
+    };
     if (!g_host || !g_host->runtime_invoke || !g_change_input_type_method) {
+        if (active) report_status("ChangeInputType invocation unavailable");
         g_applied_generation.store(desired, std::memory_order_release);
         return;
     }
 
-    const bool active = g_mobile_ui_enabled.load(std::memory_order_acquire);
-
-    // The default must preserve the game's own input choice.  A module which
-    // only hides the HUD/UID has no opinion about the layout, and pushing the
-    // fallback value here would silently select keyboard mode on a phone.
+    // Default must preserve the game's own input choice. A module which only
+    // hides HUD/UID must never implicitly select keyboard mode on a phone.
     const int32_t restore = g_restore_input_type.load(std::memory_order_acquire);
     if (!active && restore < 0) {
         g_applied_generation.store(desired, std::memory_order_release);
         return;
     }
-
     int32_t current = 0;
     const bool have_current = TryReadInputType(current);
-    if (active && have_current && current != kInputTypeTouch) {
-        // Remember what the game had picked so disabling can hand it back.
-        g_restore_input_type.store(current, std::memory_order_release);
+    if (active && !have_current && restore < 0) {
+        report_status("waiting for readable inputType backing field");
+        return; // restoration cannot be guaranteed
     }
-
-    int32_t target = active ? kInputTypeTouch : restore;
+    int32_t target = active ? (pc ? g_keyboard_input_type : kInputTypeTouch) : restore;
+    if (target < 0) return;
 
     if (have_current && current == target) {
-        if (!active) {
-            g_restore_input_type.store(-1, std::memory_order_release);
-        }
+        if (pending && active) report_status("backing field already matches; monitoring subsequent changes");
+        if (!active) g_restore_input_type.store(-1, std::memory_order_release);
         g_applied_generation.store(desired, std::memory_order_release);
         return;
     }
+    // An initial default already equal to the target is not a state we changed.
+    // Capture restoration only when we actually override the game's choice.
+    if (active && have_current && restore < 0)
+        g_restore_input_type.store(current, std::memory_order_release);
 
     void* parameters[1] = {&target};
     void* exception = nullptr;
     g_host->runtime_invoke(g_host->context, g_change_input_type_method,
         nullptr, parameters, &exception);
 
-    g_applied_generation.store(desired, std::memory_order_release);
-    // The hand-back is one-shot: leaving the remembered value in place would
-    // let a later settings generation push it back over a layout the player
-    // picked in the meantime.
-    if (!active) {
-        g_restore_input_type.store(-1, std::memory_order_release);
+    int32_t verified = -1;
+    if (!exception && TryReadInputType(verified) && verified == target) {
+        g_applied_generation.store(desired, std::memory_order_release);
+        if (!active) g_restore_input_type.store(-1, std::memory_order_release);
     }
 
     if (g_diagnostics_enabled.load(std::memory_order_relaxed)) {
         // Read back: the game can refuse a switch, so "sent" is not "applied".
         int32_t observed = -1;
         TryReadInputType(observed);
+        static thread_local uint32_t logged_generation = 0;
+        static thread_local int32_t logged_target = -1, logged_observed = -1;
+        static thread_local bool logged_exception = false, have_logged = false;
+        const bool managed_exception = exception != nullptr;
+        if (have_logged && logged_generation == desired && logged_target == target &&
+            logged_observed == observed && logged_exception == managed_exception) return;
+        have_logged = true;
+        logged_generation = desired;
+        logged_target = target;
+        logged_observed = observed;
+        logged_exception = managed_exception;
         char buffer[200];
         std::snprintf(buffer, sizeof(buffer),
             "Input type pushed to %d (was %d, now %d, active=%s)%s%s",
@@ -1115,24 +1152,7 @@ bool ParseBoolean(std::string_view value, bool default_value = false) {
 }
 
 int ParseVirtualKey(std::string_view value, int fallback) {
-    std::string key = Trim(value);
-    std::transform(key.begin(), key.end(), key.begin(),
-        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    if (key.size() == 1 && std::isalnum(static_cast<unsigned char>(key[0]))) {
-        return static_cast<unsigned char>(key[0]);
-    }
-    if (key.size() > 1 && key.front() == 'F') {
-        const int number = std::atoi(key.c_str() + 1);
-        if (number >= 1 && number <= 24) {
-            return VK_F1 + number - 1;
-        }
-    }
-    constexpr std::string_view numpad_prefix = "NUMPAD";
-    if (key.size() == numpad_prefix.size() + 1 &&
-        key.starts_with(numpad_prefix) && key.back() >= '0' && key.back() <= '9') {
-        return VK_NUMPAD0 + key.back() - '0';
-    }
-    return fallback;
+    return BetterEndfield::Input::ParseKey(value, fallback);
 }
 
 UiConfiguration ParseConfigurationText(const char* raw_configuration) {
@@ -1181,6 +1201,8 @@ UiConfiguration ParseConfigurationText(const char* raw_configuration) {
             config.enabled = ParseBoolean(value, config.enabled);
         } else if (key == "mobile_ui_enabled") {
             config.mobile_ui_enabled = ParseBoolean(value, config.mobile_ui_enabled);
+        } else if (key == "pc_ui_enabled") {
+            config.pc_ui_enabled = ParseBoolean(value, config.pc_ui_enabled);
         } else if (key == "hide_uid_enabled") {
             config.hide_uid_enabled = ParseBoolean(value, config.hide_uid_enabled);
         } else if (key == "hide_hud_enabled") {
@@ -1254,6 +1276,18 @@ bool ResolveContracts() {
     }
 
     if (g_host->resolve_field) {
+#if defined(__ANDROID__)
+        const BE_FieldDescriptorV1 keyboard{"Common.Beyond.dll", "Beyond", "DeviceInfo/InputType", "Keyboard", nullptr};
+        BE_ResolvedFieldV1 enum_field{};
+        if (g_host->resolve_field(g_host->context, &keyboard, &enum_field) == BE_Result_Ok &&
+            g_host->field_get_value_object &&
+            Unbox(g_host->field_get_value_object(g_host->context, enum_field.field_info, nullptr), g_keyboard_input_type)) {
+            Log("Android PC layout: resolved InputType.Keyboard by metadata.");
+        } else {
+            g_keyboard_input_type = -1;
+            Log("Android PC layout: Keyboard enum unavailable; leaving game layout unchanged.");
+        }
+#endif
         const BE_FieldDescriptorV1 descriptor{
             "Common.Beyond.dll", "Beyond", "DeviceInfo",
             "<inputType>k__BackingField", nullptr};
@@ -1309,6 +1343,11 @@ bool InstallHooks() {
         void** original = nullptr;
 
         std::string_view key(contract.key);
+#if defined(__ANDROID__)
+        // No device/platform spoofing is needed to hide native Android HUDs.
+        if ((key.starts_with("device.") && key != "device.change_input_type") || key.starts_with("app.") ||
+            key.starts_with("cloud_")) continue;
+#endif
         if (key == "device.is_mobile") {
             detour = reinterpret_cast<void*>(&DetourGetIsMobile);
             original = reinterpret_cast<void**>(&g_original_get_is_mobile);
@@ -1421,6 +1460,19 @@ void StopHooks() {
     }
 }
 
+#if defined(__ANDROID__)
+void AndroidUiFrame(bool suspend) {
+    if (!betterendfield::OnAndroidFrameThread()) return;
+    const auto state = g_state.load(std::memory_order_acquire);
+    if (state != ModuleState::Ready && state != ModuleState::Active && state != ModuleState::Disabled) return;
+    if (!suspend) {
+        PumpInputType();
+        PumpUidVisibility();
+        PumpHudVisibility();
+    }
+    betterendfield::PublishAndroidHudState(g_hud_hidden);
+}
+#endif
 BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
     if (!host || host->abi_version != BETTER_ENDFIELD_MODULE_ABI_V1) {
         return BE_Result_InvalidArgument;
@@ -1445,6 +1497,9 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
     TouchInput::Start([](const char* message) { Log(message); });
 
     g_state.store(ModuleState::Ready);
+#if defined(__ANDROID__)
+    betterendfield::SetAndroidFrameClient(betterendfield::FrameClient::Ui, &AndroidUiFrame);
+#endif
     Log("BetterEndfield.UI module initialized successfully.");
     return BE_Result_Ok;
 }
@@ -1459,7 +1514,13 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     const bool mobile_active = config.enabled && config.mobile_ui_enabled;
     const bool uid_active = config.enabled && config.hide_uid_enabled;
     const bool hud_active = config.enabled && config.hide_hud_enabled;
-    const bool active = mobile_active || uid_active || hud_active;
+#if defined(__ANDROID__)
+    const bool pc_active = config.enabled && config.pc_ui_enabled && g_keyboard_input_type >= 0;
+#else
+    const bool pc_active = false;
+#endif
+    const bool active = mobile_active || pc_active || uid_active || hud_active;
+    g_pc_ui_enabled.store(pc_active, std::memory_order_release);
     g_mobile_ui_enabled.store(mobile_active, std::memory_order_release);
     g_hide_uid_enabled.store(uid_active, std::memory_order_release);
     g_hide_hud_enabled.store(hud_active, std::memory_order_release);
@@ -1471,6 +1532,9 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
 
     Log(std::string("UI Configuration applied: enabled=") + (config.enabled ? "true" : "false") +
         ", mobile_ui_enabled=" + (config.mobile_ui_enabled ? "true" : "false") +
+        ", pc_ui_enabled=" + (config.pc_ui_enabled ? "true" : "false") +
+        ", pc_ui_effective=" + (pc_active ? "true" : "false") +
+        ", keyboard_input_type=" + std::to_string(g_keyboard_input_type) +
         ", hide_uid_enabled=" + (config.hide_uid_enabled ? "true" : "false") +
         ", hide_hud_enabled=" + (config.hide_hud_enabled ? "true" : "false") +
         ", hide_hud_hotkey_vk=" + std::to_string(config.hide_hud_hotkey) +
@@ -1481,6 +1545,7 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     // into managed code.  Record the request and let the UI-thread pump raise
     // the actual input-type switch.
     g_desired_generation.fetch_add(1, std::memory_order_acq_rel);
+    g_next_input_type_check_tick.store(0, std::memory_order_release);
     g_uid_desired_generation.fetch_add(1, std::memory_order_acq_rel);
     g_next_uid_scan_tick.store(0, std::memory_order_release);
     g_next_hud_scan_tick.store(0, std::memory_order_release);
@@ -1490,6 +1555,10 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
 }
 
 void BE_CALL Shutdown() {
+#if defined(__ANDROID__)
+    betterendfield::SetAndroidFrameClient(betterendfield::FrameClient::Ui, nullptr);
+    betterendfield::PublishAndroidHudState(false);
+#endif
     TouchInput::SetEnabled(false);
     TouchInput::Stop();
     g_hide_uid_enabled.store(false, std::memory_order_release);
@@ -1499,6 +1568,7 @@ void BE_CALL Shutdown() {
     StopHooks();
     g_state.store(ModuleState::Stopped);
     g_mobile_ui_enabled.store(false, std::memory_order_release);
+    g_pc_ui_enabled.store(false, std::memory_order_release);
     g_host = nullptr;
 }
 

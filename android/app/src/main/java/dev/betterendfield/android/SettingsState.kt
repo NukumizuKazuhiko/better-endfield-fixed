@@ -561,6 +561,8 @@ class SettingsState(private val context: Context) {
         private set
     var hideHud by mutableStateOf(false)
         private set
+    var pcUi by mutableStateOf(false)
+        private set
 
     // betterendfield.camera
     var disableDither by mutableStateOf(false)
@@ -797,6 +799,7 @@ class SettingsState(private val context: Context) {
     private fun loadEnhancement() {
         hideUid = ModuleSettings.isHideUidEnabled(context)
         hideHud = ModuleSettings.isHideHudEnabled(context)
+        pcUi = ModuleSettings.isPcUiEnabled(context)
         disableDither = ModuleSettings.isDisableDitherEnabled(context)
         freeCamera = ModuleSettings.isFreeCameraEnabled(context)
         freeCameraFollowCharacter = ModuleSettings.isFreeCameraFollowCharacter(context)
@@ -895,6 +898,14 @@ class SettingsState(private val context: Context) {
     fun updateHideHud(value: Boolean) {
         hideHud = value
         saveInterfaceSettings()
+    }
+
+    fun updatePcUi(value: Boolean) {
+        pcUi = value
+        // Writes the preference and re-emits the interface configuration in one
+        // step: the configuration writer reads the flag back from the store.
+        ModuleSettings.setPcUiEnabled(context, value)
+        afterEnhancementChange()
     }
 
     fun updateDisableDither(value: Boolean) {
@@ -1940,7 +1951,7 @@ class SettingsState(private val context: Context) {
     fun loadedModuleIds(): List<String> = buildList {
         if (ModuleSettings.getVoiceRules(context).isNotEmpty()) add("voice.character")
         if (modelEnabled || logoEnabled) add("model")
-        if (hideUid || hideHud) add("ui")
+        if (hideUid || hideHud || pcUi) add("ui")
         if (disableDither || freeCamera || firstPerson) add("camera")
         if (sustainedDash) add("actions")
     }
@@ -1956,7 +1967,7 @@ class SettingsState(private val context: Context) {
     /* -------------------------------------------------------------------- 卡片状态 */
 
     val interfaceCardStatus: String
-        get() = moduleStatus("betterendfield.ui", hideUid || hideHud)
+        get() = moduleStatus("betterendfield.ui", hideUid || hideHud || pcUi)
 
     val cameraCardStatus: String
         get() = moduleStatus(

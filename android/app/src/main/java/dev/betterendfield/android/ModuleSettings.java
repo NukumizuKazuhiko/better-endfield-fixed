@@ -26,6 +26,7 @@ final class ModuleSettings {
     // betterendfield.ui — the desktop interface module.
     private static final String UI_HIDE_UID = "ui_hide_uid";
     static final String UI_HIDE_HUD = "ui_hide_hud";
+    static final String PC_UI_ENABLED = "pc_ui_enabled";
     static final String UI_CONFIGURATION = "ui_configuration";
 
     // betterendfield.camera — the desktop camera module.
@@ -210,21 +211,43 @@ final class ModuleSettings {
         return preferences(context).getBoolean(UI_HIDE_HUD, false);
     }
 
-    static void setInterfaceSettings(Context context, boolean hideUid, boolean hideHud) {
+    static boolean isPcUiEnabled(Context context) {
+        return preferences(context).getBoolean(PC_UI_ENABLED, false);
+    }
+
+    static void setPcUiEnabled(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean(PC_UI_ENABLED, enabled).commit();
+        setInterfaceSettings(context, isHideUidEnabled(context), isHideHudEnabled(context));
+    }
+
+    /**
+     * The interface module configuration exactly as betterendfield.ui parses it.
+     *
+     * Deliberately free of Android calls: this text is the contract handed to
+     * the native module, and the key names have to match its string comparisons
+     * one for one. A key typed slightly wrong is not an error anywhere - the
+     * parser ignores it silently and the switch simply does nothing - so the
+     * function is kept pure to be exercised off-device.
+     */
+    static String interfaceConfiguration(boolean hideUid, boolean hideHud, boolean pcUi) {
         // An empty configuration is what keeps the module out of the game process,
         // so it has to be empty exactly when nothing is selected.
-        String configuration = hideUid || hideHud
+        return hideUid || hideHud || pcUi
                 ? "schema_version=1\n"
                         + "enabled=true\n"
                         + "diagnostics=true\n"
                         + "hide_uid_enabled=" + hideUid + "\n"
                         + "hide_hud_enabled=" + hideHud + "\n"
+                        + "pc_ui_enabled=" + pcUi + "\n"
                         + "hide_hud_hotkey=" + Hotkeys.HIDE_HUD_NAME + "\n"
-                // The touch layout and the Android/cloud platform claim only exist
-                // to make a desktop client look like a phone. This is a phone.
+                // PC UI changes only input type; it never spoofs the platform.
                         + "mobile_ui_enabled=false\n"
                         + "platform_spoof_enabled=false\n"
                 : "";
+    }
+
+    static void setInterfaceSettings(Context context, boolean hideUid, boolean hideHud) {
+        String configuration = interfaceConfiguration(hideUid, hideHud, isPcUiEnabled(context));
         preferences(context)
                 .edit()
                 .putBoolean(UI_HIDE_UID, hideUid)

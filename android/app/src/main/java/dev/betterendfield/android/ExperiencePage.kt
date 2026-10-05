@@ -58,6 +58,12 @@ private fun InterfaceCard(state: SettingsState) {
                 onCheckedChange = state::updateHideHud,
                 badge = stringResource(R.string.badge_overlay),
             )
+            SwitchRow(
+                title = stringResource(R.string.ui_pc),
+                description = stringResource(R.string.ui_pc_hint),
+                checked = state.pcUi,
+                onCheckedChange = state::updatePcUi,
+            )
         }
     }
 }
