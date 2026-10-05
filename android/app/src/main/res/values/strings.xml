@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="third_party_eyebrow">THIRD-PARTY MODULES</string>
+    <string name="third_party_title">第三方模块</string>
+    <string name="third_party_hint">安装 ZIP 后可启用、排序并打开模块界面。游戏内运行状态以运行日志为准。</string>
+    <string name="third_party_manage">安装 / 管理第三方模块</string>
+    <string name="third_party_import">选择模块 ZIP</string>
+    <string name="third_party_empty">尚未安装第三方模块。</string>
+    <string name="third_party_enable">启用模块</string>
+    <string name="third_party_unsupported">此包没有 Android 模块或网页入口。</string>
+    <string name="third_party_open_ui">打开模块界面</string>
+    <string name="third_party_up">上移</string>
+    <string name="third_party_down">下移</string>
+    <string name="third_party_remove">移除</string>
+    <string name="third_party_saved">模块选择已保存；运行中的游戏可能需要重新启动。</string>
+    <string name="third_party_error">第三方模块操作失败：%1$s</string>
     <string name="app_name">Better Endfield</string>
     <string name="xposed_description">Modular Endfield model replacement and per-character voice routing</string>
     <string name="settings_subtitle">终末地增强模块 · Android</string>

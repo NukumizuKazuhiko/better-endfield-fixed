@@ -94,6 +94,44 @@ final class FrameworkSettings {
         return context.getSharedPreferences("module_settings", Context.MODE_PRIVATE);
     }
 
+    static synchronized void publishThirdParty(java.io.File file, String name)
+            throws java.io.IOException {
+        if (remoteService == null || file == null || !file.isFile()
+                || !name.matches("tpm-[a-f0-9-]{36}\\.zip")) {
+            throw new java.io.IOException("框架服务未连接或第三方模块 ZIP 无效");
+        }
+        try (ParcelFileDescriptor descriptor = remoteService.openRemoteFile(name);
+                java.io.FileInputStream input = new java.io.FileInputStream(file);
+                FileOutputStream output = new FileOutputStream(descriptor.getFileDescriptor())) {
+            output.getChannel().truncate(0);
+            byte[] buffer = new byte[65536];
+            long copied = 0;
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                copied += count;
+                if (copied > ThirdPartyModulePackage.LIMIT) {
+                    throw new java.io.IOException("第三方模块 ZIP 超过容量限制");
+                }
+                output.write(buffer, 0, count);
+            }
+            output.getFD().sync();
+        } catch (RuntimeException error) {
+            throw new java.io.IOException("第三方模块 ZIP 发布失败", error);
+        }
+    }
+
+    static synchronized boolean removeThirdParty(String name) {
+        if (remoteService == null || name == null
+                || !name.matches("tpm-[a-f0-9-]{36}\\.zip")) return false;
+        try {
+            return remoteService.deleteRemoteFile(name)
+                    || !java.util.Arrays.asList(remoteService.listRemoteFiles()).contains(name);
+        } catch (RuntimeException error) {
+            Log.e("BetterEndfield.ThirdParty", "Removing shared ZIP failed", error);
+            return false;
+        }
+    }
+
     /**
      * Whether the framework service is reachable at all. The settings screen asks
      * before offering an import: a .vmd that cannot be published has to be

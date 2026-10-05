@@ -10,6 +10,7 @@ import android.util.Log;
 import java.lang.reflect.Method;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import android.os.ParcelFileDescriptor;
@@ -32,6 +33,10 @@ public final class XposedEntry extends XposedModule {
      * precondition cannot be met is not retried four times a second.
      */
     private volatile String heldBackCommand;
+    private volatile boolean thirdPartyPrepared;
+    private volatile String thirdPartyObserved = "";
+    private final AtomicReference<String> thirdPartyPending = new AtomicReference<>();
+    private final AtomicBoolean thirdPartyUpdating = new AtomicBoolean();
 
     /** This module instance, so helper classes in this package can reach hook(). */
     private static volatile XposedEntry instance;
@@ -297,6 +302,17 @@ public final class XposedEntry extends XposedModule {
                                 settings.getString(BemInstaller.INDEX,"[]"),
                                 name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report,true);
                         } catch(Exception error) {report("Installed BEM preparation failed: "+error);}
+                        if (!configs.thirdParty().isEmpty()) {
+                            try {
+                                ThirdPartyRuntimeMaterializer.prepare(context, configs.thirdParty(),
+                                        name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                                        this::report);
+                            } catch (Exception error) {
+                                report("Third-party preparation failed: " + error);
+                            }
+                            thirdPartyObserved = configs.thirdParty();
+                            thirdPartyPrepared = true;
+                        }
                         // The imported .vmd rides the same remote file space the
                         // packages do; its declared length comes from the same
                         // settings snapshot the configurations were read from.
@@ -448,6 +464,7 @@ public final class XposedEntry extends XposedModule {
             long nextNativeProbeAt = 0L;
             while (attached.get()) {
                 try {
+                    maybeUpdateThirdParty();
                     boolean present = false;
                     for (String file : listRemoteFiles()) if ("command.next".equals(file)) { present = true; break; }
                     long now = System.currentTimeMillis();
@@ -547,5 +564,40 @@ public final class XposedEntry extends XposedModule {
             }
         }, "BetterEndfield-Commands");
         worker.setDaemon(true); worker.start();
+    }
+
+    /** The existing command poller detects changes; ZIP preparation runs only for a new snapshot. */
+    private void maybeUpdateThirdParty() {
+        Context context = gameContext;
+        if (!thirdPartyPrepared || context == null) return;
+        String current = getRemotePreferences("module_settings")
+                .getString(ThirdPartyModuleStore.KEY, "");
+        if (current == null || current.isEmpty() || current.equals(thirdPartyObserved)) return;
+        thirdPartyObserved = current;
+        thirdPartyPending.set(current);
+        startThirdPartyWorker(context);
+    }
+
+    private void startThirdPartyWorker(Context context) {
+        if (!thirdPartyUpdating.compareAndSet(false, true)) return;
+        Thread worker = new Thread(() -> {
+            try {
+                String next;
+                while ((next = thirdPartyPending.getAndSet(null)) != null) {
+                    try {
+                        ThirdPartyRuntimeMaterializer.prepare(context, next,
+                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                                this::report);
+                    } catch (Exception error) {
+                        report("Third-party update failed: " + error);
+                    }
+                }
+            } finally {
+                thirdPartyUpdating.set(false);
+                if (thirdPartyPending.get() != null) startThirdPartyWorker(context);
+            }
+        }, "BetterEndfield-ThirdPartyUpdate");
+        worker.setDaemon(true);
+        worker.start();
     }
 }

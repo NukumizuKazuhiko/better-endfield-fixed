@@ -83,3 +83,19 @@ BEM 1.2 的 `bone_name_aliases` 已声明所属资源，但原解析结果把 wo
 上游全局 FOV 语义接入本仓库相机模块及 Compose 设置页，独立于已有自由镜头基准 FOV 与第一人称 FOV。只在主透视相机的 Cinemachine 推送中临时改写 FOV，推送后恢复原 CameraState；原生契约缺失时关闭该功能并记日志。设置开关可独立启用相机模块，关闭后无其他相机功能时不保留活动配置。
 
 固定 834 份头饰目录下运行 `:app:assembleDebug :app:assembleDebugAndroidTest --offline --no-daemon --quiet` 成功。HLK-AL00 Android 10 的 `testCameraSettingsRoundTrip` 通过独立启用、关闭后停用及跟随选项持久化检查；设置页实际打开、切换、拖动数值并核对持久配置，最后恢复关闭状态与原默认角度。截图保存在 `D:/CodexData/bem-global-fov.png`。补齐第一人称视觉退出期间的隔离后重新构建通过，最终 Debug APK SHA-256 为 `688DA75F58B33D250ED800841AB1547B61EFA26379757DD6B978A1E41E5B8CDF`，包内有一份头饰清单、834 个 `.behw` 和两个 Better Endfield ARM64 库。设备无游戏资源，普通镜头的实际视野变化及与游戏相机模式切换的交互仍未验证。
+
+## 第三方模块 Android 开发节点（2026-10-05）
+
+独立分支 `codex/android-thirdparty-alignment` 从已完成 BEM 1.3、自由镜头跟随与全局 FOV 的 `300129a` 继续。参照上游 `071288c` 的包格式、Host ABI、ZIP 部署和网页桥，在本仓库保留 Compose 设置页与已有 Hook Broker：设置应用导入并发布 ZIP；游戏启动时把已启用代际复制到私有目录；原生 Host 从索引加载 Android ARM64 库、处理本地认证消息，并使用现有 Hook 链。空管理索引不会单独启动游戏内 Host；运行中的配置变化借用已有命令轮询入口，只有索引变化才启动一次部署任务。Windows SDK 打包脚本未进入本阶段。
+
+已运行 Android Debug 主包与测试包构建，并重新安装两包后在 HLK-AL00 运行整套 `BemInstallerTest`。其中第三方测试覆盖 ZIP 路径、平台支持、私有部署、不可变代际复用、身份不匹配和失败隔离；工具页跳转、管理页空态在设备上可见，截图位于 `D:/CodexData/bem-thirdparty-manager.png`。独立 ARM64 Host 测试程序在设备上加载 Echo 示例：认证成功时 `/status`、`/send`、`/poll` 可用，错误令牌被拒绝，配置文件变化后回调读到新配置，停用后消息被拒绝。Debug 应用私有目录中的 Echo `.so` 可由 `System.load` 加载。测试结束后已移除设备临时 Host、端口转发和示例库。最终 Debug APK SHA-256 为 `61A38EA5D367884F5611C1EE009A677F4D8842F4710D220641E3455E5CC53C65`；包内有一份头饰清单、834 份 `.behw` 与两个 Better Endfield ARM64 库。
+
+**当前停在开发集成节点，尚未达到游戏内验收或发布节点。** 设备没有游戏资源；未验证 LSPosed 框架服务中的实际 ZIP 导入、游戏进程 `dlopen`、网页桥与 Echo 的端到端交互，也未验证 Release 签名环境。旧模块代际与远端 ZIP 暂按上游方案保留，长期存储回收需要明确安全时机与上界后再纳入发布门禁。
+
+## 后续移植顺序
+
+1. 第三方模块：完成框架服务导入、真实游戏进程加载与网页消息的设备闭环；补上旧代际存储治理，核对 Hook 与内置模块并存，再决定是否纳入发行。
+2. MMD 播放：以 Android 的资源导入、动作/表情/相机/音乐共用时间轴为合同，先接原生播放与文件部署，再接管理页和游戏内控制；逐项验证多人、暂停/恢复、衣物物理和清理。
+3. 模型剩余链路：在已有 BEM 1.3 合同上接上游通用模型匹配、场景原网格身份和阴影代理，再实现分批上传与低峰值加载，最后接场景热切换和原版恢复；分别测画面、显存、帧时、切换与回滚。
+4. 全面 Android 验收：固定 834 份头饰清单构建，核对 APK 与签名；在真实游戏上回归第一人称、相机、模型、第三方模块、MMD、Hook 共存和异常路径，再更新公开文档与发布状态。
+5. Android 闭环后再审可移植的 Windows 上游功能。先比较合同与本仓库现有实现，复用可共享的原生 owner；Windows UI、打包和发行另设验收，不反向扩大当前 Android 交付。

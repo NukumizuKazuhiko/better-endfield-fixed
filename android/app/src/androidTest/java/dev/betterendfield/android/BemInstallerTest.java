@@ -6,6 +6,14 @@ import java.io.*;
 import java.nio.file.Files;
 
 public final class BemInstallerTest extends Instrumentation {
+    public void testThirdPartyModulePackageBoundary() throws Exception {
+        ThirdPartyModulePackageTest.run(this);
+    }
+
+    public void testThirdPartyRuntimeMaterialization() throws Exception {
+        ThirdPartyRuntimeMaterializerTest.run(getTargetContext());
+    }
+
     public void testCameraSettingsRoundTrip() {
         CameraSettingsTest.run(this);
     }

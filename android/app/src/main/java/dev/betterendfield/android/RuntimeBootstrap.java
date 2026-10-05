@@ -149,6 +149,8 @@ final class RuntimeBootstrap {
             Os.setenv("BETTER_ENDFIELD_CUSTOM_MODEL_PROBE", debugResourceProbe() ? "1" : "0", true);
             Os.setenv("BETTER_ENDFIELD_FP_LOOK_PROBE", lookProbeRequested(settings) ? "1" : "0", true);
             Os.setenv("BETTER_ENDFIELD_CUSTOM_MODEL_CONFIG", customModelConfig(), true);
+            Os.setenv("BETTER_ENDFIELD_THIRD_PARTY_INDEX",
+                    ThirdPartyRuntimeMaterializer.indexPath, true);
             Os.setenv("BETTER_ENDFIELD_VOICE_CATALOG_ROOT",
                     new File(context.getFilesDir(), "betterendfield/catalog").getAbsolutePath(), true);
             // The diagnostics file is the only log sink a release build has:

@@ -14,7 +14,8 @@ import android.content.SharedPreferences;
  * native runtime keeps an unselected feature out of the game process entirely.
  */
 record ModuleConfigurations(
-        String voice, String model, String ui, String camera, String actions) {
+        String voice, String model, String ui, String camera, String actions,
+        String thirdParty) {
 
     static ModuleConfigurations read(SharedPreferences settings) {
         return new ModuleConfigurations(
@@ -22,16 +23,17 @@ record ModuleConfigurations(
                 string(settings, ModuleSettings.MODEL_CONFIGURATION),
                 string(settings, ModuleSettings.UI_CONFIGURATION),
                 string(settings, ModuleSettings.CAMERA_CONFIGURATION),
-                string(settings, ModuleSettings.ACTIONS_CONFIGURATION));
+                string(settings, ModuleSettings.ACTIONS_CONFIGURATION),
+                ThirdPartyModuleStore.selectedRuntimeIndex(settings));
     }
 
     static ModuleConfigurations empty() {
-        return new ModuleConfigurations("", "", "", "", "");
+        return new ModuleConfigurations("", "", "", "", "", "");
     }
 
     boolean none() {
         return voice.isEmpty() && model.isEmpty() && ui.isEmpty()
-                && camera.isEmpty() && actions.isEmpty();
+                && camera.isEmpty() && actions.isEmpty() && thirdParty.isEmpty();
     }
 
     /**
@@ -55,7 +57,7 @@ record ModuleConfigurations(
     String summary() {
         return "voice=" + !voice.isEmpty() + " model=" + !model.isEmpty()
                 + " ui=" + !ui.isEmpty() + " camera=" + !camera.isEmpty()
-                + " actions=" + !actions.isEmpty();
+                + " actions=" + !actions.isEmpty() + " thirdParty=" + !thirdParty.isEmpty();
     }
 
     private static String string(SharedPreferences settings, String key) {

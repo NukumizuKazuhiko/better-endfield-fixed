@@ -9,6 +9,7 @@
 #include "modules/custom_model/custom_model_module.h"
 #include "modules/camera/first_person_look_probe.h"
 #include "modules/custom_model/android_mesh_builder.h"
+#include "../../../../../native/shared/third_party_modules/third_party_host.h"
 
 #include "android_virtual_keys.h"
 
@@ -45,6 +46,9 @@ constexpr int kMaximumAttempts = 1200;
 std::atomic_bool g_runtime_started{false};
 std::vector<std::unique_ptr<Module>> g_modules;
 std::unique_ptr<Il2CppRuntime> g_il2cpp_runtime;
+BetterEndfield::ThirdParty::ThirdPartyHost g_third_party;
+HookBroker g_third_party_hooks;
+std::unique_ptr<DesktopModule> g_third_party_helper;
 
 const char* Configured(const char* variable) {
     const char* value = std::getenv(variable);
@@ -57,6 +61,16 @@ void RunModules() {
     // il2cpp_thread_attach while domain initialization is still in progress.
     std::this_thread::sleep_for(kInitialDelay);
     LogInfo("runtime", "Android module runtime started");
+
+    if (const char* index = Configured("BETTER_ENDFIELD_THIRD_PARTY_INDEX")) {
+        std::string hook_error;
+        const bool hook_ready = g_third_party_hooks.Initialize(hook_error);
+        if (!hook_ready) LogError("third-party", hook_error.c_str());
+        g_third_party.Start(index, "android-arm64",
+            [](const auto& id, const auto& message) {
+                LogInfo(id.c_str(), message.c_str());
+            }, nullptr, hook_ready ? g_third_party_hooks.ChainApi() : nullptr);
+    }
 
     g_il2cpp_runtime = std::make_unique<Il2CppRuntime>();
     Il2CppRuntime& runtime = *g_il2cpp_runtime;
@@ -75,6 +89,20 @@ void RunModules() {
     if (!thread.attached()) {
         LogError("runtime", "failed to attach worker to the IL2CPP domain");
         return;
+    }
+
+    if (Configured("BETTER_ENDFIELD_THIRD_PARTY_INDEX") != nullptr) {
+        static const BE_ModuleApiV1 helper{
+            {"third-party.runtime.helper", "Third-party optional helpers", "1", 1},
+            [](const BE_HostApiV1*) -> BE_Result { return BE_Result_Ok; },
+            [](const char*) -> BE_Result { return BE_Result_Ok; },
+            []() {}};
+        g_third_party_helper = std::make_unique<DesktopModule>(
+            "third-party.runtime.helper", "BETTER_ENDFIELD_THIRD_PARTY_INDEX",
+            []() -> const BE_ModuleApiV1* { return &helper; },
+            "third-party runtime helper ready");
+        if (g_third_party_helper->Start(runtime).active)
+            g_third_party.SetRuntime(g_third_party_helper->OptionalHostApi());
     }
 
     const char* custom_probe = std::getenv("BETTER_ENDFIELD_CUSTOM_MODEL_PROBE");
@@ -148,6 +176,7 @@ bool AnyModuleRequested() {
         "BETTER_ENDFIELD_CAMERA_CONFIG",
         "BETTER_ENDFIELD_ACTIONS_CONFIG",
         "BETTER_ENDFIELD_CUSTOM_MODEL_CONFIG",
+        "BETTER_ENDFIELD_THIRD_PARTY_INDEX",
     };
     for (const char* variable : kVariables) {
         if (Configured(variable) != nullptr) return true;

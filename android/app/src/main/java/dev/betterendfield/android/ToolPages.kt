@@ -41,9 +41,20 @@ import androidx.compose.material3.Text
  */
 @Composable
 fun ToolsPage(state: SettingsState, onPreviewOverlay: () -> Unit) {
+    val context = LocalContext.current
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Be.Space.l)) {
         OverlayCard(state, onPreviewOverlay)
         DiagnosticsCard(state)
+
+        PanelCard {
+            CardTitle(stringResource(R.string.third_party_title))
+            BodyText(stringResource(R.string.third_party_hint), modifier = Modifier.padding(top = Be.Space.m))
+            GhostButton(
+                text = stringResource(R.string.third_party_manage),
+                onClick = { context.startActivity(android.content.Intent(context, ThirdPartyModulesActivity::class.java)) },
+                modifier = Modifier.fillMaxWidth().padding(top = Be.Space.l),
+            )
+        }
 
         PanelCard {
             SubPageRow(
