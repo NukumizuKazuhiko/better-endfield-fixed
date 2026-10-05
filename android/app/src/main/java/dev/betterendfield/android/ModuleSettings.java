@@ -172,9 +172,27 @@ final class ModuleSettings {
         preferences(context).edit().putBoolean(OVERLAY_AUTO_SNAP, enabled).commit();
     }
 
+    /**
+     * The next command generation: the value the native pump compares its
+     * high-water mark against to drop replayed payloads.
+     *
+     * Wall-clock milliseconds rather than a counter, because two processes
+     * issue commands. The settings app writes through the framework's remote
+     * file space, and the in-game overlay submits straight to the relay from
+     * inside the game process. The pump keeps one mark for the whole process,
+     * so two private counters would simply count past each other and whichever
+     * side lagged would have every command silently discarded. A clock is
+     * shared by both sides and needs no coordination.
+     *
+     * The persisted value is only a floor, for the case the clock steps
+     * backwards: a counter here would instead reset to zero when the settings
+     * app is reinstalled with empty preferences, and then never be accepted
+     * again.
+     */
     static long nextCommandGeneration(Context context) {
         SharedPreferences settings = preferences(context);
-        long next = settings.getLong(COMMAND_GENERATION, 0L) + 1L;
+        long last = settings.getLong(COMMAND_GENERATION, 0L);
+        long next = Math.max(System.currentTimeMillis(), last + 1L);
         settings.edit().putLong(COMMAND_GENERATION, next).commit();
         return next;
     }
@@ -595,6 +613,442 @@ final class ModuleSettings {
                 prefs.getBoolean("camera_vmd_loop", false));
     }
 
+    // --------------------------------------------------------------------- MMD
+
+    /**
+     * The MMD director's settings, and the file slots it plays from.
+     *
+     * MMD has two ways to find material and {@code work} picks between them:
+     * when it names a work folder under {@code BETTER_ENDFIELD_MMD_ROOT}, the
+     * native {@code ResolveSources} reads that folder's {@code set.ini}; while
+     * it is empty, the director reads the three loose slots below instead. The
+     * empty value is therefore not a placeholder but a selection in its own
+     * right, and it is the default because a loose playback needs nothing
+     * installed.
+     *
+     * The two forms are not merged on purpose. A work carries its own audio
+     * offset, dancer count and per-file pairing, so a slot that happened to be
+     * filled while a work was selected would be a second, contradictory answer
+     * to the same question.
+     *
+     * The slot paths are written with the {@code %files%} placeholder, which the
+     * camera configuration already resolves to the game's own files directory. A
+     * slot that holds no file writes an empty value rather than dropping the key,
+     * so the native reader sees the same key set on every launch.
+     *
+     * {@code body}, {@code face}, {@code terrain}, {@code motionScale} and
+     * {@code clothMode} are the EIEM body-motion block, and they belong here
+     * because body motion is what an MMD motion is: the director hands the file
+     * to the character session, and that session refuses to start unless body
+     * motion is enabled. Without them a page could offer to play a dance and only
+     * the camera and the music would move.
+     */
+    record MmdSettings(boolean enabled, boolean loop, boolean music, double seekSeconds,
+            double gain, double audioOffset, boolean body, boolean face, boolean terrain,
+            double motionScale, int clothMode, boolean motionLoop, String slots, String work) {
+        /** The native parser's cloth modes, in {@code vmd_cloth_mode} spelling. */
+        static final String[] CLOTH_MODES = {"game", "stable", "freeze"};
+
+        MmdSettings {
+            seekSeconds = bounded(seekSeconds, 5, 0.5, 60);
+            gain = bounded(gain, 1, 0, 1);
+            audioOffset = bounded(audioOffset, 0, -600, 600);
+            motionScale = bounded(motionScale, 1.0, 0.05, 5);
+            clothMode = clothMode < 0 || clothMode >= CLOTH_MODES.length ? 1 : clothMode;
+            slots = slots == null ? "" : slots;
+            work = work == null ? "" : work;
+        }
+
+        String toIniLines() {
+            return "mmd_enabled=" + enabled + "\n"
+                    + "mmd_loop=" + loop + "\n"
+                    + "mmd_music_enabled=" + music + "\n"
+                    + "mmd_seek_seconds=" + number(seekSeconds) + "\n"
+                    + "mmd_music_gain=" + number(gain) + "\n"
+                    + "mmd_audio_offset=" + number(audioOffset) + "\n"
+                    // Android has no companion overlay process, so the visibility
+                    // key is not written. The gate stays on because on desktop it
+                    // is also what arms the director's overlay loop.
+                    + "mmd_overlay_enabled=true\n"
+                    // A work folder name, or empty for the loose slots below.
+                    + "mmd_work=" + work + "\n"
+                    + slotLine("vmd_motion_file", MMD_SLOT_MOTION)
+                    + slotLine("mmd_face_file", MMD_SLOT_FACE)
+                    + slotLine("mmd_music_file", MMD_SLOT_MUSIC)
+                    + "vmd_motion_loop=" + motionLoop + "\n"
+                    + "vmd_body_enabled=" + body + "\n"
+                    // Face and eyes ride the body session: EIEM drives the whole
+                    // rig, so a face with no body is not a state the session has.
+                    + "vmd_eyes_enabled=" + (body && face) + "\n"
+                    + "vmd_face_enabled=" + (body && face) + "\n"
+                    + "vmd_terrain_enabled=" + (body && terrain) + "\n"
+                    + "vmd_motion_scale=" + number(motionScale) + "\n"
+                    + "vmd_cloth_mode=" + CLOTH_MODES[clothMode] + "\n";
+        }
+
+        /** One slot's path, or an empty value when that slot holds no file. */
+        private String slotLine(String key, String id) {
+            String name = mmdSlotName(slots, id);
+            return key + "="
+                    + (name.isEmpty() ? "" : "%files%/" + MMD_SLOT_DIRECTORY + "/" + name)
+                    + "\n";
+        }
+
+        void store(SharedPreferences.Editor edit) {
+            edit.putBoolean("mmd_enabled", enabled)
+                    .putBoolean("mmd_loop", loop)
+                    .putBoolean("mmd_music_enabled", music)
+                    .putString("mmd_seek_seconds", number(seekSeconds))
+                    .putString("mmd_music_gain", number(gain))
+                    .putString("mmd_audio_offset", number(audioOffset))
+                    .putBoolean("mmd_body_enabled", body)
+                    .putBoolean("mmd_face_enabled", face)
+                    .putBoolean("mmd_terrain_enabled", terrain)
+                    .putString("mmd_motion_scale", number(motionScale))
+                    .putInt("mmd_cloth_mode", clothMode)
+                    .putBoolean("mmd_motion_loop", motionLoop)
+                    .putString(MMD_WORK, work);
+        }
+    }
+
+    static MmdSettings getMmdSettings(Context context) {
+        SharedPreferences prefs = preferences(context);
+        return new MmdSettings(
+                prefs.getBoolean("mmd_enabled", false),
+                prefs.getBoolean("mmd_loop", false),
+                prefs.getBoolean("mmd_music_enabled", true),
+                parse(prefs.getString("mmd_seek_seconds", "5"), 5.0),
+                parse(prefs.getString("mmd_music_gain", "1"), 1.0),
+                parse(prefs.getString("mmd_audio_offset", "0"), 0.0),
+                prefs.getBoolean("mmd_body_enabled", false),
+                prefs.getBoolean("mmd_face_enabled", false),
+                prefs.getBoolean("mmd_terrain_enabled", false),
+                parse(prefs.getString("mmd_motion_scale", "1"), 1.0),
+                prefs.getInt("mmd_cloth_mode", 1),
+                prefs.getBoolean("mmd_motion_loop", false),
+                prefs.getString(MMD_SLOTS, ""),
+                prefs.getString(MMD_WORK, ""));
+    }
+
+    /**
+     * Whether MMD has anything to play, which is also what decides whether the
+     * page's transport controls are worth offering.
+     *
+     * The camera slot is included because it is a second consumer of the same
+     * director: an MMD with only a camera motion is a valid playback, and the
+     * desktop module treats it as one.
+     */
+    static boolean mmdHasMaterial(String slots, boolean cameraSlot) {
+        return cameraSlot
+                || !mmdSlotName(slots, MMD_SLOT_MOTION).isEmpty()
+                || !mmdSlotName(slots, MMD_SLOT_FACE).isEmpty()
+                || !mmdSlotName(slots, MMD_SLOT_MUSIC).isEmpty();
+    }
+
+    // ------------------------------------------------------------- MMD slots
+
+    /**
+     * Where the imported MMD files land inside the game's own files directory.
+     *
+     * The native director takes paths, and the settings app cannot write into the
+     * game's data directory - different UIDs - so each slot travels through the
+     * framework's remote file space and the game process copies it here once on
+     * startup, exactly like the VMD camera slot next to it.
+     */
+    static final String MMD_SLOT_DIRECTORY = "betterendfield/mmd";
+
+    /** The three files a loose (non-library) MMD playback is assembled from. */
+    static final String MMD_SLOT_MOTION = "motion";
+    static final String MMD_SLOT_FACE = "face";
+    static final String MMD_SLOT_MUSIC = "music";
+
+    private static final String MMD_SLOTS = "mmd_slots";
+
+    /** The selected library work folder, empty while the loose slots are in use. */
+    private static final String MMD_WORK = "mmd_work";
+
+    /** One imported slot: the remote name to read, its filename, and its length. */
+    record MmdSlot(String id, String remote, String name, long bytes) {}
+
+    /** The remote name a slot is published under. One live file per slot. */
+    static String mmdSlotRemote(String id) {
+        return "mmd." + id;
+    }
+
+    /** The native loaders' ceiling, so an import is refused here instead of there. */
+    static long mmdSlotMaximumBytes() {
+        return 64L * 1024 * 1024;
+    }
+
+    /**
+     * Reduces a picked file's display name to something safe to write as a path.
+     *
+     * The name ends up inside a generated configuration and as a file name in the
+     * game's directory, so anything that could escape a directory or split a line
+     * is removed rather than escaped; an empty result falls back to the slot id,
+     * which keeps the target deterministic.
+     */
+    static String sanitizeMmdSlotName(String raw, String fallback) {
+        String name = raw == null ? "" : raw.trim();
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0) name = name.substring(slash + 1);
+        StringBuilder cleaned = new StringBuilder();
+        for (int i = 0; i < name.length() && cleaned.length() < 96; ++i) {
+            char c = name.charAt(i);
+            boolean safe = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+                    || c == '.' || c == '_' || c == '-' || c == ' ' || c == '(' || c == ')';
+            cleaned.append(safe ? c : '_');
+        }
+        String result = cleaned.toString().trim();
+        while (result.startsWith(".")) result = result.substring(1);
+        return result.isEmpty() ? fallback : result;
+    }
+
+    static java.util.List<MmdSlot> mmdSlots(String encoded) {
+        java.util.List<MmdSlot> slots = new java.util.ArrayList<>();
+        if (encoded == null || encoded.isEmpty()) return slots;
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(encoded);
+            for (int i = 0; i < array.length(); ++i) {
+                org.json.JSONObject entry = array.getJSONObject(i);
+                String id = entry.optString("id");
+                String name = sanitizeMmdSlotName(entry.optString("name"), id);
+                long bytes = entry.optLong("bytes");
+                if (!id.isEmpty() && bytes > 0) {
+                    slots.add(new MmdSlot(id, mmdSlotRemote(id), name, bytes));
+                }
+            }
+        } catch (org.json.JSONException broken) {
+            android.util.Log.w("BetterEndfield.Mmd", "MMD slot record unreadable", broken);
+        }
+        return slots;
+    }
+
+    static String mmdSlotName(String encoded, String id) {
+        for (MmdSlot slot : mmdSlots(encoded)) {
+            if (slot.id().equals(id)) return slot.name();
+        }
+        return "";
+    }
+
+    static long mmdSlotBytes(String encoded, String id) {
+        for (MmdSlot slot : mmdSlots(encoded)) {
+            if (slot.id().equals(id)) return slot.bytes();
+        }
+        return 0L;
+    }
+
+    /** Adds or replaces one slot, keeping the rest of the record intact. */
+    static String mmdSlotsWith(String encoded, String id, String name, long bytes) {
+        java.util.List<MmdSlot> slots = mmdSlots(encoded);
+        slots.removeIf(slot -> slot.id().equals(id));
+        slots.add(new MmdSlot(id, mmdSlotRemote(id), sanitizeMmdSlotName(name, id), bytes));
+        return encodeMmdSlots(slots);
+    }
+
+    static String mmdSlotsWithout(String encoded, String id) {
+        java.util.List<MmdSlot> slots = mmdSlots(encoded);
+        slots.removeIf(slot -> slot.id().equals(id));
+        return encodeMmdSlots(slots);
+    }
+
+    private static String encodeMmdSlots(java.util.List<MmdSlot> slots) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (MmdSlot slot : slots) {
+            try {
+                array.put(new org.json.JSONObject()
+                        .put("id", slot.id())
+                        .put("name", slot.name())
+                        .put("bytes", slot.bytes()));
+            } catch (org.json.JSONException impossible) {
+                // put() only throws for a non-finite number, and these are a
+                // String and a long.
+            }
+        }
+        return array.toString();
+    }
+
+    static String getMmdSlots(Context context) {
+        return preferences(context).getString(MMD_SLOTS, "");
+    }
+
+    static void setMmdSlots(Context context, String encoded) {
+        preferences(context).edit().putString(MMD_SLOTS, encoded == null ? "" : encoded).commit();
+    }
+
+    // ----------------------------------------------------------- MMD library
+
+    /**
+     * Where the settings app keeps its own copy of an installed work.
+     *
+     * This is not where the game reads from: the two processes have separate
+     * data directories, and the copy exists so a work can be re-published after
+     * the framework service reconnects, without asking the user to pick the
+     * folder again. The name is not the same as the game's directory because the
+     * two live under different UIDs and there is no reason to make them look
+     * alike from the outside.
+     */
+    static final String MMD_LIBRARY_DIRECTORY = "mmd";
+
+    /** The installed-work index; read by the game process through the settings snapshot. */
+    static final String MMD_WORKS = "installed_mmd_works";
+
+    /** One published file of a work: the remote name, its plain name, its length. */
+    record MmdWorkFile(String remote, String name, long bytes) {}
+
+    /**
+     * One installed work.
+     *
+     * The generation is a UUID and it doubles as the folder name the game scans,
+     * which is what makes re-importing a work replace it atomically instead of
+     * merging into whatever was there before. A user-visible name would have to
+     * be unique, and enforcing that on a phone - where two works genuinely can
+     * share a title - buys nothing the generation does not already give.
+     */
+    record MmdWork(String generation, String name, java.util.List<MmdWorkFile> files) {}
+
+    /** The remote name one work file is published under; unique per work and file. */
+    static String mmdWorkRemote(String generation, String name) {
+        return "mmd-" + generation + "-" + name;
+    }
+
+    /** Per-file ceiling for a work; the whole work is bounded separately. */
+    static long mmdWorkMaximumBytes() {
+        return 512L * 1024 * 1024;
+    }
+
+    static String getMmdWork(Context context) {
+        return preferences(context).getString(MMD_WORK, "");
+    }
+
+    /**
+     * Selects a library work and rewrites the stored camera configuration.
+     *
+     * Selecting has to do both: the running game is switched by the {@code work}
+     * command the page sends alongside this call, while the stored configuration
+     * carries the same choice for the next launch. The rewrite is line-level
+     * rather than a full regeneration because this also runs from the installer
+     * when a work is removed - a path that has no access to the settings
+     * screen's state and must not reset every other camera option to defaults.
+     *
+     * @return whether the rewritten configuration reached the running game
+     */
+    static boolean setMmdWork(Context context, String work) {
+        String folder = work == null ? "" : work.trim();
+        SharedPreferences prefs = preferences(context);
+        if (folder.equals(prefs.getString(MMD_WORK, ""))) return true;
+        prefs.edit().putString(MMD_WORK, folder).commit();
+        String configuration = prefs.getString(CAMERA_CONFIGURATION, "");
+        if (configuration.isEmpty()) return true;
+        String next = withIniValue(configuration, "mmd_work", folder);
+        if (next.equals(configuration)) return true;
+        prefs.edit().putString(CAMERA_CONFIGURATION, next).commit();
+        return ModuleCommandRouter.issue(context, "camera_config", next);
+    }
+
+    /**
+     * Replaces one key's value inside a stored configuration string.
+     *
+     * The configuration is a line-oriented text and the whole string is what the
+     * native side reloads, so a single-key change has to be expressed as a new
+     * string. Working line by line - instead of regenerating the configuration
+     * from the caller's view of the settings - is what lets a background
+     * operation change its own key while every other setting is carried forward
+     * untouched. A key that is not present is appended rather than ignored; the
+     * native reader takes the last occurrence, so a missing line would otherwise
+     * mean "the change silently did nothing".
+     */
+    private static String withIniValue(String configuration, String key, String value) {
+        StringBuilder out = new StringBuilder(configuration.length() + 32);
+        String prefix = key + "=";
+        boolean seen = false;
+        int position = 0;
+        while (position < configuration.length()) {
+            int end = configuration.indexOf('\n', position);
+            if (end < 0) end = configuration.length();
+            String line = configuration.substring(position, end);
+            if (line.startsWith(prefix)) {
+                if (!seen) {
+                    out.append(prefix).append(value).append('\n');
+                    seen = true;
+                }
+            } else {
+                out.append(line).append('\n');
+            }
+            position = end + 1;
+        }
+        if (!seen) out.append(prefix).append(value).append('\n');
+        return out.toString();
+    }
+
+    static java.util.List<MmdWork> getMmdWorks(Context context) {
+        return mmdWorks(preferences(context).getString(MMD_WORKS, ""));
+    }
+
+    static void setMmdWorks(Context context, java.util.List<MmdWork> works) {
+        preferences(context).edit().putString(MMD_WORKS, encodeMmdWorks(works)).commit();
+    }
+
+    /**
+     * Reads the installed-work index, dropping entries that do not describe a
+     * usable work rather than failing the whole list.
+     *
+     * A single corrupt entry must not hide the rest of the library, and the
+     * generation is the one field the rest of the pipeline cannot work without -
+     * it is the folder name, the remote-name prefix and the identity used to
+     * replace a work - so an entry missing it, or carrying anything other than a
+     * UUID, is skipped.
+     */
+    static java.util.List<MmdWork> mmdWorks(String encoded) {
+        java.util.List<MmdWork> works = new java.util.ArrayList<>();
+        if (encoded == null || encoded.isEmpty()) return works;
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(encoded);
+            for (int i = 0; i < array.length(); ++i) {
+                org.json.JSONObject entry = array.getJSONObject(i);
+                String generation = entry.optString("generation");
+                if (!generation.matches("[a-f0-9-]{36}")) continue;
+                java.util.List<MmdWorkFile> files = new java.util.ArrayList<>();
+                org.json.JSONArray listed = entry.optJSONArray("files");
+                if (listed != null) {
+                    for (int j = 0; j < listed.length(); ++j) {
+                        org.json.JSONObject file = listed.getJSONObject(j);
+                        String name = file.optString("name");
+                        long bytes = file.optLong("bytes");
+                        if (name.isEmpty() || bytes <= 0) continue;
+                        files.add(new MmdWorkFile(mmdWorkRemote(generation, name), name, bytes));
+                    }
+                }
+                works.add(new MmdWork(generation, entry.optString("name", generation), files));
+            }
+        } catch (org.json.JSONException broken) {
+            android.util.Log.w("BetterEndfield.Mmd", "MMD work index unreadable", broken);
+        }
+        return works;
+    }
+
+    private static String encodeMmdWorks(java.util.List<MmdWork> works) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (MmdWork work : works) {
+            try {
+                org.json.JSONArray files = new org.json.JSONArray();
+                for (MmdWorkFile file : work.files()) {
+                    files.put(new org.json.JSONObject()
+                            .put("name", file.name())
+                            .put("bytes", file.bytes()));
+                }
+                array.put(new org.json.JSONObject()
+                        .put("generation", work.generation())
+                        .put("name", work.name())
+                        .put("files", files));
+            } catch (org.json.JSONException impossible) {
+                // put() only throws for a non-finite number, and these are
+                // strings and longs.
+            }
+        }
+        return array.toString();
+    }
+
     // ------------------------------------------------------------- VMD slot
 
     /**
@@ -690,7 +1144,7 @@ final class ModuleSettings {
         return setCameraSettings(context, disableDither, freeCamera, worldPause, firstPerson,
                 hideHead, fillNeck, movementSpeed, fieldOfView, firstPersonFov, eyeForward,
                 eyeHeight, nearClip, extendLookRange, advanced, motion,
-                getFirstPersonGyro(context));
+                getFirstPersonGyro(context), getMmdSettings(context));
     }
 
     /**
@@ -719,6 +1173,40 @@ final class ModuleSettings {
             FirstPersonAdvanced advanced,
             CameraMotion motion,
             FirstPersonGyro gyro) {
+        return setCameraSettings(context, disableDither, freeCamera, worldPause, firstPerson,
+                hideHead, fillNeck, movementSpeed, fieldOfView, firstPersonFov, eyeForward,
+                eyeHeight, nearClip, extendLookRange, advanced, motion, gyro,
+                getMmdSettings(context));
+    }
+
+    /**
+     * The camera configuration, with the gyroscope and the MMD director passed
+     * explicitly.
+     *
+     * Both are second entry points for the same reason: each is edited by its own
+     * screen, so every write from the others has to carry the stored value
+     * forward rather than reset it. Overloading keeps the many existing callers
+     * from having to know either feature exists.
+     */
+    static CameraWrite setCameraSettings(
+            Context context,
+            boolean disableDither,
+            boolean freeCamera,
+            boolean worldPause,
+            boolean firstPerson,
+            boolean hideHead,
+            boolean fillNeck,
+            double movementSpeed,
+            double fieldOfView,
+            double firstPersonFov,
+            double eyeForward,
+            double eyeHeight,
+            double nearClip,
+            boolean extendLookRange,
+            FirstPersonAdvanced advanced,
+            CameraMotion motion,
+            FirstPersonGyro gyro,
+            MmdSettings mmd) {
         eyeForward = bounded(eyeForward, 0.03, 0.0, 0.5);
         eyeHeight = bounded(eyeHeight, 0.05, -0.5, 0.5);
         nearClip = bounded(nearClip, 0.03, 0.001, 1.0);
@@ -757,6 +1245,14 @@ final class ModuleSettings {
             firstPerson = true;
             any = true;
         }
+        // MMD lives inside the camera module - the director is pumped from that
+        // module's engine tick - so switching MMD on has to arm the same gate the
+        // camera switches do, or the configuration would stay empty and there
+        // would be no module in the process to read the MMD keys at all. It does
+        // NOT drag the first-person camera on the way the gyroscope does: the
+        // director asks the character session for the body motion and borrows a
+        // camera of its own while it plays.
+        if (mmd.enabled()) any = true;
         String previous = preferences(context).getString(CAMERA_CONFIGURATION, "");
         if (previous == null) previous = "";
         String configuration = any
@@ -796,6 +1292,7 @@ final class ModuleSettings {
                         + "free_camera_mouse_look=true\n"
                         + "free_camera_smoothing=0.3\n"
                         + motion.toIniLines()
+                        + mmd.toIniLines()
                         // The panel presses the exact codes the desktop module
                         // polls; pin them so a native default change cannot
                         // silently detach the on-screen buttons.
@@ -829,6 +1326,7 @@ final class ModuleSettings {
         advanced.store(edit);
         motion.store(edit);
         gyro.store(edit);
+        mmd.store(edit);
         edit.commit();
         if (configuration.equals(previous)) return new CameraWrite(false, false, false);
         // The native module also reads this string once, from the environment

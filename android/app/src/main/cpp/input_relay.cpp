@@ -13,6 +13,11 @@
 // The look deltas are summed rather than queued, so the panel can send a drag at
 // whatever rate its gesture recogniser reports without the runtime having to
 // keep up event by event.
+// A command payload is itself multi-line, so the panel folds its newlines into
+// U+001F to keep the event on one line; the "c" branch below unfolds it before
+// handing it to the pump, which frames the payload by newlines itself. Sending
+// those newlines raw would end the event after "BE_COMMAND_V1" and the pump
+// would reject the fragment.
 // The status file is rewritten whenever the runtime command status changes.
 
 #include "android_virtual_keys.h"
@@ -77,7 +82,12 @@ void HandleLine(const std::string& line) {
         return;
     }
     if (line[0] == 'c' && line.size() >= 3 && line[1] == ' ') {
-        SubmitRuntimeCommand(line.c_str() + 2, line.size() - 2);
+        // The payload's own newlines arrive folded (see the header). Unfold them
+        // here: the pump validates a full "BE_COMMAND_V1\n<generation>\n..." and
+        // a raw newline would have ended this event at its first field.
+        std::string payload = line.substr(2);
+        std::replace(payload.begin(), payload.end(), '\x1f', '\n');
+        SubmitRuntimeCommand(payload.c_str(), payload.size());
         return;
     }
     if (line[0] == 'm' && line.size() >= 3 && line[1] == ' ') {

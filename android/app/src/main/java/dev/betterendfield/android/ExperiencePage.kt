@@ -153,6 +153,17 @@ private fun CameraCard(state: SettingsState) {
             state = state.firstPerson,
             onClick = { state.openPage(SettingsPage.FIRST_PERSON) },
         )
+
+        // MMD is not a camera mode - it drives the character's own motion - but
+        // it lives in the same module and is pumped from the same engine tick, so
+        // it is reached from this card rather than from a tab of its own.
+        GroupLabel("MMD")
+        SubPageRow(
+            title = "MMD 舞蹈与运镜",
+            hint = state.mmdSourceSummary,
+            state = state.mmdEnabled,
+            onClick = { state.openPage(SettingsPage.MMD) },
+        )
     }
 }
 

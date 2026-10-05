@@ -16,7 +16,8 @@ public record OverlayFeatures(
         boolean freeCamera,
         boolean worldPause,
         boolean firstPerson,
-        boolean vmdCamera) {
+        boolean vmdCamera,
+        boolean mmd) {
 
     static OverlayFeatures read(SharedPreferences settings) {
         boolean freeCamera = settings.getBoolean(ModuleSettings.CAMERA_FREE, false);
@@ -32,14 +33,20 @@ public record OverlayFeatures(
                 // hotkey while the free camera is enabled, and there is nothing to
                 // play until a .vmd has actually been published - which is why
                 // this button arrives only now, with the import path.
-                freeCamera && settings.getBoolean(ModuleSettings.CAMERA_VMD_IMPORTED, false));
+                freeCamera && settings.getBoolean(ModuleSettings.CAMERA_VMD_IMPORTED, false),
+                // MMD needs no camera gate: its overlay controls are commands to
+                // the director, not keys to the free camera, so they work with
+                // the camera off. What they do need is the module switched on -
+                // the director stops and stays stopped while it is off, and a
+                // play button that queues a discarded command is worse than none.
+                settings.getBoolean("mmd_enabled", false));
     }
 
     static OverlayFeatures off() {
-        return new OverlayFeatures(false, false, false, false, false, false);
+        return new OverlayFeatures(false, false, false, false, false, false, false);
     }
 
     boolean anyControl() {
-        return hideHud || freeCamera || firstPerson;
+        return hideHud || freeCamera || firstPerson || mmd;
     }
 }

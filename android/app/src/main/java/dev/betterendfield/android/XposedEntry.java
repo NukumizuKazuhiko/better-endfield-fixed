@@ -302,6 +302,25 @@ public final class XposedEntry extends XposedModule {
                                 settings.getString(BemInstaller.INDEX,"[]"),
                                 name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),this::report,true);
                         } catch(Exception error) {report("Installed BEM preparation failed: "+error);}
+                        // The imported MMD files land in the game's own directory
+                        // before the native library is loaded, because the camera
+                        // configuration that names them is read during that load.
+                        try {
+                            MmdSlotFiles.prepare(context, settings.getString("mmd_slots",""),
+                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                                this::report);
+                        } catch(Exception error) {report("MMD slot preparation failed: "+error);}
+                        // Library works are folders rather than slots, so they are
+                        // materialized by their own pass - but before the native
+                        // library loads, for the same reason: the camera
+                        // configuration that names the selected work is read
+                        // during that load.
+                        try {
+                            MmdSlotFiles.prepareWorks(context,
+                                settings.getString(ModuleSettings.MMD_WORKS,""),
+                                name -> new ParcelFileDescriptor.AutoCloseInputStream(openRemoteFile(name)),
+                                this::report);
+                        } catch(Exception error) {report("MMD library preparation failed: "+error);}
                         if (!configs.thirdParty().isEmpty()) {
                             try {
                                 ThirdPartyRuntimeMaterializer.prepare(context, configs.thirdParty(),

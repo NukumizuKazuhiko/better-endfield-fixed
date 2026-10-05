@@ -40,6 +40,25 @@ class OverlaySurface(
          */
         fun delayedPulse(key: Int, description: String)
         fun hold(key: Int, pressed: Boolean, description: String)
+        /**
+         * Submits a runtime command to the native pump, the same channel the
+         * settings app drives. That app has to go out to the framework's remote
+         * file space and back because it runs in another process; this panel is
+         * already inside the game, so it appends to the relay stream the native
+         * side tails and skips the round trip.
+         *
+         * This exists for the modules whose desktop controls are hotkeys the
+         * touch panel cannot press - MMD's are NUMPAD4/5/6, the very codes the
+         * virtual-key latch already uses, so routing them through [pulse] would
+         * have the panel pressing keys against itself.
+         */
+        fun command(name: String, value: String)
+        /**
+         * The command channel's own status line, as the native relay publishes
+         * it, empty until the runtime has loaded. Callers read it after issuing
+         * a command to tell "sent" from "the runtime refused it".
+         */
+        fun commandStatus(): String
         fun openSettings()
         fun saveLog()
         fun refreshLog()

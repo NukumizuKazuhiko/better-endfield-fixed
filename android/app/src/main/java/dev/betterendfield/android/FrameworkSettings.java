@@ -187,6 +187,128 @@ final class FrameworkSettings {
         }
     }
 
+    /**
+     * Publishes one MMD slot into the framework's remote file space.
+     *
+     * The remote space is the only channel between the two processes, and the
+     * native director takes a path, so the game process copies the slot out of
+     * here into its own files directory on startup - the same arrangement the VMD
+     * camera slot already uses. One live file per slot, so the name is fixed
+     * rather than generated.
+     *
+     * A refused or short write returns false and the slot stays unreferenced: the
+     * import is recorded only after this returns true, and a path in the
+     * configuration that points at a file which is not there is worse than no
+     * path at all.
+     */
+    static synchronized boolean publishMmdSlot(java.io.File file, String remote) {
+        if (remoteService == null || file == null || !file.isFile()
+                || remote == null || !remote.matches("mmd\\.[a-z]{3,16}")) return false;
+        try (ParcelFileDescriptor descriptor = remoteService.openRemoteFile(remote);
+             java.io.FileInputStream in = new java.io.FileInputStream(file);
+             FileOutputStream out = new FileOutputStream(descriptor.getFileDescriptor())) {
+            out.getChannel().truncate(0);
+            byte[] buffer = new byte[65536];
+            long total = 0;
+            for (int read = in.read(buffer); read > 0; read = in.read(buffer)) {
+                total += read;
+                if (total > ModuleSettings.mmdSlotMaximumBytes()) {
+                    Log.e("BetterEndfield.Mmd", "MMD slot exceeds the loader ceiling: " + remote);
+                    return false;
+                }
+                out.write(buffer, 0, read);
+            }
+            out.getFD().sync();
+            if (total <= 0) return false;
+            return true;
+        } catch (Exception error) {
+            Log.e("BetterEndfield.Mmd", "MMD slot publish failed: " + remote, error);
+            return false;
+        }
+    }
+
+    /** Drops a published MMD slot. */
+    static synchronized boolean removeMmdSlot(String remote) {
+        if (remoteService == null || remote == null || !remote.matches("mmd\\.[a-z]{3,16}")) {
+            return false;
+        }
+        try {
+            if (remoteService.deleteRemoteFile(remote)) return true;
+            return !java.util.Arrays.asList(remoteService.listRemoteFiles()).contains(remote);
+        } catch (RuntimeException error) {
+            Log.e("BetterEndfield.Mmd", "MMD slot removal failed: " + remote, error);
+            return false;
+        }
+    }
+
+    /**
+     * Whether a name is one this app publishes a work file under.
+     *
+     * A work file's remote name is {@code mmd-<generation>-<file>}, and the
+     * generation is exactly 36 characters wide because that is what a UUID
+     * stringifies to. Splitting on the first hyphen after the prefix would
+     * instead cut inside the UUID, which contains four of them - so the
+     * generation is taken as a fixed-width field and the separator position is
+     * checked rather than searched for.
+     *
+     * This is the one place the shape is defined: the publisher, the remover and
+     * the game-side reader all go through it, so a work whose name was mangled
+     * on the way in is refused instead of being written under a name nothing
+     * will ever look up.
+     */
+    static boolean validMmdRemote(String remote) {
+        if (remote == null || remote.length() < 4 + 36 + 1 + 1 || !remote.startsWith("mmd-")) return false;
+        if (!remote.substring(4, 40).matches("[a-f0-9-]{36}") || remote.charAt(40) != '-') return false;
+        String name = remote.substring(41);
+        return !name.isEmpty() && name.length() <= 200;
+    }
+
+    /**
+     * Publishes one file of a library work into the framework's remote space.
+     *
+     * Identical in mechanism to the loose slot beside it - same channel, same
+     * one-file-per-name rule - but the payload is a file inside a work folder
+     * rather than a whole playback, so the ceiling and the name shape differ.
+     * The declared length is what the game side sizes its copy from, so a short
+     * write has to fail here rather than leave a stamp claiming bytes that were
+     * never sent.
+     */
+    static synchronized boolean publishMmdWork(java.io.File file, String remote) {
+        if (remoteService == null || file == null || !file.isFile() || !validMmdRemote(remote)) return false;
+        try (ParcelFileDescriptor descriptor = remoteService.openRemoteFile(remote);
+             java.io.FileInputStream in = new java.io.FileInputStream(file);
+             FileOutputStream out = new FileOutputStream(descriptor.getFileDescriptor())) {
+            out.getChannel().truncate(0);
+            byte[] buffer = new byte[65536];
+            long total = 0;
+            for (int read = in.read(buffer); read > 0; read = in.read(buffer)) {
+                total += read;
+                if (total > ModuleSettings.mmdWorkMaximumBytes()) {
+                    Log.e("BetterEndfield.Mmd", "MMD work file exceeds the ceiling: " + remote);
+                    return false;
+                }
+                out.write(buffer, 0, read);
+            }
+            out.getFD().sync();
+            return total > 0;
+        } catch (Exception error) {
+            Log.e("BetterEndfield.Mmd", "MMD work publish failed: " + remote, error);
+            return false;
+        }
+    }
+
+    /** Drops one published work file, so a removed work cannot be rebuilt from stale bytes. */
+    static synchronized boolean removeMmdWork(String remote) {
+        if (remoteService == null || !validMmdRemote(remote)) return false;
+        try {
+            if (remoteService.deleteRemoteFile(remote)) return true;
+            return !java.util.Arrays.asList(remoteService.listRemoteFiles()).contains(remote);
+        } catch (RuntimeException error) {
+            Log.e("BetterEndfield.Mmd", "MMD work removal failed: " + remote, error);
+            return false;
+        }
+    }
+
     static synchronized boolean removeBem(String name) {
         if(remoteService==null || !name.matches("bem-[a-f0-9-]{36}\\.bem")) return false;
         try {

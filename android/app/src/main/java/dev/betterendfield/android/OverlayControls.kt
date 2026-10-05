@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -190,5 +194,60 @@ internal fun MotionControls(features: OverlayFeatures, callbacks: OverlaySurface
                 }
             }
         }
+    }
+}
+
+/**
+ * MMD playback, driven by the runtime command channel rather than by keys.
+ *
+ * The desktop module reads its MMD controls from NUMPAD4/5/6 - the same codes
+ * the touch panel's virtual-key latch already uses - so pressing them here
+ * would have the panel fighting itself. Commands sidestep that: the panel is
+ * inside the game process, so it hands the payload to the relay the native side
+ * tails, exactly as the settings app does through the framework's remote file
+ * space.
+ *
+ * <p>Play and stop are plain taps, unlike the camera keys that start a shot:
+ * those are deferred so the panel is out of frame before the camera moves,
+ * whereas a dance is the character's own motion and the panel being visible
+ * while it plays is the point of having these controls in the overlay at all.
+ */
+@Composable
+internal fun MmdControls(callbacks: OverlaySurface.Callbacks) {
+    // The channel is asynchronous: the runtime answers only once it has drained
+    // the command, so the row shows the last outcome rather than pretending the
+    // new one has already arrived. Tapping again is the refresh, and the
+    // journal below carries the same status line in full.
+    var revision by remember { mutableStateOf(0) }
+    val status = remember(revision) { callbacks.commandStatus() }
+    val send = { verb: String ->
+        callbacks.command("mmd", verb)
+        revision += 1
+    }
+
+    OverlaySection("MMD 舞蹈") {
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            OverlayActionRow("播放 / 暂停", { send("play_pause") }, "停止", { send("stop") })
+            OverlayActionRow("循环", { send("loop") }, "镜头模式", { send("camera next") })
+            Text(mmdStatusSummary(status), color = Be.Colors.textSecondary, fontSize = 10.sp)
+        }
+    }
+}
+
+/**
+ * The runtime's status line shortened for one row. The header and generation
+ * are transport detail; the outcome and the command it refers to are not.
+ */
+private fun mmdStatusSummary(raw: String): String {
+    val lines = raw.split('\n').filter { it.isNotEmpty() }
+    if (lines.size < 3 || lines[0] != "BE_STATUS_V1") return "尚未收到回执"
+    val command = if (lines.size > 3) lines[3] else ""
+    return when (lines[2]) {
+        "idle" -> if (command.isEmpty()) "就绪" else "已下发：$command"
+        "accepted" -> "已下发：$command"
+        "applied" -> "已执行：$command"
+        "rejected" -> "被拒绝：$command"
+        "unsupported" -> "不支持：$command"
+        else -> lines[2]
     }
 }

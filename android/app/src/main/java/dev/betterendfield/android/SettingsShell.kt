@@ -159,6 +159,7 @@ private fun SettingsBody(
                 SettingsPage.TOOLS -> ToolsPage(state, onPreviewOverlay)
                 SettingsPage.FIRST_PERSON -> FirstPersonPage(state)
                 SettingsPage.CAMERA_MOTION -> CameraMotionPage(state)
+                SettingsPage.MMD -> MmdPage(state)
                 SettingsPage.APPEARANCE -> AppearancePage(state, onInstallBem)
                 SettingsPage.LOG -> LogPage(state)
                 SettingsPage.ABOUT -> AboutPage()

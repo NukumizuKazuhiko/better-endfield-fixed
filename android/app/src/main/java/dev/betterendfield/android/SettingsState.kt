@@ -21,6 +21,25 @@ private const val VMD_HEADER_BYTES = 30
 private const val VMD_TIME_PATTERN = "yyyy-MM-dd HH:mm"
 
 /**
+ * One installed library work, as the page presents it.
+ *
+ * Deliberately not the stored record: the page needs a name to show and a
+ * footprint to describe, while the index also carries the remote names and the
+ * per-file lengths, which are the installer's and the game process's business.
+ * A page that held the record could start making decisions from fields it has no
+ * reason to understand.
+ *
+ * [generation] is the folder name under the game's library directory and the
+ * identity a selection is stored as, so it is what the buttons act on.
+ */
+data class MmdWorkRow(
+    val generation: String,
+    val name: String,
+    val files: Int,
+    val bytes: Long,
+)
+
+/**
  * Page indices for the settings tree.
  *
  * Four tabs, and five sub-pages that are reached from a card inside a tab. Both
@@ -55,12 +74,13 @@ object SettingsPage {
     const val LOG = 12
     const val ABOUT = 13
     const val CAMERA_MOTION = 14
+    const val MMD = 15
 
     fun isSubPage(page: Int): Boolean = page >= FIRST_PERSON
 
     /** The tab a page belongs to, so a sub-page keeps its parent highlighted. */
     fun parentOf(page: Int): Int = when (page) {
-        FIRST_PERSON, CAMERA_MOTION -> EXPERIENCE
+        FIRST_PERSON, CAMERA_MOTION, MMD -> EXPERIENCE
         APPEARANCE -> CHARACTERS
         LOG, ABOUT -> TOOLS
         else -> page
@@ -682,6 +702,80 @@ class SettingsState(private val context: Context) {
     var vmdImporting by mutableStateOf(false)
         private set
 
+    /*
+     * MMD. Two things decide whether the page can do anything at all: the module
+     * has to be on (nothing else in this block is read with it off), and at least
+     * one file has to be loaded, because the transport drives a playback that
+     * otherwise has nothing to play.
+     *
+     * The transport is not a settings write. It goes out through the runtime
+     * command pump, which the native director drains on the game's frame thread,
+     * so a tap reaches a running game the way the panel's own buttons do.
+     */
+    var mmdEnabled by mutableStateOf(false)
+        private set
+    var mmdLoop by mutableStateOf(false)
+        private set
+    var mmdMusic by mutableStateOf(true)
+        private set
+    var mmdSeekSeconds by mutableStateOf(5f)
+        private set
+    var mmdGain by mutableStateOf(1f)
+        private set
+    var mmdAudioOffset by mutableStateOf(0f)
+        private set
+    var mmdBody by mutableStateOf(false)
+        private set
+    var mmdFace by mutableStateOf(false)
+        private set
+    var mmdTerrain by mutableStateOf(false)
+        private set
+    var mmdMotionScale by mutableStateOf(1f)
+        private set
+    var mmdClothMode by mutableStateOf(1)
+        private set
+    var mmdMotionLoop by mutableStateOf(false)
+        private set
+
+    /** The slot record, as the JSON the game process reads back. */
+    var mmdSlots by mutableStateOf("")
+        private set
+    var mmdImporting by mutableStateOf("")
+        private set
+    var mmdImportStatus by mutableStateOf("")
+        private set
+
+    /** The last thing the transport sent, and whether it reached the game. */
+    var mmdCommandStatus by mutableStateOf("")
+        private set
+
+    /**
+     * The installed works, as the library card lists them.
+     *
+     * A view model rather than the storage record: the page shows a name, a
+     * file count and a size, while the index's other fields - remote names,
+     * per-file lengths - are the installer's business and the game process's.
+     * Keeping those out of the state holder is what lets this read as a
+     * description of what the user has rather than of how it is stored.
+     */
+    var mmdWorks by mutableStateOf(emptyList<MmdWorkRow>())
+        private set
+
+    /** The selected work's folder, empty while the loose slots below are in use. */
+    var mmdWork by mutableStateOf("")
+        private set
+
+    var mmdLibraryStatus by mutableStateOf("")
+        private set
+
+    /** True while a selection is being copied and recognised off the main thread. */
+    var mmdLibraryImporting by mutableStateOf(false)
+        private set
+
+    /** True while the installer is publishing or removing; every button goes inert. */
+    var mmdLibraryBusy by mutableStateOf(false)
+        private set
+
     // betterendfield.actions
     var sustainedDash by mutableStateOf(false)
         private set
@@ -758,6 +852,25 @@ class SettingsState(private val context: Context) {
         vmdName = ModuleSettings.getVmdName(context)
         vmdBytes = ModuleSettings.getVmdBytes(context)
         vmdImportedAt = formatVmdTime(ModuleSettings.getVmdTime(context))
+        val mmd = ModuleSettings.getMmdSettings(context)
+        mmdEnabled = mmd.enabled()
+        mmdLoop = mmd.loop()
+        mmdMusic = mmd.music()
+        mmdSeekSeconds = mmd.seekSeconds().toFloat()
+        mmdGain = mmd.gain().toFloat()
+        mmdAudioOffset = mmd.audioOffset().toFloat()
+        mmdBody = mmd.body()
+        mmdFace = mmd.face()
+        mmdTerrain = mmd.terrain()
+        mmdMotionScale = mmd.motionScale().toFloat()
+        mmdClothMode = mmd.clothMode()
+        mmdMotionLoop = mmd.motionLoop()
+        // Read from the preference rather than from the record: the record only
+        // describes what reaches the native configuration, while the page also
+        // needs the slots that were just imported and not yet saved.
+        mmdSlots = ModuleSettings.getMmdSlots(context)
+        mmdWorks = mmdWorkRows()
+        mmdWork = ModuleSettings.getMmdWork(context)
         sustainedDash = ModuleSettings.isSustainedDashEnabled(context)
         liinoCleanDash = ModuleSettings.isLiinoCleanDashEnabled(context)
         dashAglina = ModuleSettings.isDashCharacterEnabled(context, "aglina")
@@ -1152,6 +1265,358 @@ class SettingsState(private val context: Context) {
             ?: context.getString(R.string.motion_vmd_unnamed)
     }
 
+    /* ------------------------------------------------------------------- MMD */
+
+    /*
+     * The settings side of MMD. Both halves are writes, but they are different
+     * kinds of write and are kept apart on purpose:
+     *
+     *  - the switches below rewrite the camera configuration, which the game
+     *    process replays live through the native reload, so a parameter change
+     *    needs no restart;
+     *  - the transport buttons publish a command, which the native director
+     *    drains on the game's frame thread. A transport command is not stored
+     *    anywhere - "pause" is a moment, not a setting - so nothing here is read
+     *    back at start-up.
+     */
+
+    fun updateMmdEnabled(value: Boolean) {
+        mmdEnabled = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdLoop(value: Boolean) {
+        mmdLoop = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdMusic(value: Boolean) {
+        mmdMusic = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdSeekSeconds(value: Float) {
+        mmdSeekSeconds = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdGain(value: Float) {
+        mmdGain = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdAudioOffset(value: Float) {
+        mmdAudioOffset = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdBody(value: Boolean) {
+        mmdBody = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdFace(value: Boolean) {
+        mmdFace = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdTerrain(value: Boolean) {
+        mmdTerrain = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdMotionScale(value: Float) {
+        mmdMotionScale = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdClothMode(value: Int) {
+        mmdClothMode = value
+        saveCameraSettings()
+    }
+
+    fun updateMmdMotionLoop(value: Boolean) {
+        mmdMotionLoop = value
+        saveCameraSettings()
+    }
+
+    /**
+     * One transport tap, sent to the running game.
+     *
+     * The vocabulary is the native parser's own and is deliberately textual:
+     * {@code play_pause}, {@code stop}, {@code loop}, {@code seek <seconds>},
+     * {@code camera [0-2]}. Writing the verb from this side rather than an enum
+     * means the two ends never have to agree on a numbering.
+     *
+     * A refusal is reported rather than swallowed. The only realistic reason for
+     * one is that the framework service is not connected - i.e. the module is not
+     * enabled for the game - and a button that appears to work while nothing
+     * happens is exactly the failure this page cannot afford.
+     */
+    fun sendMmdCommand(verb: String) {
+        val delivered = ModuleCommandRouter.issue(context, "mmd", verb)
+        mmdCommandStatus = if (delivered) {
+            "已发送：$verb"
+        } else {
+            "命令未送达：框架服务未连接，请先在模块管理里为该游戏启用本模块。"
+        }
+    }
+
+    /**
+     * Imports one file into its slot.
+     *
+     * The same three steps the VMD camera import uses: validate before anything
+     * is published, let the framework's remote file space carry the payload, then
+     * record what landed so the game process knows the length to expect. The
+     * difference is that MMD has three slots, so the record is merged rather than
+     * replaced.
+     *
+     * The header check is the native loader's own rule ({@code isVmdMotion}, the
+     * two VMD generations) and it is applied to the motion and face slots only.
+     * The music slot is handed to MediaPlayer, which sniffs the container, so a
+     * VMD header rule there would refuse valid audio.
+     */
+    fun importMmdSlot(id: String, uri: android.net.Uri) {
+        if (mmdImporting.isNotEmpty()) return
+        mmdImporting = id
+        mmdImportStatus = "正在读取所选文件…"
+        val name = ModuleSettings.sanitizeMmdSlotName(vmdDisplayName(uri), id)
+        val motionSourced = id != ModuleSettings.MMD_SLOT_MUSIC
+        Thread({
+            val outcome = runCatching {
+                val temporary = File(context.cacheDir, "mmd-$id-import.tmp")
+                try {
+                    var bytes = 0L
+                    var header = ByteArray(0)
+                    val stream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("无法读取所选文件")
+                    stream.use { input ->
+                        FileOutputStream(temporary, false).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read <= 0) break
+                                if (header.isEmpty()) {
+                                    header = buffer.copyOfRange(0, minOf(read, VMD_HEADER_BYTES))
+                                }
+                                bytes += read
+                                if (bytes > ModuleSettings.mmdSlotMaximumBytes()) {
+                                    throw IllegalStateException("文件超过 64 MiB")
+                                }
+                                output.write(buffer, 0, read)
+                            }
+                            output.fd.sync()
+                        }
+                    }
+                    if (bytes <= 0L) throw IllegalStateException("文件为空")
+                    if (motionSourced && !ModuleSettings.isVmdMotion(header)) {
+                        throw IllegalStateException("不是 VMD 动作文件")
+                    }
+                    if (!FrameworkSettings.publishMmdSlot(
+                            temporary, ModuleSettings.mmdSlotRemote(id),
+                        )
+                    ) {
+                        throw IllegalStateException("框架服务未连接或发布失败")
+                    }
+                    bytes
+                } finally {
+                    temporary.delete()
+                }
+            }
+            Handler(Looper.getMainLooper()).post {
+                mmdImporting = ""
+                outcome.fold(
+                    onSuccess = { bytes ->
+                        val updated = ModuleSettings.mmdSlotsWith(mmdSlots, id, name, bytes)
+                        ModuleSettings.setMmdSlots(context, updated)
+                        mmdSlots = updated
+                        mmdImportStatus =
+                            "已导入 $name（${formatVmdBytes(bytes)}）。重启游戏后生效。"
+                        // The path travels inside the camera configuration, so a
+                        // slot that has just been filled has to be rewritten for
+                        // the game process to find it.
+                        saveCameraSettings()
+                    },
+                    onFailure = { error ->
+                        mmdImportStatus = "导入失败：${error.message ?: error}"
+                    },
+                )
+            }
+        }, "BetterEndfield-MmdImport").start()
+    }
+
+    /**
+     * Drops one slot. The configuration stops naming the file even when the
+     * framework refuses to delete it: an unreferenced file is inert, while a
+     * dangling reference would keep the director reading a file the user removed.
+     */
+    fun clearMmdSlot(id: String) {
+        val dropped = FrameworkSettings.removeMmdSlot(ModuleSettings.mmdSlotRemote(id))
+        val updated = ModuleSettings.mmdSlotsWithout(mmdSlots, id)
+        ModuleSettings.setMmdSlots(context, updated)
+        mmdSlots = updated
+        mmdImportStatus = if (dropped) {
+            "已清除该文件。"
+        } else {
+            "已从配置中移除该文件；框架里的副本未能删除。"
+        }
+        saveCameraSettings()
+    }
+
+    /** The one-line description of a slot for the page's rows. */
+    fun mmdSlotLabel(id: String): String {
+        val name = ModuleSettings.mmdSlotName(mmdSlots, id)
+        if (name.isEmpty()) return "未导入"
+        return "$name（${formatVmdBytes(ModuleSettings.mmdSlotBytes(mmdSlots, id))}）"
+    }
+
+    /** A work's footprint, for the library rows. */
+    fun mmdWorkLabel(work: MmdWorkRow): String =
+        "${work.files} 个文件 · ${formatVmdBytes(work.bytes)}"
+
+    /**
+     * Switches the library work, or back to the loose slots when given "".
+     *
+     * Two separate things are switched, and only one of them is instant. The
+     * stored configuration is rewritten for the next launch. The running game is
+     * told to switch now through the same command channel the transport uses -
+     * but that can only succeed for a work whose files are already in the game's
+     * own directory, and those are copied before the native library loads. So a
+     * work invoked before the game was restarted is remembered, not playing, and
+     * the message says so rather than pretending.
+     */
+    fun selectMmdWork(generation: String) {
+        ModuleSettings.setMmdWork(context, generation)
+        mmdWork = generation
+        val verb = if (generation.isEmpty()) "work" else "work $generation"
+        val delivered = ModuleCommandRouter.issue(context, "mmd", verb)
+        mmdLibraryStatus = when {
+            generation.isEmpty() -> "已切回散文件播放（配置里的作品选择已清空）。"
+            delivered -> "已选择作品，游戏正在运行的话会立刻切换。"
+            else -> "已选择作品；命令未送达，重启游戏后生效。"
+        }
+    }
+
+    /**
+     * Reads the index back as rows.
+     *
+     * Read from the store rather than kept in memory as it is built: the
+     * installer runs on its own thread and appends there, so re-reading is how
+     * a work it just added becomes visible without the page having to know an
+     * install happened.
+     */
+    private fun mmdWorkRows(): List<MmdWorkRow> =
+        ModuleSettings.getMmdWorks(context).map { work ->
+            MmdWorkRow(
+                generation = work.generation(),
+                name = work.name(),
+                files = work.files().size,
+                bytes = work.files().sumOf { file -> file.bytes() },
+            )
+        }
+
+    /** Re-reads the index, which the installer changes on its own thread. */
+    private fun refreshMmdWorks() {
+        mmdWorks = mmdWorkRows()
+        mmdWork = ModuleSettings.getMmdWork(context)
+    }
+
+    /**
+     * Runs one installer operation, mirroring its progress into the page.
+     *
+     * The installer reports through a static status string and a static busy
+     * flag rather than a callback, because the operation outlives whichever
+     * screen started it. Polling is therefore the only way to show progress, and
+     * the flag dropping is the only signal that it finished - including when it
+     * was rejected outright, which is why the rejected path still refreshes.
+     */
+    private fun runLibraryOperation(start: () -> Boolean) {
+        if (mmdLibraryBusy) return
+        mmdLibraryBusy = true
+        Thread({
+            val accepted = start()
+            if (accepted) {
+                while (MmdLibraryInstaller.busy) {
+                    val text = MmdLibraryInstaller.status
+                    if (text.isNotEmpty()) Handler(Looper.getMainLooper()).post { mmdLibraryStatus = text }
+                    Thread.sleep(150)
+                }
+            }
+            val summary = MmdLibraryInstaller.status
+            Handler(Looper.getMainLooper()).post {
+                mmdLibraryBusy = false
+                refreshMmdWorks()
+                mmdLibraryStatus = summary
+            }
+        }, "BetterEndfield-MmdLibrary").start()
+    }
+
+    fun removeMmdWork(generation: String) {
+        runLibraryOperation { MmdLibraryInstaller.remove(context, generation) }
+    }
+
+    fun republishMmdWork(generation: String) {
+        runLibraryOperation { MmdLibraryInstaller.republish(context, generation) }
+    }
+
+    /**
+     * Imports a picked folder into the library.
+     *
+     * The folder is copied into a private cache and analysed on a worker thread;
+     * this call only arms that and then watches it, because the copy can take
+     * minutes on a large work and the page has to stay responsive and say what
+     * it is doing. Once the analysis names its works they are installed in
+     * order - the installer runs one operation at a time, so a second work has to
+     * wait for the first to finish rather than be rejected.
+     */
+    fun importMmdLibrary(uri: android.net.Uri) {
+        if (mmdLibraryImporting || mmdLibraryBusy) return
+        val session = MmdImportSession.open(context.applicationContext, null)
+        mmdLibraryImporting = true
+        mmdLibraryStatus = "正在读取所选目录…"
+        Thread({
+            session.prepare(context, uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION, true, null)
+            while (session.busy) {
+                val text = session.status
+                if (text.isNotEmpty()) Handler(Looper.getMainLooper()).post { mmdLibraryStatus = text }
+                Thread.sleep(150)
+            }
+            Handler(Looper.getMainLooper()).post { installInspectedWorks(session) }
+        }, "BetterEndfield-MmdLibraryImport").start()
+    }
+
+    private fun installInspectedWorks(session: MmdImportSession) {
+        val plan = session.plan
+        if (plan == null || plan.works.isEmpty()) {
+            mmdLibraryImporting = false
+            mmdLibraryStatus = session.status.ifEmpty { "所选目录里没有可识别的作品。" }
+            session.dispose()
+            return
+        }
+        mmdLibraryStatus = "识别到 ${plan.works.size} 个作品，正在导入…"
+        Thread({
+            var installed = 0
+            for (work in plan.works) {
+                while (MmdLibraryInstaller.busy) Thread.sleep(150)
+                if (!MmdLibraryInstaller.start(context, session, work.name, work.slots, work.settings)) break
+                while (MmdLibraryInstaller.busy) {
+                    val text = MmdLibraryInstaller.status
+                    if (text.isNotEmpty()) Handler(Looper.getMainLooper()).post { mmdLibraryStatus = text }
+                    Thread.sleep(150)
+                }
+                installed += 1
+            }
+            val summary = MmdLibraryInstaller.status
+            Handler(Looper.getMainLooper()).post {
+                mmdLibraryImporting = false
+                refreshMmdWorks()
+                mmdLibraryStatus =
+                    if (installed > 0) "已导入 $installed 个作品。$summary" else summary
+                session.dispose()
+            }
+        }, "BetterEndfield-MmdLibraryInstall").start()
+    }
+
     private fun formatVmdTime(millis: Long): String =
         if (millis <= 0L) "" else SimpleDateFormat(VMD_TIME_PATTERN, Locale.ROOT).format(Date(millis))
 
@@ -1266,6 +1731,31 @@ class SettingsState(private val context: Context) {
                 gyroscopeDeadzone.toDouble(),
                 gyroscopeSmoothing.toDouble(),
             ),
+            ModuleSettings.MmdSettings(
+                mmdEnabled,
+                mmdLoop,
+                mmdMusic,
+                mmdSeekSeconds.toDouble(),
+                mmdGain.toDouble(),
+                mmdAudioOffset.toDouble(),
+                mmdBody,
+                mmdFace,
+                mmdTerrain,
+                mmdMotionScale.toDouble(),
+                mmdClothMode,
+                mmdMotionLoop,
+                // The slot record is the one field read back from the store
+                // rather than held as page state: it is written by the import
+                // itself, and re-reading it here keeps the configuration and the
+                // record from drifting apart if an import landed while the page
+                // was open.
+                ModuleSettings.getMmdSlots(context),
+                // Read back for the same reason as the slots, and read from the
+                // same store rather than from page state: selecting a work is
+                // what writes it, and re-reading keeps the configuration from
+                // naming a work the index no longer lists.
+                ModuleSettings.getMmdWork(context),
+            ),
         )
         afterCameraChange(write)
     }
@@ -1372,6 +1862,51 @@ class SettingsState(private val context: Context) {
     val dashCharactersAvailable get() = sustainedDash
     val liinoCleanDashAvailable get() = sustainedDash && dashLiino
 
+    /* --------------------------------------------------------------------- MMD */
+
+    /**
+     * The selected library work, or null while the loose slots are in use.
+     *
+     * Resolved against the index rather than trusted from the stored folder
+     * name: a selection that outlived the work it names - because the work was
+     * removed from another screen or the index was rewritten - must read as "no
+     * work" here, not as a work this page cannot show.
+     */
+    val mmdSelectedWork get() = mmdWorks.firstOrNull { it.generation == mmdWork }
+
+    /**
+     * Whether the module has a file to play. The camera slot counts: an MMD with
+     * only a camera motion is a valid playback, and the native side treats it as
+     * one (a VMD motion often carries the camera keys with it). A selected work
+     * counts for the same reason and by construction - the importer refuses to
+     * install a work without a motion or a camera.
+     */
+    val mmdMaterialAvailable get() =
+        mmdSelectedWork != null || ModuleSettings.mmdHasMaterial(mmdSlots, vmdImported)
+
+    /**
+     * The transport is offered only when the module is on and something is
+     * loaded. Both halves are load-bearing: the native director stops and stays
+     * stopped while {@code mmd_enabled} is false, so a play button with the
+     * module off would queue a command that is discarded on the next frame.
+     */
+    val mmdTransportAvailable get() = mmdEnabled && mmdMaterialAvailable
+
+    /** The page's one-line answer to "what will it play". */
+    val mmdSourceSummary: String
+        get() {
+            // A selected work is named by its display name, not its folder: the
+            // folder is a UUID and means nothing to the user who imported it.
+            val work = mmdSelectedWork
+            if (work != null) return "作品库：${work.name}"
+            return when {
+                !mmdEnabled -> "未启用"
+                !mmdMaterialAvailable -> "没有可播放的文件；先导入动作或镜头"
+                vmdImported -> "镜头：已导入的 VMD 镜头文件"
+                else -> "散文件：${ModuleSettings.mmdSlotName(mmdSlots, ModuleSettings.MMD_SLOT_MOTION)}"
+            }
+        }
+
     /* ----------------------------------------------------------------------- 诊断 */
 
     var diagnosticsOverlay by mutableStateOf("")
@@ -1424,7 +1959,14 @@ class SettingsState(private val context: Context) {
         get() = moduleStatus("betterendfield.ui", hideUid || hideHud)
 
     val cameraCardStatus: String
-        get() = moduleStatus("betterendfield.camera", disableDither || freeCamera || firstPerson)
+        get() = moduleStatus(
+            "betterendfield.camera",
+            // The same four terms the configuration writer uses to decide whether
+            // it emits a configuration at all. They have to match, or this line
+            // would claim the module will not load while the write that follows
+            // it makes it load.
+            disableDither || freeCamera || firstPerson || gyroscopeEnabled || mmdEnabled,
+        )
 
     val dashCardStatus: String
         get() = moduleStatus("betterendfield.actions", sustainedDash && (dashAglina || dashLiino))

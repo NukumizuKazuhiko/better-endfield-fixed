@@ -27,6 +27,20 @@ final class NativeCommandBridge {
     static final int KEY_PRESS = 1;
     static final int KEY_PULSE = 2;
 
+    /**
+     * Stands in for a newline inside a command payload.
+     *
+     * <p>The relay frames the input stream by newlines - one event per line -
+     * but a runtime command is itself multi-line ({@code BE_COMMAND_V1} on its
+     * own line, then the generation, then the verb, then the value). Writing
+     * those newlines raw ends the event after its first field, and the relay
+     * hands the pump the 13-byte fragment {@code "BE_COMMAND_V1"}, which it
+     * rejects outright. Folding them into U+001F keeps the whole command on one
+     * line; the native relay unfolds it. A control character, not a printable
+     * one, so no verb or value can collide with it.
+     */
+    private static final char LINE_SEPARATOR = '\u001f';
+
     private static final Object LOCK = new Object();
     private static volatile File inputFile;
     private static volatile File statusFile;
@@ -53,9 +67,16 @@ final class NativeCommandBridge {
         }
     }
 
+    /**
+     * Submits a runtime command. The payload is multi-line; it travels folded
+     * into a single relay line and is unfolded by the native relay. Note the
+     * absence of a trim: the payload's own trailing newline is part of the
+     * shape the pump validates, and folding it preserves that terminator.
+     */
     static boolean submit(String payload) {
         if (payload == null || payload.isEmpty()) return false;
-        return append("c " + payload.trim() + "\n");
+        String flat = payload.replace('\r', ' ').replace('\n', LINE_SEPARATOR);
+        return append("c " + flat + "\n");
     }
 
     /**

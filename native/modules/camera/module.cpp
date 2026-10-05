@@ -346,7 +346,10 @@ std::atomic_int g_mmd_overlay_key{VK_SUBTRACT};
 // they live here next to the key that toggles them.
 std::atomic_bool g_mmd_overlay_enabled{true};
 std::atomic_bool g_mmd_overlay_initial_visible{false};
-std::atomic_bool g_mmd_overlay_toggle_request{false};
+// Written by the MMD key table, which is surveyed out under Android (the panel
+// drives MMD by command, and the default keys collide with its own). Kept
+// defined because the desktop build writes it from that same table.
+[[maybe_unused]] std::atomic_bool g_mmd_overlay_toggle_request{false};
 // Body-motion hotkeys (EIEM DirectVmd). Zero means unbound, which is the
 // upstream default: the character preview is switched on from the panel.
 std::atomic_bool g_character_preview_enabled{false};
@@ -981,6 +984,15 @@ void InputThreadMain() {
         }
         // MMD: the press edge is translated straight into the director's request
         // word, which the game thread drains in Mmd::Pump. Nothing here calls Unity.
+        //
+        // Surveyed off under Android on purpose. The panel drives MMD through the
+        // runtime command pump ("mmd <verb>"), not by pressing keys, and the
+        // module's own MMD defaults are the numpad block - NUMPAD4, NUMPAD5 and
+        // NUMPAD6 - which are exactly the codes this app's panel presses for
+        // "clear keyframe", "reset view" and "replay VMD". Polling both would make
+        // one panel tap fire two unrelated actions, so on this platform the key
+        // table is inert and the command pump is the only MMD input.
+#if !defined(__ANDROID__)
         std::size_t mmd_index = 0;
         for (HotkeyRequest& binding : mmd_keys) {
             const bool down = focused && mmd_enabled &&
@@ -998,6 +1010,10 @@ void InputThreadMain() {
             binding.was_down = down;
             ++mmd_index;
         }
+#else
+        // Keep the table's no-op reference so the array is not an unused local.
+        (void)mmd_keys;
+#endif
         // Windows only: keeps the companion overlay window in step with the game.
         // The body is empty under Android, which has no companion process.
         PumpMmdOverlayHost(mmd_enabled);
@@ -2575,6 +2591,23 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "mmd_seek_forward_hotkey") config.mmd_seek_forward_key = ParseVirtualKey(value, config.mmd_seek_forward_key);
         else if (key == "mmd_camera_mode_hotkey") config.mmd_camera_mode_key = ParseVirtualKey(value, config.mmd_camera_mode_key);
         else if (key == "mmd_overlay_hotkey") config.mmd_overlay_key = ParseVirtualKey(value, config.mmd_overlay_key);
+        // The EIEM body-motion block. The fields travelled with the file import,
+        // but nothing parsed them, so body/face/terrain/cloth could not be reached
+        // from any configuration - the MMD director read them and always found
+        // its defaults. Spellings are upstream's, so one configuration file stays
+        // valid on both platforms.
+        else if (key == "vmd_motion_file") config.vmd_motion_file = Unquote(value);
+        else if (key == "vmd_body_enabled") config.vmd_body_enabled = ParseBoolean(value, config.vmd_body_enabled);
+        else if (key == "vmd_eyes_enabled") config.vmd_eyes_enabled = ParseBoolean(value, config.vmd_eyes_enabled);
+        else if (key == "vmd_face_enabled") config.vmd_face_enabled = ParseBoolean(value, config.vmd_face_enabled);
+        else if (key == "vmd_motion_loop") config.vmd_motion_loop = ParseBoolean(value, config.vmd_motion_loop);
+        else if (key == "vmd_terrain_enabled") config.vmd_terrain_enabled = ParseBoolean(value, config.vmd_terrain_enabled);
+        else if (key == "vmd_cloth_mode") {
+            const std::string mode = LowerAscii(Unquote(value));
+            config.vmd_cloth_mode = mode == "game" ? 0 : mode == "freeze" ? 2 : 1;
+        }
+        else if (key == "vmd_motion_scale") config.vmd_motion_scale = ParseFloat(value, config.vmd_motion_scale);
+        else if (key == "vmd_motion_weight") config.vmd_motion_weight = ParseFloat(value, config.vmd_motion_weight);
     }
     config.mmd_seek_seconds = std::clamp(config.mmd_seek_seconds, 0.5f, 60.0f);
     config.movement_speed = std::clamp(config.movement_speed, 0.5f, 100.0f);

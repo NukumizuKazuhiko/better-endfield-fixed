@@ -241,6 +241,10 @@ final class GameOverlay {
                 sendKey(key, pressed ? NativeCommandBridge.KEY_PRESS
                         : NativeCommandBridge.KEY_RELEASE, description);
             }
+            @Override public void command(String name, String value) {
+                GameOverlay.this.sendCommand(name, value);
+            }
+            @Override public String commandStatus() { return NativeCommandBridge.status(); }
             @Override public void openSettings() { GameOverlay.this.openSettings(); }
             @Override public void saveLog() { saveJournalToFile(); }
             @Override public void refreshLog() { updateJournal(); }
@@ -303,7 +307,8 @@ final class GameOverlay {
         } catch (RuntimeException unavailable) { current = OverlayFeatures.off(); }
         if (preview) {
             current = new OverlayFeatures(true, current.hideHud(), current.freeCamera(),
-                    current.worldPause(), current.firstPerson(), current.vmdCamera());
+                    current.worldPause(), current.firstPerson(), current.vmdCamera(),
+                    current.mmd());
         }
         if (current.equals(shown)) return;
         shown = current;
@@ -715,6 +720,43 @@ final class GameOverlay {
         runningDescription = firedDescription;
         RuntimeLog.record("take running: " + (firedDescription == null
                 ? "vk " + Integer.toHexString(startedKey) : firedDescription));
+    }
+
+    /**
+     * The native pump keeps one high-water mark for the whole process, so the
+     * panel numbers its commands from the clock as well; see
+     * ModuleSettings.nextCommandGeneration for why two private counters cannot
+     * coexist.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong COMMAND_GENERATION =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Issues a runtime command from the panel.
+     *
+     * <p>The settings app has to write into the framework's remote file space
+     * and wait for this process to pick the payload up. The panel is already in
+     * that process, so it appends to the relay stream directly - both routes
+     * end at the same "c &lt;payload&gt;" line the native side tails, which is
+     * what makes the preview mode's promise of sending nothing meaningful.
+     */
+    private void sendCommand(String name, String value) {
+        if (preview) {
+            toast("预览模式：不会发送指令");
+            return;
+        }
+        long generation = COMMAND_GENERATION.updateAndGet(
+                previous -> Math.max(System.currentTimeMillis(), previous + 1L));
+        String payload = "BE_COMMAND_V1\n" + generation + "\n" + name + "\n" + value + "\n";
+        if (!NativeCommandBridge.submit(payload)) {
+            RuntimeLog.record("command rejected (relay not configured): " + name + " " + value);
+            if (!bridgeMissing) {
+                bridgeMissing = true;
+                toast("增强运行时尚未载入，请稍后重试");
+            }
+            return;
+        }
+        RuntimeLog.record("command sent: " + name + " " + value);
     }
 
     private void sendKey(int virtualKey, int action, String description) {

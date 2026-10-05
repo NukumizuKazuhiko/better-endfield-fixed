@@ -153,6 +153,13 @@ final class RuntimeBootstrap {
                     ThirdPartyRuntimeMaterializer.indexPath, true);
             Os.setenv("BETTER_ENDFIELD_VOICE_CATALOG_ROOT",
                     new File(context.getFilesDir(), "betterendfield/catalog").getAbsolutePath(), true);
+            // Where the MMD director looks for library works, and where the
+            // imported slots were copied by MmdSlotFiles. Set unconditionally:
+            // an empty directory is a valid answer ("no works"), and leaving the
+            // variable unset made the director scan an empty path, which reports
+            // as a broken library rather than as an empty one.
+            Os.setenv("BETTER_ENDFIELD_MMD_ROOT",
+                    new File(context.getFilesDir(), ModuleSettings.MMD_SLOT_DIRECTORY).getAbsolutePath(), true);
             // The diagnostics file is the only log sink a release build has:
             // logcat is often suppressed for an injected process, and the ring
             // that feeds the on-device journal is bounded, so a burst of module
