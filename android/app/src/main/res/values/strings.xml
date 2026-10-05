@@ -69,6 +69,10 @@
     <string name="camera_follow_character">自由镜头跟随人物移动</string>
     <string name="camera_follow_character_hint">仅跟随人物位置，不改变你手动调整的镜头方向；播放运镜时暂停跟随。</string>
     <string name="camera_follow_save_failed">跟随设置保存失败。</string>
+    <string name="camera_global_fov">全局视野角度</string>
+    <string name="camera_global_fov_hint">调整普通游戏镜头的视野；自由镜头和第一人称使用各自的视野设置。</string>
+    <string name="camera_global_fov_value">普通镜头视野</string>
+    <string name="camera_global_fov_save_failed">全局视野设置保存失败。</string>
     <string name="camera_pause">启用时间冻结功能</string>
     <string name="camera_pause_hint">冻结游戏时间，保留镜头移动；需先启用自由视角。</string>
     <string name="camera_fp_eye_forward">眼位前移（游戏单位）</string>

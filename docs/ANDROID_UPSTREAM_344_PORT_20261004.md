@@ -77,3 +77,9 @@ BEM 1.2 的 `bone_name_aliases` 已声明所属资源，但原解析结果把 wo
 沿用上游 `camera_follow.h` 的身份与位置锚点，接入本仓库已有自由镜头循环。只在自由镜头手动操控时补偿人物位移，不改镜头方向；角色或模型身份变化、大幅跳跃、位置无效、关闭选项与退出自由镜头时重置锚点。Compose 体验页的开关进入相机配置，不影响第一人称独立相机路径。
 
 `BetterEndfield.CameraFollowTests.exe` 通过身份重绑、正常位移、跳跃及非有限坐标检查；固定头饰目录下 `:app:assembleDebug --offline --no-daemon --quiet` 成功。HLK-AL00 Android 10 设置页实际打开、开关、检查持久配置后恢复原有关闭状态；截图保存在 `D:/CodexData/bem-follow-screen.png`。Debug APK SHA-256 为 `9C5A87ACE8A40DD5D7B601A1C4B58655CFFDAF73D506A13A0550B246420229DA`，含一份头饰清单、834 个 `.behw` 与两个 Better Endfield ARM64 库。设备无游戏资源，镜头实时跟随与场景切换画面未验收。
+
+## 普通镜头全局 FOV（2026-10-05）
+
+上游全局 FOV 语义接入本仓库相机模块及 Compose 设置页，独立于已有自由镜头基准 FOV 与第一人称 FOV。只在主透视相机的 Cinemachine 推送中临时改写 FOV，推送后恢复原 CameraState；原生契约缺失时关闭该功能并记日志。设置开关可独立启用相机模块，关闭后无其他相机功能时不保留活动配置。
+
+固定 834 份头饰目录下运行 `:app:assembleDebug :app:assembleDebugAndroidTest --offline --no-daemon --quiet` 成功。HLK-AL00 Android 10 的 `testCameraSettingsRoundTrip` 通过独立启用、关闭后停用及跟随选项持久化检查；设置页实际打开、切换、拖动数值并核对持久配置，最后恢复关闭状态与原默认角度。截图保存在 `D:/CodexData/bem-global-fov.png`。补齐第一人称视觉退出期间的隔离后重新构建通过，最终 Debug APK SHA-256 为 `688DA75F58B33D250ED800841AB1547B61EFA26379757DD6B978A1E41E5B8CDF`，包内有一份头饰清单、834 个 `.behw` 和两个 Better Endfield ARM64 库。设备无游戏资源，普通镜头的实际视野变化及与游戏相机模式切换的交互仍未验证。

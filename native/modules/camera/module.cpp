@@ -94,6 +94,8 @@ struct CameraConfiguration {
     bool diagnostics = true;
     float movement_speed = 5.0f;
     float field_of_view = 60.0f;
+    bool global_fov_enabled = false;
+    float global_fov = 60.0f;
     bool free_camera_follow_character = false;
     float first_person_fov = 75.0f;
     float first_person_neck_plug_scale = 1.0f;
@@ -199,6 +201,8 @@ std::atomic_bool g_first_person_external_head_scale{false};
 std::atomic_bool g_diagnostics_enabled{true};
 std::atomic<float> g_movement_speed{5.0f};
 std::atomic<float> g_field_of_view{60.0f};
+std::atomic_bool g_global_fov_enabled{false};
+std::atomic<float> g_global_fov{60.0f};
 std::atomic_bool g_free_camera_follow_character{false};
 std::atomic<float> g_first_person_fov{75.0f};
 std::atomic<float> g_first_person_neck_plug_scale{1.0f};
@@ -435,6 +439,9 @@ MethodContract g_contracts[]{
     {"unity.camera.fov.set",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Camera", "set_fieldOfView",
             "System.Single", "System.Void", 1}},
+    {"unity.camera.orthographic.get",
+        {"UnityEngine.CoreModule.dll", "UnityEngine", "Camera", "get_orthographic",
+            nullptr, "System.Boolean", 0}},
     {"unity.screen.width.get",
         {"UnityEngine.CoreModule.dll", "UnityEngine", "Screen", "get_width",
             nullptr, "System.Int32", 0}},
@@ -643,6 +650,10 @@ bool GetValue(const MethodContract* method, void* instance, float& value) {
 }
 
 bool GetValue(const MethodContract* method, void* instance, int& value) {
+    return Unbox(Invoke(method, instance, nullptr), value);
+}
+
+bool GetValue(const MethodContract* method, void* instance, bool& value) {
     return Unbox(Invoke(method, instance, nullptr), value);
 }
 
@@ -2056,6 +2067,8 @@ void __fastcall DetourPushState(void* instance, void* state, void* method) {
         RefreshFirstPersonTarget()) {
         FpRefreshHiddenParts(true, false);
     }
+    ScopedGlobalFovState global_fov_scope(instance,state,
+        g_fp_perspective.visual_exit_deadline != 0);
     if (state && !g_free_camera_active && (g_first_person_camera_enabled.load(std::memory_order_acquire) ||
         g_fp_perspective.visual_exit_deadline)) {
         FpCoordinateState(instance,state);
@@ -2245,6 +2258,8 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "diagnostics") config.diagnostics = ParseBoolean(value, config.diagnostics);
         else if (key == "movement_speed") config.movement_speed = ParseFloat(value, config.movement_speed);
         else if (key == "field_of_view") config.field_of_view = ParseFloat(value, config.field_of_view);
+        else if (key == "global_fov_enabled") config.global_fov_enabled = ParseBoolean(value, config.global_fov_enabled);
+        else if (key == "global_fov") config.global_fov = ParseFloat(value, config.global_fov);
         else if (key == "free_camera_follow_character") config.free_camera_follow_character = ParseBoolean(value, config.free_camera_follow_character);
         else if (key == "first_person_fov") config.first_person_fov = ParseFloat(value, config.first_person_fov);
         else if (key == "toggle_hotkey") config.toggle_key = ParseVirtualKey(value, config.toggle_key);
@@ -2287,6 +2302,8 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
     }
     config.movement_speed = std::clamp(config.movement_speed, 0.5f, 100.0f);
     config.field_of_view = std::clamp(config.field_of_view, 20.0f, 120.0f);
+    config.global_fov = std::isfinite(config.global_fov)
+        ? std::clamp(config.global_fov, 5.0f, 150.0f) : 60.0f;
     config.first_person_fov = std::clamp(config.first_person_fov, 20.0f, 120.0f);
     config.first_person_neck_plug_scale =
         std::clamp(config.first_person_neck_plug_scale, 0.2f, 3.0f);
@@ -2618,6 +2635,15 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     g_diagnostics_enabled.store(config.diagnostics, std::memory_order_release);
     g_movement_speed.store(config.movement_speed, std::memory_order_release);
     g_field_of_view.store(config.field_of_view, std::memory_order_release);
+    const auto* projection = Contract("unity.camera.orthographic.get");
+    const auto* brain_object = Contract("unity.component.game_object");
+    g_global_fov_enabled.store(config.enabled && config.global_fov_enabled &&
+        g_push_state_hook_ready && g_state_layout.ready &&
+        projection && projection->resolved && brain_object && brain_object->resolved,
+        std::memory_order_release);
+    if (config.enabled && config.global_fov_enabled && !g_global_fov_enabled.load())
+        Log("Global FOV unavailable: camera state or projection contract was not resolved.");
+    g_global_fov.store(config.global_fov, std::memory_order_release);
     g_free_camera_follow_character.store(config.free_camera_follow_character, std::memory_order_release);
     g_first_person_fov.store(config.first_person_fov, std::memory_order_release);
     g_first_person_neck_plug_scale.store(config.first_person_neck_plug_scale,
@@ -2667,7 +2693,7 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
         g_first_person_exit_request.store(true, std::memory_order_release);
     }
 
-    g_state.store(free_camera || anti_dither || first_person
+    g_state.store(free_camera || anti_dither || first_person || g_global_fov_enabled.load()
         ? ModuleState::Active
         : ModuleState::Disabled, std::memory_order_release);
 
@@ -2699,6 +2725,7 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
 
 void BE_CALL Shutdown() {
     g_free_camera_enabled.store(false, std::memory_order_release);
+    g_global_fov_enabled.store(false, std::memory_order_release);
     g_disable_dither_enabled.store(false, std::memory_order_release);
     g_first_person_camera_enabled.store(false, std::memory_order_release);
     g_input_thread_stop.store(true, std::memory_order_release);

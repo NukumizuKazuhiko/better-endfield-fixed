@@ -71,6 +71,7 @@ final class CameraSettingsTest {
             // set from compiling.
             testAdvanced(isolated);
             testMotion(isolated);
+            testGlobalFovAndFollow(isolated);
         } finally {
             preferences.edit().clear().commit();
         }
@@ -88,6 +89,30 @@ final class CameraSettingsTest {
                 ModuleSettings.parse(ModuleSettings.getFirstPersonNearClip(context), 0.03),
                 ModuleSettings.isFirstPersonExtendLookRange(context), ModuleSettings.getFirstPersonAdvanced(context),
                 ModuleSettings.getCameraMotion(context));
+    }
+
+    private static void testGlobalFovAndFollow(Context context) {
+        SharedPreferences preferences = FrameworkSettings.open(context);
+        check(ModuleSettings.setGlobalFov(context, true, 81), "global FOV save");
+        check(ModuleSettings.setFreeCameraFollowCharacter(context, true), "follow save");
+        ModuleSettings.setCameraSettings(context, false, false, false, false, true, true,
+                5, 60, 75, 0.03, 0.05, 0.03, false,
+                ModuleSettings.getFirstPersonAdvanced(context), ModuleSettings.getCameraMotion(context));
+        String ini = ModuleConfigurations.read(preferences).camera();
+        check(ini.contains("global_fov_enabled=true\n") && ini.contains("global_fov=81\n"),
+                "global FOV alone starts camera module");
+        check(ini.contains("free_camera_follow_character=true\n"), "follow serialized");
+        check(ModuleSettings.setGlobalFov(context, false, Double.NaN), "global FOV disable");
+        ModuleSettings.setCameraSettings(context, false, false, false, false, true, true,
+                5, 60, 75, 0.03, 0.05, 0.03, false,
+                ModuleSettings.getFirstPersonAdvanced(context), ModuleSettings.getCameraMotion(context));
+        check(ModuleConfigurations.read(preferences).camera().isEmpty(), "global FOV disable stops module");
+        check(ModuleSettings.getGlobalFov(context) == 60f, "nonfinite global FOV defaults");
+        ModuleSettings.setCameraSettings(context, false, true, false, false, true, true,
+                5, 60, 75, 0.03, 0.05, 0.03, false,
+                ModuleSettings.getFirstPersonAdvanced(context), ModuleSettings.getCameraMotion(context));
+        check(ModuleConfigurations.read(preferences).camera().contains("free_camera_follow_character=true\n"),
+                "follow selection retained for free camera");
     }
 
     private static void testAdvanced(Context context) {

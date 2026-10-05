@@ -561,6 +561,10 @@ class SettingsState(private val context: Context) {
         private set
     var cameraFov by mutableStateOf(60.0f)
         private set
+    var globalFovEnabled by mutableStateOf(false)
+        private set
+    var globalFov by mutableStateOf(60.0f)
+        private set
     var firstPersonFov by mutableStateOf(75.0f)
         private set
     var firstPersonEyeForward by mutableStateOf(0.03f)
@@ -708,6 +712,8 @@ class SettingsState(private val context: Context) {
         firstPersonFillNeck = ModuleSettings.isFirstPersonFillNeck(context)
         cameraSpeed = ModuleSettings.parse(ModuleSettings.getCameraSpeed(context), 5.0).toFloat()
         cameraFov = ModuleSettings.parse(ModuleSettings.getCameraFieldOfView(context), 60.0).toFloat()
+        globalFovEnabled = ModuleSettings.isGlobalFovEnabled(context)
+        globalFov = ModuleSettings.getGlobalFov(context)
         firstPersonFov = ModuleSettings.parse(ModuleSettings.getFirstPersonFieldOfView(context), 75.0).toFloat()
         firstPersonEyeForward = ModuleSettings.parse(ModuleSettings.getFirstPersonEyeForward(context), 0.03).toFloat()
         firstPersonEyeHeight = ModuleSettings.parse(ModuleSettings.getFirstPersonEyeHeight(context), 0.05).toFloat()
@@ -824,6 +830,24 @@ class SettingsState(private val context: Context) {
 
     fun updateCameraFov(value: Float) {
         cameraFov = value
+        saveCameraSettings()
+    }
+
+    fun updateGlobalFovEnabled(value: Boolean) {
+        if (!ModuleSettings.setGlobalFov(context, value, globalFov.toDouble())) {
+            status = context.getString(R.string.camera_global_fov_save_failed)
+            return
+        }
+        globalFovEnabled = value
+        saveCameraSettings()
+    }
+
+    fun updateGlobalFov(value: Float) {
+        if (!ModuleSettings.setGlobalFov(context, globalFovEnabled, value.toDouble())) {
+            status = context.getString(R.string.camera_global_fov_save_failed)
+            return
+        }
+        globalFov = value
         saveCameraSettings()
     }
 

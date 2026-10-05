@@ -85,6 +85,20 @@ private fun CameraCard(state: SettingsState) {
                 unit = stringResource(R.string.degree_suffix),
             )
             BodyText(stringResource(R.string.camera_default_fov_hint))
+            SwitchRow(
+                title = stringResource(R.string.camera_global_fov),
+                description = stringResource(R.string.camera_global_fov_hint),
+                checked = state.globalFovEnabled,
+                onCheckedChange = state::updateGlobalFovEnabled,
+            )
+            SliderRow(
+                label = stringResource(R.string.camera_global_fov_value),
+                value = state.globalFov,
+                onValueChange = state::updateGlobalFov,
+                valueRange = 5f..150f,
+                unit = stringResource(R.string.degree_suffix),
+                enabled = state.globalFovEnabled,
+            )
         }
 
         GroupLabel(stringResource(R.string.camera_group_free))

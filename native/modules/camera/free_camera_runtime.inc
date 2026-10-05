@@ -865,6 +865,41 @@ bool BrainDrivesActiveCamera(void* brain) {
     return g_free_brain_matches;
 }
 
+class ScopedGlobalFovState {
+public:
+    ScopedGlobalFovState(void* brain, void* state, bool first_person_transition) {
+        if (!state || !brain || !g_state_layout.ready ||
+            !g_global_fov_enabled.load(std::memory_order_relaxed) ||
+            g_first_person_active.load(std::memory_order_acquire) ||
+            first_person_transition || g_free_camera_active)
+            return;
+        void* camera = Invoke(Contract("unity.camera.main"), nullptr, nullptr);
+        bool orthographic = true;
+        if (!camera || !IsObjectAlive(camera) || !IsObjectAlive(brain) ||
+            !GetValue(Contract("unity.camera.orthographic.get"), camera, orthographic) || orthographic)
+            return;
+        void* brain_object = Invoke(Contract("unity.component.game_object"), brain, nullptr);
+        void* camera_object = Invoke(Contract("unity.component.game_object"), camera, nullptr);
+        if (!brain_object || brain_object != camera_object) return;
+        offset_ = g_state_layout.lens + g_state_layout.lens_field_of_view;
+        const float requested = g_global_fov.load(std::memory_order_relaxed);
+        if (!std::isfinite(requested) || requested < kFreeMinFov || requested > kFreeMaxFov ||
+            !ReadBytes(state, offset_, &original_, sizeof(original_)) ||
+            !std::isfinite(original_) || original_ <= 0.0f || original_ >= 180.0f)
+            return;
+        if (WriteBytes(state, offset_, &requested, sizeof(requested))) state_ = state;
+    }
+    ~ScopedGlobalFovState() {
+        if (state_) WriteBytes(state_, offset_, &original_, sizeof(original_));
+    }
+    ScopedGlobalFovState(const ScopedGlobalFovState&) = delete;
+    ScopedGlobalFovState& operator=(const ScopedGlobalFovState&) = delete;
+private:
+    void* state_ = nullptr;
+    int32_t offset_ = -1;
+    float original_ = 60.0f;
+};
+
 void ApplyFreeCameraState(void* state) {
     StepFreeCamera();
     WriteFreeCameraState(state);
