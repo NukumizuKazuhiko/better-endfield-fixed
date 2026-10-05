@@ -37,6 +37,7 @@ final class ModuleSettings {
     private static final String CAMERA_FP_FILL_NECK = "camera_first_person_fill_neck";
     private static final String CAMERA_SPEED = "camera_movement_speed";
     private static final String CAMERA_FOV = "camera_field_of_view";
+    private static final String CAMERA_FOLLOW_CHARACTER = "camera_free_follow_character";
     private static final String CAMERA_FP_FOV = "camera_first_person_fov";
     private static final String CAMERA_FP_EYE_FORWARD = "camera_first_person_eye_forward";
     private static final String CAMERA_FP_EYE_HEIGHT = "camera_first_person_eye_height";
@@ -247,6 +248,14 @@ final class ModuleSettings {
 
     static String getCameraFieldOfView(Context context) {
         return preferences(context).getString(CAMERA_FOV, "60");
+    }
+
+    static boolean isFreeCameraFollowCharacter(Context context) {
+        return preferences(context).getBoolean(CAMERA_FOLLOW_CHARACTER, false);
+    }
+
+    static boolean setFreeCameraFollowCharacter(Context context, boolean enabled) {
+        return preferences(context).edit().putBoolean(CAMERA_FOLLOW_CHARACTER, enabled).commit();
     }
 
     static String getFirstPersonFieldOfView(Context context) {
@@ -743,6 +752,7 @@ final class ModuleSettings {
                         + "first_person_fill_neck_hole=" + fillNeck + "\n"
                         + "movement_speed=" + number(movementSpeed) + "\n"
                         + "field_of_view=" + number(fieldOfView) + "\n"
+                        + "free_camera_follow_character=" + isFreeCameraFollowCharacter(context) + "\n"
                         + "first_person_fov=" + number(firstPersonFov) + "\n"
                         + "first_person_eye_forward=" + number(eyeForward) + "\n"
                         + "first_person_eye_height=" + number(eyeHeight) + "\n"

@@ -1,5 +1,6 @@
 #include "BetterEndfield/ModuleApi.h"
 #include "first_person_math.h"
+#include "camera_follow.h"
 #include "first_person_facing.h"
 #include "first_person_motion.h"
 #include "first_person_readback.h"
@@ -93,6 +94,7 @@ struct CameraConfiguration {
     bool diagnostics = true;
     float movement_speed = 5.0f;
     float field_of_view = 60.0f;
+    bool free_camera_follow_character = false;
     float first_person_fov = 75.0f;
     float first_person_neck_plug_scale = 1.0f;
     int toggle_key = '9';
@@ -197,6 +199,7 @@ std::atomic_bool g_first_person_external_head_scale{false};
 std::atomic_bool g_diagnostics_enabled{true};
 std::atomic<float> g_movement_speed{5.0f};
 std::atomic<float> g_field_of_view{60.0f};
+std::atomic_bool g_free_camera_follow_character{false};
 std::atomic<float> g_first_person_fov{75.0f};
 std::atomic<float> g_first_person_neck_plug_scale{1.0f};
 std::atomic_int g_toggle_key{'9'};
@@ -2242,6 +2245,7 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "diagnostics") config.diagnostics = ParseBoolean(value, config.diagnostics);
         else if (key == "movement_speed") config.movement_speed = ParseFloat(value, config.movement_speed);
         else if (key == "field_of_view") config.field_of_view = ParseFloat(value, config.field_of_view);
+        else if (key == "free_camera_follow_character") config.free_camera_follow_character = ParseBoolean(value, config.free_camera_follow_character);
         else if (key == "first_person_fov") config.first_person_fov = ParseFloat(value, config.first_person_fov);
         else if (key == "toggle_hotkey") config.toggle_key = ParseVirtualKey(value, config.toggle_key);
         else if (key == "pause_hotkey") config.pause_key = ParseVirtualKey(value, config.pause_key);
@@ -2614,6 +2618,7 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     g_diagnostics_enabled.store(config.diagnostics, std::memory_order_release);
     g_movement_speed.store(config.movement_speed, std::memory_order_release);
     g_field_of_view.store(config.field_of_view, std::memory_order_release);
+    g_free_camera_follow_character.store(config.free_camera_follow_character, std::memory_order_release);
     g_first_person_fov.store(config.first_person_fov, std::memory_order_release);
     g_first_person_neck_plug_scale.store(config.first_person_neck_plug_scale,
         std::memory_order_release);

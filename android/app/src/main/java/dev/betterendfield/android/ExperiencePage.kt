@@ -96,6 +96,13 @@ private fun CameraCard(state: SettingsState) {
                 onCheckedChange = state::updateFreeCamera,
                 badge = stringResource(R.string.badge_overlay),
             )
+            SwitchRow(
+                title = stringResource(R.string.camera_follow_character),
+                description = stringResource(R.string.camera_follow_character_hint),
+                checked = state.freeCameraFollowCharacter,
+                onCheckedChange = state::updateFreeCameraFollowCharacter,
+                enabled = state.freeCamera,
+            )
             SliderRow(
                 label = stringResource(R.string.camera_speed_label),
                 value = state.cameraSpeed,

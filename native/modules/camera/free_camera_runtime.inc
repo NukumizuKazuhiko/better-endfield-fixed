@@ -218,6 +218,7 @@ double g_free_last_heartbeat = 0.0;
 bool g_free_transform_fallback_logged = false;
 void* g_free_brain = nullptr;
 bool g_free_brain_matches = false;
+CameraFollow::Anchor<Vector3> g_free_follow_anchor;
 
 FreePlayback g_playback = FreePlayback::None;
 double g_playback_start = 0.0;
@@ -335,6 +336,32 @@ bool CharacterPose(Vector3& position, float& yaw) {
         yaw = std::atan2(forward.x, forward.z) * kRadToDeg;
     }
     return true;
+}
+
+void FollowCharacterTranslation() {
+    const bool enabled = g_free_camera_follow_character.load(std::memory_order_relaxed);
+    if (!enabled || g_playback != FreePlayback::None) {
+        g_free_follow_anchor.Reset();
+        return;
+    }
+    void* character = Invoke(Contract("player_controller.get_main_character"), nullptr, nullptr);
+    void* model_component = character
+        ? Invoke(Contract("entity.get_model_com"), character, nullptr) : nullptr;
+    void* model_object = model_component
+        ? Invoke(Contract("base_model_component.get_model_go"), model_component, nullptr) : nullptr;
+    void* transform = model_object && IsObjectAlive(model_object)
+        ? Invoke(Contract("unity.game_object.transform"), model_object, nullptr) : nullptr;
+    Vector3 position{}, delta{};
+    const bool valid = transform && IsObjectAlive(transform) &&
+        GetValue(Contract("unity.transform.position.get"), transform, position) &&
+        character == Invoke(Contract("player_controller.get_main_character"), nullptr, nullptr);
+    if (g_free_follow_anchor.Sample(enabled, true,
+        reinterpret_cast<uintptr_t>(character), reinterpret_cast<uintptr_t>(transform),
+        valid, position, delta)) {
+        g_free_target.position = Add(g_free_target.position, delta);
+        g_free_smoothed.position = Add(g_free_smoothed.position, delta);
+        g_free_view.position = Add(g_free_view.position, delta);
+    }
 }
 
 Vector3 MotionAnchor() {
@@ -753,6 +780,7 @@ void StepFreeCamera() {
     if (dt <= 0.0f) {
         return;
     }
+    FollowCharacterTranslation();
     switch (g_playback) {
     case FreePlayback::Motion: StepMotion(now, dt); break;
     case FreePlayback::Keyframes: StepKeyframes(now); break;
@@ -852,6 +880,7 @@ void ExitFreeCamera(const char* reason) {
         return;
     }
     g_playback = FreePlayback::None;
+    g_free_follow_anchor.Reset();
     g_free_camera_running.store(false, std::memory_order_release);
     ClearMouseInput();
     RestoreWorldPause("free camera exit");
@@ -912,6 +941,7 @@ bool EnterFreeCamera() {
     g_free_smoothed = control;
     ViewFromControl(control);
     g_playback = FreePlayback::None;
+    g_free_follow_anchor.Reset();
     g_free_last_step = NowSeconds();
     g_free_last_push = -1.0;
     g_free_last_validate = g_free_last_step;

@@ -2,6 +2,7 @@
 
 正式扩展名 `.bem`。玩家只需安装包，不需要 Python、原 Mod 注入框架、角色数据库或手工 runtime.ini。
 Windows 与 Android 使用同一个标准包：Android 编译共用的 `native/modules/custom_model` 读取器，作者无需另出一份手机包。包头 `target.platform` 仍固定为 `windows-x64`，这是现有格式常量。手机纹理不兼容时，Android 可对安装包执行「转换手机纹理」；法线编码缺少已验证声明时不能转换。两端保存选项后均在下次启动游戏时应用。1.0 字段见 `BEM_V1_SPEC.md`，组合外观的 1.1 字段见 `BEM_V1_1_SPEC.md`。
+当前完整字段合同见 [BEM 格式规范 1.0–1.3](BEM_FORMAT_SPEC.md)；分版本旧文档保留原时点说明。
 
 Android 兼容性移植中，替换网格按包内已校验的顶点声明和流步长构建；原生网格只提供骨骼、bindpose 和材质，构建后仍回读校验声明、步长和几何。世界场景使用 UI LOD0 的已验证材质副本时，可接受 `M_actor_` 与 `M_actor_lod_` 后完整后缀相同的原生材质对应；其他名称或同名不同纹理对象仍拒绝。此改动尚未完成本项目的游戏内实机验收，不应据此把任意 BEM 包标为 `render_verified=true`。
 

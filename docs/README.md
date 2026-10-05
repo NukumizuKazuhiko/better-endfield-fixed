@@ -9,7 +9,7 @@
 | [产品边界](PRODUCT_BOUNDARY.md) | Android 唯一目标平台及历史 Windows 代码的处理边界 |
 | [技术实现与配置参考](TECHNICAL_DETAILS.md) | Android 实现与历史桌面实现细节 |
 | [BEM 创作者指南](BEM_CREATOR_GUIDE.md) | 外观包制作、转换和验证 |
-| [BEM v1 规范](BEM_V1_SPEC.md) | 标准包字段与合同 |
+| [BEM 格式规范 1.0–1.3](BEM_FORMAT_SPEC.md) | 当前标准包字段、形变参数与版本合同 |
 | [第一人称执行记录](CAMERA_FIRST_PERSON_EXECUTION.md) | 相机阶段门禁与验证边界 |
 | [OmniMix 集成交接](OMNIMIX_INTEGRATION_HANDOFF.md) | 音乐后端协议与回退合同 |
 | [项目更新日志](../CHANGELOG.md) | 版本变化与发布状态 |
@@ -21,5 +21,6 @@
 | --- | --- |
 | [Android 开发记录归档](ANDROID_DEVELOPMENT_HISTORY.md) | 旧 Android README 中的逐版本日志和实现记录，保留原时点上下文 |
 | [Android Compose 悬浮层实验](ANDROID_OVERLAY_COMPOSE_EXPERIMENT_20260929.md) | 实验过程与当时的验收证据 |
+| [BEM 1.0 规范](BEM_V1_SPEC.md)、[BEM 1.1 扩展](BEM_V1_1_SPEC.md) | 分版本旧文档；当前完整格式以 1.0–1.3 合并规范为准 |
 
 其他带日期的审计、探针和迁移文档记录其对应时点；阅读时应与当前源码及版本说明核对。

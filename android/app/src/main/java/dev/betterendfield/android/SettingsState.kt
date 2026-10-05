@@ -547,6 +547,8 @@ class SettingsState(private val context: Context) {
         private set
     var freeCamera by mutableStateOf(false)
         private set
+    var freeCameraFollowCharacter by mutableStateOf(false)
+        private set
     var worldPause by mutableStateOf(false)
         private set
     var firstPerson by mutableStateOf(false)
@@ -699,6 +701,7 @@ class SettingsState(private val context: Context) {
         hideHud = ModuleSettings.isHideHudEnabled(context)
         disableDither = ModuleSettings.isDisableDitherEnabled(context)
         freeCamera = ModuleSettings.isFreeCameraEnabled(context)
+        freeCameraFollowCharacter = ModuleSettings.isFreeCameraFollowCharacter(context)
         worldPause = ModuleSettings.isWorldPauseEnabled(context)
         firstPerson = ModuleSettings.isFirstPersonEnabled(context)
         firstPersonHideHead = ModuleSettings.isFirstPersonHideHead(context)
@@ -782,6 +785,15 @@ class SettingsState(private val context: Context) {
 
     fun updateFreeCamera(value: Boolean) {
         freeCamera = value
+        saveCameraSettings()
+    }
+
+    fun updateFreeCameraFollowCharacter(value: Boolean) {
+        if (!ModuleSettings.setFreeCameraFollowCharacter(context, value)) {
+            status = context.getString(R.string.camera_follow_save_failed)
+            return
+        }
+        freeCameraFollowCharacter = value
         saveCameraSettings()
     }
 

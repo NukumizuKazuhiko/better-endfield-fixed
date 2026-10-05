@@ -71,3 +71,9 @@ BEM 1.2 的 `bone_name_aliases` 已声明所属资源，但原解析结果把 wo
 本轮执行 `py -m unittest test_bem_v13 test_bem_tasks -q`，25 项通过；`BetterEndfield.BemV13MorphTests.exe` 通过 86 项检查。固定 834 份头饰目录下执行 `:app:assembleDebug :app:assembleDebugAndroidTest -PheadwearCatalogDir=... --offline --no-daemon --quiet` 成功。HLK-AL00（Android 10）覆盖安装两份 Debug APK 后，`BemInstallerTest` 整套设备测试通过，包含参数保存、非法步长拒绝、配置生成及模型安装。APK SHA-256 为 `23CD0E33173FD6A8230AF75EA353B9AFE7FCBEF3AAD331622356B9ADD24996CB`，包内有一份头饰清单、834 个 `.behw` 和两个 Better Endfield ARM64 库。
 
 设备没有游戏资源，形变在世界/详情场景的画面、角色切换和运行时资源峰值未实测。当前安装与选项仍在下次启动游戏时生效；模型热切换和低峰值加载不是本阶段结果。
+
+## 自由镜头跟随人物位移（2026-10-05）
+
+沿用上游 `camera_follow.h` 的身份与位置锚点，接入本仓库已有自由镜头循环。只在自由镜头手动操控时补偿人物位移，不改镜头方向；角色或模型身份变化、大幅跳跃、位置无效、关闭选项与退出自由镜头时重置锚点。Compose 体验页的开关进入相机配置，不影响第一人称独立相机路径。
+
+`BetterEndfield.CameraFollowTests.exe` 通过身份重绑、正常位移、跳跃及非有限坐标检查；固定头饰目录下 `:app:assembleDebug --offline --no-daemon --quiet` 成功。HLK-AL00 Android 10 设置页实际打开、开关、检查持久配置后恢复原有关闭状态；截图保存在 `D:/CodexData/bem-follow-screen.png`。Debug APK SHA-256 为 `9C5A87ACE8A40DD5D7B601A1C4B58655CFFDAF73D506A13A0550B246420229DA`，含一份头饰清单、834 个 `.behw` 与两个 Better Endfield ARM64 库。设备无游戏资源，镜头实时跟随与场景切换画面未验收。
