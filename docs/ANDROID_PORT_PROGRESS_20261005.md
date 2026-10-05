@@ -17,9 +17,9 @@
 | 4 | 自定义模型（体型/骨骼别名/贴图/通用匹配） | 部分 | 通过 | BEM 1.3 参数已验，其余未验 | 双方 |
 | 5 | 三方模块宿主（导入→dlopen→HTTP 桥） | 全链路已落地 | 通过 | **仅独立测试程序**，游戏内零验收 | 我方新增 |
 | 6 | Hook 链 / 动作诊断 | 部分 | 通过 | 未验 | 双方 |
-| 7 | MMD 播放（作品库 + 导演 + 相机路径） | **0 文件** | — | 无 | 上游已有，待移植 |
-| 8 | EIEM 身体动作（DirectVmd） | **文件已导入**（`ba18649`），但**未链入产物** | 5/5 TU OK（`-Werror`）；`.so` 逐字节未变 | 夹具：单槽 PASS；四槽 1 项子断言失败（见 §6） | 上游已有，待集成 |
-| 9 | 本地音轨时间轴 | **0 文件** | — | 无 | 上游已有，待移植 |
+| 7 | MMD 播放（作品库 + 导演 + 相机路径） | **原生层已落地**（`cfee7c2`）；管理页 0 文件 | 通过；`.so` 已含 `Mmd::Stop` | 无 | 上游已有，UI 待重写 |
+| 8 | EIEM 身体动作（DirectVmd） | **已落地并进入产物**（`cfee7c2`） | 5/5 TU OK（`-Werror`）；`.so` 含 42 个 `EiemBody` 符号、0 未解析 | 夹具：单槽 PASS；四槽 1 项子断言失败（见 §6） | 上游已有，已集成 |
+| 9 | 本地音轨时间轴 | **已落地**（`local_music_android.cpp` 进 Android 目标） | 通过；`.so` 含 `AndroidLocalMusicApi` | 无 | 上游已有，已集成 |
 | 10 | 数据与版本资源（F 块） | 未开始 | — | 无 | 双方 |
 
 ## 1. 已落地（代码 + 构建 + 设备三档齐全）
@@ -111,7 +111,26 @@ rootOffset=0.0000 baseline=0.300 baseValid=1 pelvisY=1.0000
 **结论边界**：适配层的地形**查询**链路在 ARM64 上工作正常（探针 6000+ 次、采到正确地面 0.300、契约解析无 reason）；夹具的抬升断言隐含「地面变更后不再发生重置」，本机运行不满足。
 **未决**：无宿主编译器 → 无法做 Windows 侧 A/B，**不能断言"仅设备侧复现"**。此项在集成 `module.cpp` 后须重测。
 
-## 5. 下一步（顺序不变）
+## 7. module.cpp 集成实测（`cfee7c2`，2026-10-05）
+
+**做法**：不碰任何双方分叉的第一人称代码，只做**加法**——补 include、配置字段、全局量、调用点。
+
+| 项 | 结果 |
+| --- | --- |
+| 兼容层缺口 | `android_win32.h` 补 11 个虚拟键（`VK_MENU/LWIN/RWIN/RETURN/SPACE/TAB/ESCAPE/MULTIPLY/ADD/DECIMAL/DIVIDE`）。补齐后**上游整个 `module.cpp` 在我方兼容层上 0 error** |
+| `free_camera_runtime.inc` | **前向移植**（非并集）。先测：我方增量 +73/−1、上游 +282/−298，且我方那 4 处（`g_free_follow_anchor`、`FollowCharacterTranslation`、`ScopedGlobalFovState`、鼠标钩子 `_WIN32` 守卫）**上游全有** → 取上游版不丢东西；唯一实质差异 `first_person_transition` 形参以默认值补回 |
+| `module.cpp` | +135 行，**无一处既有代码被改写** |
+| 构建 | `assembleDebug + assembleDebugAndroidTest` **BUILD SUCCESSFUL**，且 `stripDebugDebugSymbols` / `packageDebug` **实跑**（上一轮是 UP-TO-DATE，导致 APK 里是旧 `.so`） |
+| `.so` | 29,836,360 → **48,587,344** 字节（未 strip）；APK 79,769,895 → **80,434,013**，sha256 `d4c5901d7422…` |
+| 符号 | `.so` 中 **42 个 `EiemBody` 符号**，`Initialize`/`LoadStatus`/`SetOptions`/`EnsureActor` 均为 `T`，**0 个 `U`** |
+| 回归 | 同一 `.so` 中我方链路仍在：`AddVirtualMouseDelta`、`DrainVirtualMouseDelta`、`AndroidRestoreHeadwearFixture`、相机模块导出、`Mmd::Stop`、`AndroidLocalMusicApi` |
+
+**合并规模实测（三方合并，基线 `9b1e895`）**：`module.cpp` 我方 +882/−90、上游 +1414/−217 → **37 处冲突**，其中约 10 处属深度语义分叉（上游重构了头部部件探针为多渲染器向量版、重写了第一人称状态块与 `ReadPartComponents`/`FindHeadBoneRecursive` 签名、重写了输入线程的键盘钩子）。
+**决策**：这些区域**一律取我方**——上游那侧是另一套实现，与 EIEM/MMD 无依赖关系，取上游等于删掉本 fork 的第一人称成果。代价：输入循环里的 MMD 热键尚未接线。
+
+**关键教训（本轮最大的一个）**：不要假设"分叉 = 对抗"。本仓库 151 个双方共同改动文件里，绝大多数是**纯增量**；正确做法是**先量增量规模，再把小的那侧前向移植到大改动的那侧**，而不是盲目并集。只有两侧都大改的文件（`module.cpp`、`first_person_runtime.inc`、`native_bridge.cpp`、Java UI）才需要逐 hunk 判决。
+
+## 8. 下一步（顺序不变）
 
 1. 三方模块设备闭环（代码已在，路径最短）
 2. MMD/EIEM **原生层**（eiem + motion + pose_lease + director + 本地音轨）→ 先过 ARM64 编译 + 宿主测试
