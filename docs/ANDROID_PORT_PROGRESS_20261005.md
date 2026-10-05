@@ -17,7 +17,7 @@
 | 4 | 自定义模型（体型/骨骼别名/贴图/通用匹配） | 部分 | 通过 | BEM 1.3 参数已验，其余未验 | 双方 |
 | 5 | 三方模块宿主（导入→dlopen→HTTP 桥） | 全链路已落地 | 通过 | **仅独立测试程序**，游戏内零验收 | 我方新增 |
 | 6 | Hook 链 / 动作诊断 | 部分 | 通过 | 未验 | 双方 |
-| 7 | MMD 播放（作品库 + 导演 + 相机路径） | **原生层已落地**（`cfee7c2`）；管理页 0 文件 | 通过；`.so` 已含 `Mmd::Stop` | 无 | 上游已有，UI 待重写 |
+| 7 | MMD 播放（作品库 + 导演 + 相机路径） | **原生层已接线**（`cfee7c2` + 本轮：热键 / 配置下发 / 面板命令入口）；管理页 0 文件 | 通过；`.so` 48,712,256 B，含 `AndroidMmdCommand`/`AndroidMmdStatus` | 无 | 上游已有，UI 待重写 |
 | 8 | EIEM 身体动作（DirectVmd） | **已落地并进入产物**（`cfee7c2`） | 5/5 TU OK（`-Werror`）；`.so` 含 42 个 `EiemBody` 符号、0 未解析 | 夹具：单槽 PASS；四槽 1 项子断言失败（见 §6） | 上游已有，已集成 |
 | 9 | 本地音轨时间轴 | **已落地**（`local_music_android.cpp` 进 Android 目标） | 通过；`.so` 含 `AndroidLocalMusicApi` | 无 | 上游已有，已集成 |
 | 10 | 数据与版本资源（F 块） | 未开始 | — | 无 | 双方 |
@@ -126,15 +126,31 @@ rootOffset=0.0000 baseline=0.300 baseValid=1 pelvisY=1.0000
 | 回归 | 同一 `.so` 中我方链路仍在：`AddVirtualMouseDelta`、`DrainVirtualMouseDelta`、`AndroidRestoreHeadwearFixture`、相机模块导出、`Mmd::Stop`、`AndroidLocalMusicApi` |
 
 **合并规模实测（三方合并，基线 `9b1e895`）**：`module.cpp` 我方 +882/−90、上游 +1414/−217 → **37 处冲突**，其中约 10 处属深度语义分叉（上游重构了头部部件探针为多渲染器向量版、重写了第一人称状态块与 `ReadPartComponents`/`FindHeadBoneRecursive` 签名、重写了输入线程的键盘钩子）。
-**决策**：这些区域**一律取我方**——上游那侧是另一套实现，与 EIEM/MMD 无依赖关系，取上游等于删掉本 fork 的第一人称成果。代价：输入循环里的 MMD 热键尚未接线。
+**决策**：这些区域**一律取我方**——上游那侧是另一套实现，与 EIEM/MMD 无依赖关系，取上游等于删掉本 fork 的第一人称成果。当时留下的代价是「输入循环里的 MMD 热键未接线」，**本轮已补齐**（见下）。
 
 **关键教训（本轮最大的一个）**：不要假设"分叉 = 对抗"。本仓库 151 个双方共同改动文件里，绝大多数是**纯增量**；正确做法是**先量增量规模，再把小的那侧前向移植到大改动的那侧**，而不是盲目并集。只有两侧都大改的文件（`module.cpp`、`first_person_runtime.inc`、`native_bridge.cpp`、Java UI）才需要逐 hunk 判决。
+
+### MMD 原生接线（本轮）
+
+`cfee7c2` 只把 `mmd_director_runtime.inc` 挂进了编译单元，**没有任何调用面**：热键不产生请求、配置不下发到全局量、Android 侧无入口。本轮补的是这三段，实测 `module.cpp` **+242 / −3**，既有逻辑里只有 `focused` 一处被刻意放宽（其余绑定各自带开关，不受影响；另两处 − 是注释与 `{}` 块的改写）：
+
+| 段 | 内容 |
+| --- | --- |
+| 输入线程 | `mmd_keys[]` 绑定表（play/stop/camera_mode/seek_back/seek_forward/overlay）+ 按下沿派发到 `g_mmd_requests` / `g_mmd_seek_steps`；`focused` 纳入 `mmd_enabled`（其余绑定各自带开关，不会提前触发）；`PumpMmdOverlayHost(mmd_enabled)` 归位 |
+| 配置 | `CameraConfiguration` 补 `mmd_overlay_enabled` / `mmd_overlay_visible` / `keyframe_file`；17 个 `mmd_*` INI 键（键名与上游逐字一致）；`ConfigurationChanged` 补 MMD 全局量下发，含此前**从未被赋值**的 `g_vmd_motion_file` / `g_mmd_music_file` / `g_mmd_face_file` / `g_mmd_work`（+ 代际递增）/ `g_keyframe_file`（Android 下由 `BETTER_ENDFIELD_MMD_ROOT` 派生 `camera-path.becam`）/ `g_asset_config_generation` |
+| Android 入口 | 实现 `android_camera.h` 里**只有声明、全仓无实现**的 `betterendfield::AndroidMmdCommand` / `AndroidMmdStatus`（定义在模块命名空间外，经 `QueueMmdCommandForAndroid` / `MmdStatusForAndroid` 转发进入匿名命名空间）+ 面板命令 `mmd`（`<verb> [arg]`：`play_pause` / `stop` / `loop` / `seek <s>` / `seek_absolute <s>` / `camera 0|1|2|next` / `work <folder>`），由 `PumpFromEngineTick` 每帧排空 |
+
+顺手修掉两个**上游有、我方缺**的隐患：inc 引用的 `g_mmd_overlay_enabled` / `g_mmd_overlay_initial_visible` / `g_mmd_overlay_toggle_request` 全仓无定义（Android 因 `#if defined(_WIN32)` 屏蔽而侥幸编过，**Windows 构建必断**）；`playback_keys[]` 缺 `keyframe_save/load` 两项绑定。
+
+**证据**：NDK r27c `aarch64-linux-android24-clang++ -fsyntax-only -Wall -Wextra` 退出码 0（告警 8 → 6，消除的正是上述两个死全局量）；`:app:externalNativeBuildDebug` **BUILD SUCCESSFUL**；`.so` 48,587,344 → **48,712,256 B**，`AndroidMmdCommand` / `AndroidMmdStatus` / `QueueMmdCommandForAndroid` / `MmdStatusForAndroid` 四个符号均为 `T`，我方 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta` 仍在。
+
+**Java 侧现状**：`ModuleCommandRouter.issue(context, command, value)` 已是通用发送口（命令名须匹配 `[a-z][a-z0-9_]{1,31}`），故 `issue(ctx, "mmd", "play_pause")` 即可驱动；回执经 `readStatus()` 读回。缺口是**没有页面去调它**——MMD 管理页仍是 0 文件，且 `AndroidMmdStatus()` 尚无 JNI 暴露面（面板目前读不到播放状态/作品列表，只有命令回执）。
 
 ## 8. 下一步（顺序不变）
 
 1. 三方模块设备闭环（代码已在，路径最短）
-2. MMD/EIEM **原生层**（eiem + motion + pose_lease + director + 本地音轨）→ 先过 ARM64 编译 + 宿主测试
-3. MMD Java 引擎 + Compose 页面（先出键位对照表，避免存量配置漂移）
+2. ~~MMD/EIEM 原生层~~ **已完成**：导演 + EIEM + 本地音轨 + 热键 + 配置下发 + 面板命令入口，全部进 `.so`
+3. MMD Java 引擎 + Compose 页面（命令词表已定：`mmd` 命令的 7 个动词见 §7；页面调用 `ModuleCommandRouter.issue`），并在 `native_bridge.cpp` 暴露 `AndroidMmdStatus` —— 面板要看播放状态与作品列表就绕不开这一步
 4. 模型剩余链路
 5. Hook 诊断复核 + 设置页逐页回归
 6. 数据资源单独提交

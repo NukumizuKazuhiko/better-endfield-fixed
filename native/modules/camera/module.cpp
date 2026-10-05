@@ -152,6 +152,7 @@ struct CameraConfiguration {
     float motion_target_height = 1.2f;
     float keyframe_segment_seconds = 3.0f;
     bool keyframe_loop = false;
+    std::string keyframe_file;
     std::string vmd_camera_file;
     float vmd_camera_scale = 0.07f;
     float vmd_camera_fov_bias = 5.0f;
@@ -173,6 +174,11 @@ struct CameraConfiguration {
     int vmd_motion_stop_key = 0;
     // MMD playback: one clock for motion, the VMD camera and the music track.
     bool mmd_enabled = true;
+    // The overlay host is a Windows companion process. The flags are still parsed
+    // and published on Android so one shared configuration file means the same
+    // thing on both platforms; the Android build simply has no window to show.
+    bool mmd_overlay_enabled = true;
+    bool mmd_overlay_visible = false;
     bool mmd_loop = false;
     bool mmd_music_enabled = true;
     float mmd_seek_seconds = 5.0f;
@@ -335,6 +341,12 @@ std::atomic_int g_mmd_seek_back_key{VK_NUMPAD4};
 std::atomic_int g_mmd_seek_forward_key{VK_NUMPAD6};
 std::atomic_int g_mmd_camera_mode_key{VK_NUMPAD5};
 std::atomic_int g_mmd_overlay_key{VK_SUBTRACT};
+// Read by the overlay host inside mmd_director_runtime.inc. That body compiles
+// out on Android, but the desktop build of this file needs the definitions, so
+// they live here next to the key that toggles them.
+std::atomic_bool g_mmd_overlay_enabled{true};
+std::atomic_bool g_mmd_overlay_initial_visible{false};
+std::atomic_bool g_mmd_overlay_toggle_request{false};
 // Body-motion hotkeys (EIEM DirectVmd). Zero means unbound, which is the
 // upstream default: the character preview is switched on from the panel.
 std::atomic_bool g_character_preview_enabled{false};
@@ -879,6 +891,11 @@ bool GameWindowHasFocus() {
 LRESULT CALLBACK FreeCameraMouseHook(int code, WPARAM message, LPARAM data);
 #endif
 
+// Implemented in mmd_director_runtime.inc, which is included further down: the
+// input thread below already needs it, so it is declared here at global scope
+// alongside that file's other entry points.
+void PumpMmdOverlayHost(bool mmd_enabled);
+
 struct HotkeyRequest {
     std::atomic_int* key;
     std::atomic_bool* request;
@@ -895,7 +912,21 @@ void InputThreadMain() {
         {&g_keyframe_add_key, &g_keyframe_add_request},
         {&g_keyframe_play_key, &g_keyframe_play_request},
         {&g_keyframe_clear_key, &g_keyframe_clear_request},
+        // Both default to 0: the camera path is saved and loaded from the panel,
+        // and a binding only exists if a configuration assigns one.
+        {&g_keyframe_save_key, &g_keyframe_save_request},
+        {&g_keyframe_load_key, &g_keyframe_load_request},
         {&g_vmd_play_key, &g_vmd_play_request},
+    };
+    // The MMD keys carry no request flag of their own: the index below picks the
+    // action, which keeps six bindings in one table instead of six globals.
+    HotkeyRequest mmd_keys[]{
+        {&g_mmd_play_key, nullptr},
+        {&g_mmd_stop_key, nullptr},
+        {&g_mmd_camera_mode_key, nullptr},
+        {&g_mmd_seek_back_key, nullptr},
+        {&g_mmd_seek_forward_key, nullptr},
+        {&g_mmd_overlay_key, nullptr},
     };
 #if defined(_WIN32)
     // The mouse hook has no Android representation; see the input loop below.
@@ -912,7 +943,12 @@ void InputThreadMain() {
         const int toggle_key = g_toggle_key.load(std::memory_order_relaxed);
         const int pause_key = g_pause_key.load(std::memory_order_relaxed);
         const int first_person_key = g_first_person_key.load(std::memory_order_relaxed);
-        const bool focused = (free_enabled || first_person_enabled) && GameWindowHasFocus();
+        // The MMD keys must reach the director even when both cameras are off, so
+        // the focus test admits the MMD feature too. Every other binding still ANDs
+        // its own enable flag below, so widening this cannot fire them early.
+        const bool mmd_enabled = g_mmd_enabled.load(std::memory_order_acquire);
+        const bool focused = (free_enabled || first_person_enabled || mmd_enabled) &&
+            GameWindowHasFocus();
 
         const bool toggle_down = focused && free_enabled && KeyDown(toggle_key);
         const bool pause_down = focused && free_enabled && KeyDown(pause_key);
@@ -943,6 +979,28 @@ void InputThreadMain() {
             }
             binding.was_down = down;
         }
+        // MMD: the press edge is translated straight into the director's request
+        // word, which the game thread drains in Mmd::Pump. Nothing here calls Unity.
+        std::size_t mmd_index = 0;
+        for (HotkeyRequest& binding : mmd_keys) {
+            const bool down = focused && mmd_enabled &&
+                KeyDown(binding.key->load(std::memory_order_relaxed));
+            if (down && !binding.was_down) {
+                switch (mmd_index) {
+                case 0: g_mmd_requests.fetch_or(MmdRequestPlayPause, std::memory_order_acq_rel); break;
+                case 1: g_mmd_requests.fetch_or(MmdRequestStop, std::memory_order_acq_rel); break;
+                case 2: g_mmd_requests.fetch_or(MmdRequestCameraMode, std::memory_order_acq_rel); break;
+                case 3: g_mmd_seek_steps.fetch_sub(1, std::memory_order_acq_rel); break;
+                case 4: g_mmd_seek_steps.fetch_add(1, std::memory_order_acq_rel); break;
+                default: g_mmd_overlay_toggle_request.store(true, std::memory_order_release); break;
+                }
+            }
+            binding.was_down = down;
+            ++mmd_index;
+        }
+        // Windows only: keeps the companion overlay window in step with the game.
+        // The body is empty under Android, which has no companion process.
+        PumpMmdOverlayHost(mmd_enabled);
 
         // A pause request is only ever drained by a pump running on the game's
         // main thread. If every pump stopped - which is exactly what freezing the
@@ -2049,6 +2107,89 @@ void ApplyFirstPersonLook() {
     }
 }
 
+#if defined(__ANDROID__)
+// ---------------------------------------------------------------------------
+// MMD, as the settings app sees it (android_camera.h).
+//
+// Same arrangement as the configuration reload below: the app only queues, this
+// drains one command per tick, and the director executes it in Mmd::Pump on the
+// observed frame thread. Nothing here reaches into Unity.
+// ---------------------------------------------------------------------------
+constexpr std::size_t kMmdCommandQueueLimit = 64;
+
+// "<verb> [argument]". Textual, so the Java side never has to mirror the native
+// enum values; this function is the one place the vocabulary is defined.
+bool ParseMmdPanelCommand(std::string_view text,
+    BetterEndfield::MmdOverlayProtocol::Command& command) {
+    using Type = BetterEndfield::MmdOverlayProtocol::CommandType;
+    while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.remove_suffix(1);
+    const std::size_t space = text.find(' ');
+    const std::string_view verb = text.substr(0, space);
+    std::string_view rest =
+        space == std::string_view::npos ? std::string_view() : text.substr(space + 1);
+    while (!rest.empty() && rest.front() == ' ') rest.remove_prefix(1);
+    if (verb.empty()) return false;
+    command = BetterEndfield::MmdOverlayProtocol::Command{};
+    if (verb == "play_pause") { command.type = static_cast<uint32_t>(Type::PlayPause); return true; }
+    if (verb == "stop") { command.type = static_cast<uint32_t>(Type::Stop); return true; }
+    if (verb == "loop") { command.type = static_cast<uint32_t>(Type::ToggleLoop); return true; }
+    if (verb == "seek" || verb == "seek_absolute") {
+        double seconds = 0.0;
+        try {
+            seconds = std::stod(std::string(rest));
+        } catch (...) {
+            return false;
+        }
+        if (!std::isfinite(seconds)) return false;
+        command.type = static_cast<uint32_t>(
+            verb == "seek" ? Type::SeekRelative : Type::SeekAbsolute);
+        command.value = seconds;
+        return true;
+    }
+    if (verb == "camera") {
+        // Anything that is not an explicit index means "next mode".
+        command.type = static_cast<uint32_t>(Type::CameraMode);
+        command.argument =
+            rest.size() == 1 && rest[0] >= '0' && rest[0] <= '2' ? rest[0] - '0' : -1;
+        return true;
+    }
+    if (verb == "work") {
+        // No argument clears the selection.
+        if (rest.size() >= sizeof(command.text)) return false;
+        command.type = static_cast<uint32_t>(Type::SelectWork);
+        std::memcpy(command.text, rest.data(), rest.size());
+        command.text[rest.size()] = '\0';
+        return true;
+    }
+    return false;
+}
+
+// Bounded, so a panel that keeps posting cannot grow the queue without limit
+// while the game thread is stalled.
+bool QueueMmdCommand(const BetterEndfield::MmdOverlayProtocol::Command& command) {
+    std::lock_guard<std::mutex> lock(Mmd::android_mutex);
+    if (Mmd::android_commands.size() >= kMmdCommandQueueLimit) return false;
+    Mmd::android_commands.push_back(command);
+    return true;
+}
+
+// One command per tick, exactly like the configuration reload above.
+void DrainMmdPanelCommand() {
+    std::string value;
+    if (!betterendfield::AcquirePanelCommand("mmd", value)) {
+        return;
+    }
+    BetterEndfield::MmdOverlayProtocol::Command command{};
+    if (!ParseMmdPanelCommand(value, command)) {
+        betterendfield::AcknowledgePanelCommand("rejected");
+        Log("MMD panel command rejected: " + value);
+        return;
+    }
+    betterendfield::AcknowledgePanelCommand(QueueMmdCommand(command) ? "applied" : "rejected");
+}
+
+#endif
+
 // The camera configuration used to be read once, from the environment the host
 // set before loading this library, so every parameter change cost a game
 // restart. It is now also delivered through the runtime command pump: the
@@ -2088,10 +2229,11 @@ void DrainConfigurationReload() {
 
 void PumpFromEngineTick(const char* source) {
 #if !defined(_WIN32)
-    // Both drained ahead of the re-entrancy guard: they carry input and
+    // All three drained ahead of the re-entrancy guard: they carry input and
     // configuration that must not be skipped just because this tick was entered
     // from inside another one.
     DrainConfigurationReload();
+    DrainMmdPanelCommand();
     FoldPanelLookInput();
 #endif
     if (t_in_engine_tick) {
@@ -2399,6 +2541,7 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "motion_target_height") config.motion_target_height = ParseFloat(value, config.motion_target_height);
         else if (key == "keyframe_segment_seconds") config.keyframe_segment_seconds = ParseFloat(value, config.keyframe_segment_seconds);
         else if (key == "keyframe_loop") config.keyframe_loop = ParseBoolean(value, config.keyframe_loop);
+        else if (key == "keyframe_file") config.keyframe_file = Unquote(value);
         else if (key == "vmd_camera_file") config.vmd_camera_file = Unquote(value);
         else if (key == "vmd_camera_scale") config.vmd_camera_scale = ParseFloat(value, config.vmd_camera_scale);
         else if (key == "vmd_camera_fov_bias") config.vmd_camera_fov_bias = ParseFloat(value, config.vmd_camera_fov_bias);
@@ -2413,7 +2556,27 @@ CameraConfiguration ParseConfiguration(const char* raw_configuration) {
         else if (key == "keyframe_play_hotkey") config.keyframe_play_key = ParseVirtualKey(value, config.keyframe_play_key);
         else if (key == "keyframe_clear_hotkey") config.keyframe_clear_key = ParseVirtualKey(value, config.keyframe_clear_key);
         else if (key == "vmd_play_hotkey") config.vmd_play_key = ParseVirtualKey(value, config.vmd_play_key);
+        // MMD. The key names are the desktop build's, so one configuration file
+        // drives both platforms.
+        else if (key == "mmd_enabled") config.mmd_enabled = ParseBoolean(value, config.mmd_enabled);
+        else if (key == "mmd_overlay_enabled") config.mmd_overlay_enabled = ParseBoolean(value, config.mmd_overlay_enabled);
+        else if (key == "mmd_overlay_visible") config.mmd_overlay_visible = ParseBoolean(value, config.mmd_overlay_visible);
+        else if (key == "mmd_loop") config.mmd_loop = ParseBoolean(value, config.mmd_loop);
+        else if (key == "mmd_music_enabled") config.mmd_music_enabled = ParseBoolean(value, config.mmd_music_enabled);
+        else if (key == "mmd_seek_seconds") config.mmd_seek_seconds = ParseFloat(value, config.mmd_seek_seconds);
+        else if (key == "mmd_music_gain") config.mmd_music_gain = ParseFloat(value, config.mmd_music_gain);
+        else if (key == "mmd_audio_offset") config.mmd_audio_offset = ParseFloat(value, config.mmd_audio_offset);
+        else if (key == "mmd_work") config.mmd_work = Unquote(value);
+        else if (key == "mmd_music_file") config.mmd_music_file = Unquote(value);
+        else if (key == "mmd_face_file") config.mmd_face_file = Unquote(value);
+        else if (key == "mmd_play_hotkey") config.mmd_play_key = ParseVirtualKey(value, config.mmd_play_key);
+        else if (key == "mmd_stop_hotkey") config.mmd_stop_key = ParseVirtualKey(value, config.mmd_stop_key);
+        else if (key == "mmd_seek_back_hotkey") config.mmd_seek_back_key = ParseVirtualKey(value, config.mmd_seek_back_key);
+        else if (key == "mmd_seek_forward_hotkey") config.mmd_seek_forward_key = ParseVirtualKey(value, config.mmd_seek_forward_key);
+        else if (key == "mmd_camera_mode_hotkey") config.mmd_camera_mode_key = ParseVirtualKey(value, config.mmd_camera_mode_key);
+        else if (key == "mmd_overlay_hotkey") config.mmd_overlay_key = ParseVirtualKey(value, config.mmd_overlay_key);
     }
+    config.mmd_seek_seconds = std::clamp(config.mmd_seek_seconds, 0.5f, 60.0f);
     config.movement_speed = std::clamp(config.movement_speed, 0.5f, 100.0f);
     config.field_of_view = std::clamp(config.field_of_view, 20.0f, 120.0f);
     config.global_fov = std::isfinite(config.global_fov)
@@ -2800,9 +2963,45 @@ BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration) {
     g_vmd_camera_scale.store(config.vmd_camera_scale, std::memory_order_release);
     g_vmd_camera_fov_bias.store(config.vmd_camera_fov_bias, std::memory_order_release);
     g_vmd_camera_loop.store(config.vmd_camera_loop, std::memory_order_release);
+    // MMD: the director reads its clock settings, its keys and its sources off
+    // these, so a reload has to publish them the same way the camera does.
+    g_mmd_enabled.store(config.enabled && config.mmd_enabled, std::memory_order_release);
+    g_mmd_overlay_enabled.store(config.mmd_overlay_enabled, std::memory_order_release);
+    g_mmd_overlay_initial_visible.store(config.mmd_overlay_visible, std::memory_order_release);
+    g_mmd_loop_default.store(config.mmd_loop, std::memory_order_release);
+    g_mmd_music_enabled.store(config.mmd_music_enabled, std::memory_order_release);
+    g_mmd_seek_seconds.store(config.mmd_seek_seconds, std::memory_order_release);
+    g_mmd_music_gain.store(config.mmd_music_gain, std::memory_order_release);
+    g_mmd_audio_offset.store(config.mmd_audio_offset, std::memory_order_release);
+    g_mmd_play_key.store(config.mmd_play_key, std::memory_order_release);
+    g_mmd_stop_key.store(config.mmd_stop_key, std::memory_order_release);
+    g_mmd_seek_back_key.store(config.mmd_seek_back_key, std::memory_order_release);
+    g_mmd_seek_forward_key.store(config.mmd_seek_forward_key, std::memory_order_release);
+    g_mmd_camera_mode_key.store(config.mmd_camera_mode_key, std::memory_order_release);
+    g_mmd_overlay_key.store(config.mmd_overlay_key, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(g_vmd_path_mutex);
         g_vmd_camera_file = config.vmd_camera_file;
+        g_vmd_motion_file = config.vmd_motion_file;
+        g_mmd_music_file = config.mmd_music_file;
+        g_mmd_face_file = config.mmd_face_file;
+        g_keyframe_file = config.keyframe_file;
+#if defined(__ANDROID__)
+        // The settings app cannot know the game's data path, so an unset camera
+        // path falls back to the one the MMD library root implies.
+        if (g_keyframe_file.empty()) {
+            const char* root = std::getenv("BETTER_ENDFIELD_MMD_ROOT");
+            if (root && *root) {
+                g_keyframe_file = MmdLibrary::ToUtf8(
+                    MmdLibrary::FromUtf8(root).parent_path() / "camera-path.becam");
+            }
+        }
+#endif
+        if (g_mmd_work != config.mmd_work) {
+            g_mmd_work = config.mmd_work;
+            g_mmd_work_generation.fetch_add(1, std::memory_order_acq_rel);
+        }
+        g_asset_config_generation.fetch_add(1, std::memory_order_acq_rel);
     }
     g_roll_left_key.store(config.roll_left_key, std::memory_order_release);
     g_roll_right_key.store(config.roll_right_key, std::memory_order_release);
@@ -2902,6 +3101,46 @@ const BE_ModuleApiV1 kApi{
 
 } // namespace
 } // namespace BetterEndfield::CameraModule
+
+#if defined(__ANDROID__)
+// ---------------------------------------------------------------------------
+// MMD as the host sees it. android_camera.h declares these in the
+// `betterendfield` namespace, which is not the camera module's namespace, while
+// the module's MMD state lives in the anonymous namespace above. This pair is
+// the forwarding bridge between the two; the definitions have to sit in a named
+// namespace to be reachable from anywhere else.
+// ---------------------------------------------------------------------------
+namespace BetterEndfield::CameraModule {
+bool QueueMmdCommandForAndroid(unsigned type, int argument, double value,
+    const std::string& text) {
+    MmdOverlayProtocol::Command command{};
+    command.type = type;
+    command.argument = argument;
+    command.value = value;
+    const std::size_t length = std::min(text.size(), sizeof(command.text) - 1);
+    std::memcpy(command.text, text.data(), length);
+    command.text[length] = '\0';
+    return QueueMmdCommand(command);
+}
+
+std::string MmdStatusForAndroid() {
+    std::lock_guard<std::mutex> lock(Mmd::android_mutex);
+    return Mmd::android_status;
+}
+}  // namespace BetterEndfield::CameraModule
+
+namespace betterendfield {
+// The JNI layer may queue directly instead of going through the panel pump; both
+// land in the same queue and are executed by Mmd::Pump on the frame thread.
+bool AndroidMmdCommand(unsigned type, int argument, double value, const std::string& text) {
+    return BetterEndfield::CameraModule::QueueMmdCommandForAndroid(type, argument, value, text);
+}
+
+std::string AndroidMmdStatus() {
+    return BetterEndfield::CameraModule::MmdStatusForAndroid();
+}
+}  // namespace betterendfield
+#endif
 
 BE_EXPORT const BE_ModuleApiV1* BE_CALL BetterEndfield_GetModuleApiV1() {
     return &BetterEndfield::CameraModule::kApi;
