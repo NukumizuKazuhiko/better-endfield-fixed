@@ -15,6 +15,7 @@
 | [OmniMix 集成交接](OMNIMIX_INTEGRATION_HANDOFF.md) | 音乐后端协议与回退合同 |
 | [项目更新日志](../CHANGELOG.md) | 版本变化与发布状态 |
 | [Android 上游 3.4.4 移植记录](ANDROID_UPSTREAM_344_PORT_20261004.md) | 本分支 Android 功能范围与验收证据 |
+| [Android 上游同步与移植准备](ANDROID_UPSTREAM_SYNC_PREP_20261005.md) | 上游 3.5.0 差距清点、MMD/EIEM 移植合同与执行顺序 |
 
 ## 历史记录
 
