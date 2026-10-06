@@ -4,7 +4,7 @@
 
 | 角色   | 提交        | 说明                                                                            |
 | ---- | --------- | ----------------------------------------------------------------------------- |
-| 本仓   | `b0d7382` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / versionCode 30402 |
+| 本仓   | `db021cd` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / versionCode 30402 |
 | 上游   | `d514f2f` | `Dr-hydra/Better-Endfield`，**v3.5.2**（2026-10-06，14 个提交）                      |
 | 共同基线 | `9b1e895` | "Expand BEM v1.1/v1.2 runtime and tooling"                                    |
 
@@ -13,6 +13,8 @@
 > **2026-10-07 00:25 再记**：本仓锚点第二次前移 `1c65eab → cbbca19`（第 11 项的三次实现 + 一次回归修复，共 4 个提交）。**§零 的桶计数有一处变动**：冲突面 207 → **208**、上游新增 270 → **269**（`core/jni_binding.h`、`RuntimeBootstrap.java` 由「纯未同步」升为「双方都改」），本仓功能面 367 → **368**；「本仓有旧版 122 / 独有独改 138 / 主动删除 22」三桶**不变**。§零点五 榜仍是 36 件（`jni_binding.h` gap = 0 不入榜），但 **`native_bridge.cpp` 由 gap 194 收敛到 90、名次第 9 → 第 13**。§十一 已按最终形态重写。
 >
 > **2026-10-07 01:00 再记（第 8 项落地）**：本仓锚点第三次前移 `cbbca19 → b0d7382`（第 8 项「运行时状态串」1 个提交，另两条为文档提交）。**§零 桶计数全部重算**：纯未同步 391 → **389**（= 本仓有旧版 **122** + 上游新增 **269 → 267**）、冲突面 208 → **210**、本仓独有 160 → **162**（独有独改 138 → **140**，主动删除 **22** 不变），本仓功能面 368 → **372**（新增 4 件）。校验：`389 + 210 = 599` ✓、`210 + 162 = 372` ✓。**§零点五 榜仍是 36 件**（两个新件 gap = 0 不入榜），但 **`native_bridge.cpp` 由 gap 90 收敛到 40、名次第 13 → 第 23**，`camera/module.cpp` 169 → **154**、`GameOverlay.java` 184 → **161**。执行记录见 §10.9。
+>
+> **2026-10-07 02:00 再记（第 6 项落地）**：本仓锚点第四次前移 `b0d7382 → db021cd`（第 6 项「MMD 本地音轨」1 个代码提交）。**§零 桶计数全部重算**：纯未同步 389 → **388**（= 本仓有旧版 **122** + 上游新增 **267 → 266**）、冲突面 210 → **211**、本仓独有 162 → **168**（独有独改 140 → **146**，主动删除 **22** 不变），本仓功能面 372 → **379**（新增 7 件）。校验：`388 + 211 = 599` ✓、`211 + 168 = 379` ✓。三处涨落的来路：`MmdAudio.java` 由「纯未同步（上游新增）」升入**冲突面**（两侧同 blob `4f9cee72`，上游 +139 / 本仓 +139 ⇒ **gap = 0，不入榜**）；本仓独有 +6 件是宿主夹具（`testHost/mmd_audio_fixture.py` 1 件 + `testHost/mmd_audio/**` 5 件）。**§零点五 榜仍是 36 件，成员与排序集合未变**，只有 **`native_bridge.cpp` gap 40 → 25、真名次 23 → 25**（本仓侧 `+244/−2` → `+257/−2`）。执行记录见 §10.11。
 
 **口径**：`git diff 9b1e895 3521627`，`+` = 上游有而本仓无，`−` = 本仓有而上游无。`.behw` 不计入差异——它是构建期产物（工作树里 1668 个，全在 `android/app/build/` 下），由 `android/.gitignore:3:**/build/` 忽略，两侧版本库均无此物，来源是 `-PheadwearCatalogDir`。
 
@@ -127,9 +129,9 @@ comm -13 up.txt our.txt   # 本仓独有
 
 ---
 
-## 零点五、冲突面 210 件：按上游领先排序
+## 零点五、冲突面 211 件：按上游领先排序
 
-`gap = (上游 +/−) − (本仓 +/−)`，按**总改动行数**（`+` 与 `−` 之和）之差排序；`git diff --numstat $BASE..<ref>` 双测后 join。**gap ≥ 7 的 36 件全列于下；其余 174 件 gap ≤ 6（其中 126 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
+`gap = (上游 +/−) − (本仓 +/−)`，按**总改动行数**（`+` 与 `−` 之和）之差排序；`git diff --numstat $BASE..<ref>` 双测后 join。**gap ≥ 7 的 36 件全列于下；其余 175 件 gap ≤ 6（其中 127 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
 
 | #  | 文件                                                                | 本仓        | 上游             | gap      | 判定                                                    |
 | -- | ----------------------------------------------------------------- | --------- | -------------- | -------- | ----------------------------------------------------- |
@@ -141,11 +143,11 @@ comm -13 up.txt our.txt   # 本仓独有
 | 6  | `native/modules/camera/first_person_runtime.inc`                  | +433/−71  | +775/−77       | 348      | **第一人称专有 ⇒ 取本仓**                                      |
 | 7  | `ui/BetterEndfield.UI/MainWindow.xaml`                            | +66/−0    | +314/−33       | 281      | Windows WPF                                           |
 | 8  | `android/.../cpp/modules/custom_model/world_resource_adapter.inc` | +45/−22   | +268/−79       | 280      | Android 世界资源绑定                                        |
-| 9  | `android/.../java/.../GameOverlay.java`                           | +724/−379 | +785/−502      | 184      | 悬浮窗宿主                                                 |
-| 10 | `native/modules/camera/module.cpp`                                | +1390/−91 | +1433/−217     | 169      | 重度分叉 · 绝不整体替换                                         |
+| 9  | `android/.../java/.../GameOverlay.java`                           | +747/−379 | +785/−502      | 161      | 悬浮窗宿主                                                 |
+| 10 | `native/modules/camera/module.cpp`                                | +1405/−91 | +1433/−217     | 154      | 重度分叉 · 绝不整体替换                                         |
 | 11 | `android/.../java/.../BemInstaller.java`                          | +187/−6   | +263/−77       | 147      | BEM 安装器                                               |
 | 12 | `native/modules/custom_model/bem.cpp`                             | +444/−71  | +561/−88       | 134      | 中度分叉                                                  |
-| 13 | `android/.../cpp/native_bridge.cpp` | **+244/−2** | +242/−42 | **40**（第 8 项后） | JNI 桥 · pc-mouse 面**已按上游移植并真机通过（§11.2）**，第 8 项又在此回填 `runtimeStatus` 导出（§10.9）⇒ gap **194 → 90 → 40**，**两轮都不是欠账**；名次 **第 9 → 第 13 → 第 23** |
+| 13 | `android/.../cpp/native_bridge.cpp` | **+257/−2** | +242/−42 | **25**（第 6 项后） | JNI 桥 · pc-mouse 面**已按上游移植并真机通过（§11.2）**，第 8 项回填 `runtimeStatus` 导出（§10.9），第 6 项再复用同一 `jclass` 出参接 `AndroidLocalMusicApi()` 要解析的那份类（§10.11）⇒ gap **194 → 90 → 40 → 25**，**三轮都不是欠账**；名次 **第 9 → 第 13 → 第 23 → 第 25** |
 | 14 | `native/modules/custom_model/mod_registry.cpp`                    | +42/−4    | +119/−12       | 85       | 注册表                                                   |
 | 15 | `android/.../java/.../BemOptions.java`                            | +22/−1    | +100/−3        | 80       | 选项 · v3.5.2 又改                                        |
 | 16 | `README.en.md`                                                    | +32/−148  | +130/−122      | 72       | 文档                                                    |
@@ -172,12 +174,12 @@ comm -13 up.txt our.txt   # 本仓独有
 
 > 路径缩写：`android/.../` = `android/app/src/main/`；`android/.../java/.../` = `android/app/src/main/java/dev/betterendfield/android/`；`android/.../cpp/` = `android/app/src/main/cpp/`；`android/.../cpp/modules/…` 同理。
 
-**榜面变动（逐件复核，非估算）**：上一版 31 件 → 本版 **36 件**。**再记（2026-10-07）**：锚点前移 `1c65eab → cbbca19` 后 **`native_bridge.cpp` 由 gap 194 收敛到 90（第 9 → 第 13）**，其余 35 行数字全部未变（第 11 项触及的另外 3 个 Java/native 文件 gap 均为负，不进榜）。**2026-10-07 01:00 再记（第 8 项）**：榜仍是 **36 件**；`core/runtime_status.h` 与 `RuntimeSnapshot.java` 两侧行数相同 ⇒ **gap = 0，不入榜**；`native_bridge.cpp` gap 90 → **40、第 13 → 第 23 名**，`camera/module.cpp` 169 → **154**（仍第 10），`GameOverlay.java` 184 → **161**（仍第 9）。**掉出的仍是 `native/modules/ui/module.cpp`**（第 2 项与第 11 项两次并入上游，**本轮再次同步后仍不在榜**）；**新进榜 6 件**全部来自 v3.5.2：`native/modules/custom_model/{mod_registry.cpp, bem.cpp, bem.h, mod_registry.h}`（上游 BEM 1.4 重构）、`android/.../BemOptions.java`、`tools/CustomModel/{bem_v11.py, bem_tool.py, bem_export.py}`。三处值得注意：
+**榜面变动（逐件复核，非估算）**：上一版 31 件 → 本版 **36 件**。**再记（2026-10-07）**：锚点前移 `1c65eab → cbbca19` 后 **`native_bridge.cpp` 由 gap 194 收敛到 90（第 9 → 第 13）**，其余 35 行数字全部未变（第 11 项触及的另外 3 个 Java/native 文件 gap 均为负，不进榜）。**2026-10-07 01:00 再记（第 8 项）**：榜仍是 **36 件**；`core/runtime_status.h` 与 `RuntimeSnapshot.java` 两侧行数相同 ⇒ **gap = 0，不入榜**；`native_bridge.cpp` gap 90 → **40、第 13 → 第 23 名**，`camera/module.cpp` 169 → **154**（仍第 10），`GameOverlay.java` 184 → **161**（仍第 9）。**2026-10-07 02:00 再记（第 6 项）**：榜仍是 **36 件**、成员与排序集合未变；`MmdAudio.java` 升入冲突面但两侧同 blob ⇒ **gap = 0，不入榜**；`native_bridge.cpp` gap 40 → **25、第 23 → 第 25 名**。**掉出的仍是 `native/modules/ui/module.cpp`**（第 2 项与第 11 项两次并入上游，**本轮再次同步后仍不在榜**）；**新进榜 6 件**全部来自 v3.5.2：`native/modules/custom_model/{mod_registry.cpp, bem.cpp, bem.h, mod_registry.h}`（上游 BEM 1.4 重构）、`android/.../BemOptions.java`、`tools/CustomModel/{bem_v11.py, bem_tool.py, bem_export.py}`。三处值得注意：
 
-- `camera/module.cpp` **269 → 169**（本仓 +1290/−91 → +1390/−91，持续投入）；
+- `camera/module.cpp` **269 → 169 → 154**（本仓 +1290/−91 → +1405/−91，持续投入）；
 - `BemInstaller.java` **173 → 140**（本轮新增 `saveChanges()` 后向上游靠拢，见 §10.6）；
 - `core/runtime.cpp` **11**（自 §10.7 起未动；余下 11 是本仓独有的其他改动，不是未同步量）；
-- `native_bridge.cpp` **180 → 194 → 90 → 40**（先纳入 v3.5.2 的 pc-mouse JNI 入口，第 11 项又**按上游移植该面**并真机通过，本轮回填第 8 项的 `runtimeStatus` 导出 ⇒ 本仓侧由 `+192/−2` 涨到 `+244/−2`，gap 收敛到 **40**，**名次第 13 → 第 23**；剩余 40 为本仓独有部分，如 relay 侧的历史导出）；
+- `native_bridge.cpp` **180 → 194 → 90 → 40 → 25**（先纳入 v3.5.2 的 pc-mouse JNI 入口，第 11 项又**按上游移植该面**并真机通过，第 8 项回填 `runtimeStatus` 导出，第 6 项复用同一 `jclass` 出参接 `InitializeAndroidMusic` ⇒ 本仓侧由 `+192/−2` 涨到 `+257/−2`，gap 收敛到 **25**，**名次第 13 → 第 25**；剩余 25 为本仓独有部分，如 relay 侧的历史导出）；
 - `camera/module.cpp` **169 → 154**、`GameOverlay.java` **184 → 161**（第 8 项在这两个文件内的落点，见 §10.9）。
 
 **其中 6 件是「本仓整文件删除、上游同期又改写」**（本仓侧 `+0/−N`）：
@@ -449,22 +451,22 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | 3  | **跨进程设置通道** — **已完成**（`30503d3`）                  | `OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization` + Manifest 组件                                      | **269 行**新增 + 补齐 §10.4-4 的 3 处缺口（另 2 处由 §10.5 的 `command_pump` 路线免掉） | `exported=true` 组件已按安全审落地：只实现 `call()`，UID + 令牌双因子（§10.6）                                                                                |
 | 4  | **模型管理悬浮窗页** — **已完成**（`30503d3`）                 | 按功能重写为 Compose 页（`OverlayModelPage.kt`，含 3 个自绘控件）                                                                          | 约 560 行；`OverlayFeatures` 已加 `models` 第 8 字段门禁                       | 已落地并真机跑通；**滑条/选择器的实际交互须人工确认**（§10.6）                                                                                                     |
 | 5  | **全局 FOV 运行时下发** — **已完成**（`d3c7fa4`）             | 走本仓既有的 `command_pump`：原生 `DrainGlobalFovCommand()` + 设置 app 在"仅 `global_fov=` 行变化"时改发 `global_fov` 命令                      | **149 行**（原生 +100 / Java +49）                                        | 已落地并编译验证；**须真机**确认生效（§10.5）                                                                                                              |
-| 6  | **MMD 安装器统一** | `MmdAudio` + `MmdInstalledResources`（**真新增**）；`MmdInstaller` / `MmdImportArchive`（←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`，**同源分叉对账**）；2 个上游独有 Activity 属页面层不合并 | 139 + 85（真新增）/ 263 + 223（对账） | 中。新增 gradle 依赖 `commons-compress:1.28.0` + `xz:1.10`；本仓 MMD 作品库在 §八 D 列为「本仓领先」⇒ **先定架构**（§10.10.3） |
+| 6  | **MMD 安装器统一** — **已完成**（`db021cd`，2026-10-07） | `MmdAudio` + `MmdInstalledResources`（**真新增**）；`MmdInstaller` / `MmdImportArchive`（←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`，**同源分叉对账**）；2 个上游独有 Activity 属页面层不合并 | 139 + 85（真新增）/ 263 + 223（对账） | 已落地并编译验证（§10.11）。`MmdAudio` 是**真缺口**：本仓 `local_music_android.cpp` 与上游零差异、按名解析其四个方法，但那四个方法不存在、`InitializeAndroidMusic` 从未被调用 ⇒ 本仓 MMD 作品**没有配乐**；`MmdInstalledResources` 经核本仓 `MmdSlotFiles.prepareWorks` **已覆盖**（原子发布 + 剪未广告代际）⇒ 无需移。**未引入** `commons-compress` / `xz`，本仓后端保留，页面层不合并 ⇒ 上游侧仅 139 行（与上游同 blob `4f9cee72`）。**游戏内听声待真机验收** |
 | 7  | **模型热切换** | Java 侧 `BemHotSwitchUpdater` + `BemHotSwitchUpdate` **确实只有 82 行**；但消费方在 `native/modules/custom_model/`（`ReloadRegistryAtDelivery` + `g_hot_switch_runtime` + `model_job_runtime.inc`） | 82（Java）；原生 **16 文件 / ~2,700 行** | **与 `custom_model` 最大缺口合并为一项**（§10.10.1）。原判「native 侧依赖 `model_overlay_host.h`」仍属实但非主要障碍；照抄 JNI 会静默无效 —— 本仓 `ResourceConfigurationChanged` 缺 `[CustomModel]` 分支 |
 | 8  | **运行时状态串** — **已完成**（`b0d7382`，2026-10-07）                                        | `RuntimeSnapshot` + `core/runtime_status.h`                                                                                | 46 + 22                                                              | 已落地并编译验证：原生侧 13 处写入 + JNI `runtimeStatus`（与 pc-mouse 同法绑定）；Java 侧 `RuntimeSnapshot` 逐字照搬；消费点接在本仓悬浮窗日志头 —— **刻意不重演"有生产者、无消费者"**（§11.2.3 的教训），并有**设备外**宿主夹具（23 项断言，§10.9）。遗留：上游第二个消费点 `OverlaySettingsPage` 本仓是 Compose，未接；`camera.speed/fov` 尚未被本仓 UI 读取（上游用浮点解析器读，`number()` 只解析整数）                                                                                                                 |
 | 9 | ~~**JNI 注册收敛**~~ — **本轮顺带完成**（`460dd11`） | `core/jni_binding.h` | 45 | **已落地**：为接回 pc-mouse / `frame` 的 JNI 面而引入 `BindContextLoaderNatives`，与上游**逐字相同**（§11.2.2） |
 | 10 | **构建配置化** ~~不适用~~ | `workspace.gradle.kts` + `settings.gradle.kts` + `scripts/workspace_config.py` + `config/` 11 件 | 87 + 208 + configs | **判为「不适用（Android-only 本仓）」**（§10.10.2）：上游 schema 是 Windows 桌面多平台工作区（ResConv / EndfieldUnpacker / wwiser / dobby / iscc / `resource_update`）；本仓 `config/` 不存在、`app/build.gradle.kts` 不读 `beWorkspace`；SDK 位置归一已由 `android/local.properties` 承担 |
 | 11 | **PC 布局相对鼠标桥** — **已完成并真机通过**（`1c65eab` → `460dd11` → `6541856`，收尾 `cbbca19`） | `android_pc_mouse.h` + `android_frame.cpp` + 两个 `.inc` + `ui/module.cpp`（原生，逐字）+ `core/jni_binding.h`（逐字）+ `PcUiMouseBridge.java`（逐字）+ `native_bridge.cpp` 的 4 个 JNI 导出 + `XposedEntry` 帧泵 | 上游 1458 行；本仓净 **+1430 / −12，13 文件**（新增 6 件） | **已真机通过**：滑动连续转向、点击生效（§11.3）。走三版 —— 真根因是**帧泵缺链**（§11.2.3），非传输层 |
 
-> **进度（2026-10-07 01:00）**：**第 1~5、8、11 项全部落地**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3` / `b0d7382` / `1c65eab`+`460dd11`+`6541856`+`cbbca19`，另宿主同步 `af1d9cd`），其中第 8 项已编译验证 + 设备外夹具 23 项断言全过（§10.9）、第 11 项已真机通过（§11.3）。第 11 项来自**上游 v3.5.2**，不在本文档原清单内 —— 它是第 2 项（PC UI）的直系后续：强制桌面输入类型之后，游戏隐藏光标并改读 `Mouse X`/`Mouse Y`，而 Android 的绝对触摸路径永远不喂这两个轴，视角到屏幕边缘就停住。三版演进、真根因与证据见 §11。
+> **进度（2026-10-07 02:00）**：**第 1~6、8、11 项全部落地**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3` / `b0d7382` / `db021cd` / `1c65eab`+`460dd11`+`6541856`+`cbbca19`，另宿主同步 `af1d9cd`），其中第 8 项已编译验证 + 设备外夹具 23 项断言全过（§10.9）、第 6 项同样 23 项断言全过（§10.11）、第 11 项已真机通过（§11.3）。第 11 项来自**上游 v3.5.2**，不在本文档原清单内 —— 它是第 2 项（PC UI）的直系后续：强制桌面输入类型之后，游戏隐藏光标并改读 `Mouse X`/`Mouse Y`，而 Android 的绝对触摸路径永远不喂这两个轴，视角到屏幕边缘就停住。三版演进、真根因与证据见 §11。
 >
-> **剩余项：第 6、7、10 项**（第 9 项已随第 11 项顺带完成，第 8 项本轮完成）。**执行序按「依赖闭包从小到大」定**，但两轮实测下来，三项**性质互不相同、不可按文件数排序**（第二轮逐符号/逐文件实测见 §10.10）：
+> **剩余项：只有第 7 项**（第 9 项随第 11 项顺带完成；第 8 项上一轮完成；第 6 项本轮完成并按用户口径「只移两件真新增」落地，见 §10.11；第 10 项经实测**不适用**）。**执行序按「依赖闭包从小到大」定**，但两轮实测下来，三项**性质互不相同、不可按文件数排序**（第二轮逐符号/逐文件实测见 §10.10）——下表保留，供第 7 项与后续复查使用：
 >
 > | 序 | 项 | 第二轮实测 | 处置 |
 > |---|---|---|---|
-> | 1 | **第 6 项 MMD 安装器统一** | 与上游**同源分叉**（`installed_mmd_works` 索引键两边相同）；4 件里 **2 件真新增**（`MmdAudio` 139 / `MmdInstalledResources` 85），另 2 件是分叉对账（上游 `MmdInstaller` 263 + `MmdImportArchive` 223 ←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`）；新增依赖 `commons-compress` + `xz`；2 个 Activity 属页面层 ⇒ §七.5 **不合并**，按功能名重写 | **唯一剩下的 Android-only 产品项** ⇒ 下一步，但**先定架构**（取上游后端 / 保留本仓后端只补真新增件 / 全量对账），见 §10.10.3 |
-> | 2 | 第 7 项 模型热切换 | **不是独立项**：Java 侧 82 行属实，但消费方在 `custom_model` 内部（`ReloadRegistryAtDelivery` + `g_hot_switch_runtime` + `model_job_runtime.inc` 1129 行）。上游同批缺席 **16 个文件 / 约 2,700 行**；本仓目录 14 件 vs 上游 32 件；`hot_switch` 命中 **0** | 与 `custom_model` 缺口**合并为一项**，子系统级前向移植，见 §10.10.1 |
-> | 3 | 第 10 项 构建配置化 | 上游 `config/workspace.defaults.json` 的 schema 是 **Windows 桌面多平台工作区**（ResConv.exe / EndfieldUnpacker / wwiser / dobby / Inno Setup / `resource_update` 指向 1.5.3 Windows 游戏输入）；本仓 `config/` 不存在、`app/build.gradle.kts` 也不读 `beWorkspace` | **判为「不适用（Android-only 本仓）」**，唯一有价值子集（SDK 位置归一）已由 `android/local.properties` 承担，见 §10.10.2 |
+> | ✅ | **第 6 项 MMD 安装器统一** | 与上游**同源分叉**（`installed_mmd_works` 索引键两边相同）；4 件里 **2 件真新增**（`MmdAudio` 139 / `MmdInstalledResources` 85），另 2 件是分叉对账（上游 `MmdInstaller` 263 + `MmdImportArchive` 223 ←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`）；新增依赖 `commons-compress` + `xz`；2 个 Activity 属页面层 ⇒ §七.5 **不合并**，按功能名重写 | **已完成**（`db021cd`）：只 `MmdAudio` 是真缺口，`MmdInstalledResources` 本仓已覆盖 ⇒ **未引入新依赖**、本仓后端保留。见 §10.11 |
+> | 1 | 第 7 项 模型热切换 | **不是独立项**：Java 侧 82 行属实，但消费方在 `custom_model` 内部（`ReloadRegistryAtDelivery` + `g_hot_switch_runtime` + `model_job_runtime.inc` 1129 行）。上游同批缺席 **16 个文件 / 约 2,700 行**；本仓目录 14 件 vs 上游 32 件；`hot_switch` 命中 **0** | 与 `custom_model` 缺口**合并为一项**，子系统级前向移植，见 §10.10.1 |
+> | — | 第 10 项 构建配置化 | 上游 `config/workspace.defaults.json` 的 schema 是 **Windows 桌面多平台工作区**（ResConv.exe / EndfieldUnpacker / wwiser / dobby / Inno Setup / `resource_update` 指向 1.5.3 Windows 游戏输入）；本仓 `config/` 不存在、`app/build.gradle.kts` 也不读 `beWorkspace` | **判为「不适用（Android-only 本仓）」**，唯一有价值子集（SDK 位置归一）已由 `android/local.properties` 承担，见 §10.10.2 |
 >
 > - **第 7 项不是"低风险顺手活"**：它的原生落点 `CustomModelModule::QueueConfiguration` 依赖 `g_update_ready` / `g_update_mutex` / `g_pending_update` / `ApplyPendingConfiguration` / `UpdateSharedReplacement` / `SharedRegistryText` 整套「共享替换事务」，本仓**全无**。第二轮再往下量一层，连**消费方**都不在本仓：`module.cpp:3316 ReloadRegistryAtDelivery()` + `module.cpp:49 g_hot_switch_runtime` + `module.cpp:3258 g_pending_registry_text/g_registry_request_mutex` + **`model_job_runtime.inc`（1129 行，本仓整个文件不存在）**。原判"native 侧依赖 `model_overlay_host.h`，该头在 `_WIN32` 内"**仍是事实，但已不是主要障碍**。唯一好消息：`ModuleApi.h` 的 `configuration_changed` 本仓已有，缝不用动 —— **但本仓的 `ResourceConfigurationChanged` 没有 `[CustomModel]` 分支**（上游 `module.cpp:3887` 才有），照抄 JNI 只会静默无效。
 > - **第 10 项判为不适用**：它的依赖是 `scripts/workspace_config.py`（208 行）+ `config/` 11 件，而 `workspace.defaults.json` 声明的是**桌面**工具链与 Windows 资源更新流水线。本仓既无 ResConv / EndfieldUnpacker / wwiser / dobby / iscc，SDK 也不在仓库内（本机 `android/local.properties` = `sdk.dir=C:/Users/Vens_/AppData/Local/Android/Sdk` + `ndk.dir=D:/android-toolchain/android-ndk-r27c`，与上游"SDK 在 `toolchains/android/sdk`"正相反）。只落 `settings.gradle.kts` + `workspace.gradle.kts` 而不落 `config/` 会**立刻断构建**。
@@ -913,7 +915,7 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 
 ---
 
-### 10.10 剩余三项的第二轮实测：三项各自的性质与原判都不同（2026-10-07，未落地）
+### 10.10 剩余三项的第二轮实测：三项各自的性质与原判都不同（2026-10-07；第 6 项已于 §10.11 落地，本条保留实测口径）
 
 §10.9.1 的排序只量了"新增/需改文件数"，这一轮把三项**逐符号、逐文件**量到底，结论是**三项都不可比**：一项其实是最大缺口的别名，一项的上游 schema 在本仓根本不适用，一项是与上游同源分叉的对账。
 
@@ -973,9 +975,33 @@ Java 侧确实只有 82 行（`BemHotSwitchUpdater` 50 + `BemHotSwitchUpdate` 28
 | 序 | 项 | 第二轮实测 | 处置建议 |
 | --- | --- | --- | --- |
 | — | 第 8 项 | 已完成（`b0d7382`） | — |
-| **1** | **第 6 项 MMD 安装器统一** | 同源分叉对账；**2 件真新增**（`MmdAudio` / `MmdInstalledResources`）+ 2 个新 gradle 依赖；页面层不合并 | **唯一剩下的 Android-only 产品项** ⇒ 建议下一步，但先定架构（见 §10.10.3） |
+| ✅ | **第 6 项 MMD 安装器统一** | 同源分叉对账；**2 件真新增**（`MmdAudio` / `MmdInstalledResources`）+ 2 个新 gradle 依赖；页面层不合并 | **已完成**（`db021cd`）：只 `MmdAudio` 是真缺口、`MmdInstalledResources` 本仓已覆盖、两个 gradle 依赖**未引入**（见 §10.11） |
 | **2** | 第 7 项 ≡ `custom_model` 最大缺口 | 16 个文件 / ~2,700 行不出现在本仓；`hot_switch` 命中 0 | 与 `custom_model` 合并为一项，子系统级前向移植 |
 | **3** | 第 10 项 构建配置化 | 上游 schema 是 Windows 桌面多平台工作区（ResConv/EndfieldUnpacker/wwiser/dobby/iscc + resource_update） | **不适用**；本仓只需 `local.properties`（已有） |
+
+### 10.11 第 6 项已完成：MMD 本地音轨接线（`db021cd`，2026-10-07）
+
+用户口径：**只移两件真新增**（保留本仓 `MmdLibraryInstaller` / `MmdLibraryFiles` / `MmdImportPlan` / Compose `MmdPage.kt` 不动，**不引入** `commons-compress` / `xz`，不碰页面层）。落地时两件的结论**一真一假**：
+
+| 上游件 | 行 | 实测 | 处置 |
+| --- | --- | --- | --- |
+| `MmdAudio.java` | 139 | **真缺口** | 移植，与上游**同 blob** `4f9cee7230c0fcb83fd88868d3daa461b1b4c49a` |
+| `MmdInstalledResources.java` | 85 | **本仓已覆盖** | **不移**。`MmdSlotFiles.prepareWorks` 已是原子发布（`.stage-<gen>` → 失败 `deleteOwned(folder)` → `renameTo(folder)`）+ 按 `[a-f0-9-]{36}` 剪除未广告代际，逐项对得上 |
+
+**这是一条断链，不是一个重构。** `mmd_director_runtime.inc:113 ResolveMusic()` 调 `betterendfield::AndroidLocalMusicApi()`；`local_music_android.cpp:77` 只在 `java_vm` 非空时返回 `&api`，而负责设置它的 `InitializeAndroidMusic` 在本仓**全仓无调用方** ⇒ `ResolveMusic()` 恒空 ⇒ `g.music`（第 369 行）与 `FeatureMusicModule | FeatureMusic`（第 629 行）双双关着：**本仓 MMD 作品从来没有配乐**。而解析侧 `local_music_android.cpp` 与上游**零差异**（`git diff --numstat` 为空）——缺的只是它要解析的那个类。
+
+**四个接线点**（4 个已存在文件合计 `+56/−6`，另有 7 个新文件 / 716 行）：
+
+1. `NativeCommandBridge` 末尾加 4 个**非 native** 静态方法（`audioOpen` / `audioControl` / `audioStatus` / `audioError`；纯 CRLF，198 → 203 行）——`local_music_android.cpp` 已按名解析它们。
+2. `native_bridge.cpp` 在 pc-mouse 绑定**之前**声明 `jclass bridge_class = nullptr;`，把它作为 `BindContextLoaderNatives(..., &bridge_class)` 的出参。`jni_binding.h` 成功时 `NewGlobalRef`，且 `PopLocalFrame` 不影响全局引用。
+3. 其后接 `InitializeAndroidMusic(vm, environment, bridge_class)`：失败只 `LogError("mmd.music", "Java media API unavailable; body and camera remain usable")` 降级成「丢音乐」，**不静默**，也不影响 file relay / 帧泵 / PC 鼠标面。
+4. `proguard-rules.pro` 加 `-keepclassmembers`（4 个方法）、`build.gradle.kts` 的 `jniCallbacks` 加第二个 owner ⇒ `verifyReleaseEntryPoints` 会断言它们没被 R8 改名、且方法名留在 dex。
+
+**证据（全部离线）**：宿主夹具 `android/app/src/testHost/mmd_audio_fixture.py` → **23/23 passed**；`:app:assembleDebug`（带 `-PheadwearCatalogDir`）BUILD SUCCESSFUL，44 任务，APK **79,009,665 B** / SHA-256 `c3766a9b…c873`；`libbetterendfield_android.so` 内 `InitializeAndroidMusic(JavaVM*, JNIEnv*, jclass)` 与 `AndroidLocalMusicApi()` 均为**已定义**符号，6 条接线字面量（`mmd.music` / `Java media API bound` / 不可用串 / 4 个方法名）全部命中；dex 内 `MmdAudio` 与 4 个方法名命中。
+
+**未验收**：听声需要装机 + LSPosed + 游戏内跑一个 MMD 作品；`verifyReleaseEntryPoints` 只能在 release 产物上跑，而本机无 release 密钥库 ⇒ 该门禁由 CI 覆盖。
+
+> 落地过程中配置阶段曾**整体**失败（`NoSuchMethodError: void Settings_gradle.<init>(KotlinScriptHost, PluginDependenciesSpec, Settings)`），根因是 `caches/<ver>/kotlin-dsl/scripts/<内容哈希>` 下被通用 Kotlin 脚本模板编译出的 `Settings_gradle`（丢父类、构造只收 `Settings`，正常应 `extends CompiledKotlinSettingsPluginManagementBlock`）。因为它**按脚本内容哈希命中**，源码怎么改都命中同一份坏类 ⇒ 表现为「HEAD 也编不过」。**与本改动无关**；恢复动作是移走该哈希目录后**再跑一次**。完整判据与三个方法论坑见 `.workbuddy/memory/2026-10-07.md`。
 
 ---
 
