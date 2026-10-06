@@ -47,8 +47,6 @@ final class NativeCommandBridge {
     private static volatile File inputFile;
     private static volatile File statusFile;
     private static volatile File nativeLogFile;
-    /** Sibling of the status file the relay rewrites for the PC layout. */
-    private static volatile File captureFile;
 
     private NativeCommandBridge() {}
 
@@ -57,7 +55,6 @@ final class NativeCommandBridge {
         inputFile = input;
         statusFile = status;
         nativeLogFile = nativeLog;
-        captureFile = new File(status.getPath() + ".pcmouse");
         // Start every session with an empty stream so the native tail cannot
         // replay events from a previous run of the game.
         try (FileOutputStream fresh = new FileOutputStream(input)) {
@@ -69,11 +66,6 @@ final class NativeCommandBridge {
             fresh.getChannel().force(false);
         } catch (Throwable ignored) {
             // The journal simply stays empty until the runtime creates it.
-        }
-        try (FileOutputStream fresh = new FileOutputStream(captureFile)) {
-            fresh.getChannel().force(false);
-        } catch (Throwable ignored) {
-            // An absent capture file reads as "not requested".
         }
     }
 
@@ -116,42 +108,21 @@ final class NativeCommandBridge {
     }
 
     /**
-     * Adds a PC-layout relative mouse delta. Deliberately not folded into
-     * {@link #look}: the free camera's look delta and the game's own
-     * Mouse X / Mouse Y axes are different consumers, and the layout only
-     * routes motion to the second one.
+     * The PC layout's three transport calls, and the only members of this class
+     * served over JNI rather than the file relay. Upstream serves them this way
+     * and the binding now works: {@code JNI_OnLoad} registers them with
+     * {@code BindContextLoaderNatives}, which resolves this class from the
+     * calling thread's context classloader instead of the classloader the
+     * library was opened under. That is what the rest of this class cannot use
+     * -- the runtime has to live in the game's namespace and the relay exists
+     * precisely because name-based lookup fails across that boundary.
+     *
+     * <p>They are declared here, after the relay members, so the one place that
+     * is not a relay call is visible at a glance.
      */
-    static boolean pcMouseMotion(float dx, float dy) {
-        if (dx == 0.0f && dy == 0.0f) return false;
-        // Float.toString round-trips exactly through the relay's strtof,
-        // so the delta the panel captured is the delta the game receives.
-        return append("p " + Float.toString(dx) + " " + Float.toString(dy) + "\n");
-    }
-
-    /**
-     * Reports whether the platform granted the pointer capture the native
-     * state machine asked for. The panel must not forward relative
-     * coordinates the game did not request.
-     */
-    static boolean pcMouseCaptured(boolean captured) {
-        return append(captured ? "P 1\n" : "P 0\n");
-    }
-
-    /**
-     * The PC layout's capture request, republished by the native relay.
-     * Absent or unreadable reads as "not requested": the panel then leaves
-     * the game's own pointer handling alone.
-     */
-    static boolean pcMouseCaptureRequested() {
-        File file = captureFile;
-        if (file == null) return false;
-        try (FileInputStream stream = new FileInputStream(file)) {
-            String text = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            return text.contains("pc_capture=1");
-        } catch (IOException notYet) {
-            return false;
-        }
-    }
+    static native boolean pcMouseCaptureRequested();
+    static native void pcMouseCaptured(boolean captured);
+    static native void pcMouseMotion(float dx, float dy);
 
     /**
      * The runtime command status the native relay publishes. Empty until the

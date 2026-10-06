@@ -189,7 +189,22 @@ final class RuntimeBootstrap {
                     new File(context.getFilesDir(), "betterendfield/status.txt").getAbsolutePath(), true);
             Os.setenv("BETTER_ENDFIELD_NATIVE_LOG",
                     new File(context.getFilesDir(), "betterendfield/native.log").getAbsolutePath(), true);
-            loadIntoTargetNamespace(library.getAbsolutePath(), context.getClassLoader(), application.getClass());
+            // The library has to be opened under the game's classloader -- its
+            // whole purpose is to register against the game's Unity player, and
+            // Android scopes both .so openings and JNI lookup per classloader.
+            // The PC mouse natives, though, live on a class from the module
+            // classloader, so JNI_OnLoad registers them through the *context*
+            // classloader of the thread that calls in. Point it at the module's
+            // own for the duration of the load and put it back afterwards.
+            Thread current = Thread.currentThread();
+            ClassLoader previous = current.getContextClassLoader();
+            try {
+                current.setContextClassLoader(NativeCommandBridge.class.getClassLoader());
+                loadIntoTargetNamespace(library.getAbsolutePath(), context.getClassLoader(),
+                        application.getClass());
+            } finally {
+                current.setContextClassLoader(previous);
+            }
             loaded = true;
             log.accept("native runtime loaded; " + configs.summary());
             log.accept("panel input channel: file relay "

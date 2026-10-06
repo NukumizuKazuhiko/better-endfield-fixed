@@ -12,6 +12,8 @@
 #include "../../../../../native/shared/third_party_modules/third_party_host.h"
 
 #include "android_virtual_keys.h"
+#include "android_pc_mouse.h"
+#include "core/jni_binding.h"
 
 #include <jni.h>
 #include <dlfcn.h>
@@ -36,6 +38,17 @@ namespace betterendfield {
 // Defined in input_relay.cpp; serves the panel's key presses through a file.
 void StartInputRelay();
 }  // namespace betterendfield
+
+// Served over JNI rather than the relay. Name-based lookup cannot reach the
+// bridge class from the copy that lives in the game's namespace, so JNI_OnLoad
+// binds these against the class resolved from the calling thread's context
+// classloader -- see core/jni_binding.h.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptureRequested(JNIEnv*, jclass);
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured(JNIEnv*, jclass, jboolean);
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion(JNIEnv*, jclass, jfloat, jfloat);
 
 namespace betterendfield {
 namespace {
@@ -193,7 +206,7 @@ bool AnyModuleRequested() {
 }  // namespace
 }  // namespace betterendfield
 
-extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM*, void*) {
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     // The Java side may load a second copy of this library under the module
     // classloader when JNI resolution against the game-classloader copy
     // fails. That copy only serves JNI symbols; the module runtime already
@@ -215,6 +228,40 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM*, void*) {
         // so setting it here is what actually stops a second copy from
         // starting a second runtime (and double-installing every hook).
         setenv("BETTER_ENDFIELD_RUNTIME_STARTED", "1", 1);
+        // The PC mouse bridge is the one panel-facing path served over JNI, the
+        // way upstream serves it. The bridge class is not visible from the
+        // namespace this library loads into, so bind it explicitly against the
+        // class the calling thread's *context* classloader resolves --
+        // RuntimeBootstrap points that loader at the module's own for this call.
+        JNIEnv* environment = nullptr;
+        if (vm == nullptr
+                || vm->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6) != JNI_OK
+                || environment == nullptr) {
+            betterendfield::LogError("runtime", "PC mouse JNI natives not bound: no environment");
+        } else {
+            static const JNINativeMethod kPcMouseMethods[]{
+                {"pcMouseCaptureRequested", "()Z", reinterpret_cast<void*>(
+                    &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptureRequested)},
+                {"pcMouseCaptured", "(Z)V", reinterpret_cast<void*>(
+                    &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured)},
+                {"pcMouseMotion", "(FF)V", reinterpret_cast<void*>(
+                    &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion)},
+            };
+            if (!betterendfield::BindContextLoaderNatives(environment,
+                    "dev.betterendfield.android.NativeCommandBridge", kPcMouseMethods,
+                    static_cast<jint>(sizeof(kPcMouseMethods) / sizeof(kPcMouseMethods[0])))) {
+                // The rest of the panel channel is the file relay and keeps
+                // working, so a refused binding costs the PC layout its
+                // relative-mouse path instead of the whole runtime. Clear the
+                // exception jni_binding.h leaves behind: nativeLoad would
+                // otherwise report the module as unloaded.
+                if (environment->ExceptionCheck()) environment->ExceptionClear();
+                betterendfield::LogError("runtime",
+                    "PC mouse JNI natives not bound; PC layout keeps its touch path");
+            } else {
+                betterendfield::LogInfo("runtime", "PC mouse JNI natives bound");
+            }
+        }
         // The panel presses keys through a file relay (see input_relay.cpp):
         // JNI resolution is classloader-scoped and the panel's classes live in
         // the LSPosed module classloader, one classloader away from this copy.
@@ -267,4 +314,25 @@ Java_dev_betterendfield_android_NativeCommandBridge_key(
 extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_releaseKeys(JNIEnv*, jclass) {
     betterendfield::ReleaseAllVirtualKeys();
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptureRequested(JNIEnv*, jclass) {
+    // Announced once. On a device with no mouse attached this is the only call
+    // the bridge ever makes, so the line doubles as proof that the binding is
+    // live and not merely present as an exported symbol.
+    static std::atomic_bool announced{false};
+    if (!announced.exchange(true)) {
+        betterendfield::LogInfo("runtime", "PC mouse bridge: JNI call path live");
+    }
+    return betterendfield::AndroidPcMouseCaptureRequested() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured(JNIEnv*, jclass, jboolean captured) {
+    betterendfield::SetAndroidPcMouseCaptured(captured == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion(JNIEnv*, jclass, jfloat dx, jfloat dy) {
+    betterendfield::AddAndroidPcMouseMotion(dx, dy);
 }
