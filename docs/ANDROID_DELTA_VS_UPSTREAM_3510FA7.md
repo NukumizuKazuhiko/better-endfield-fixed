@@ -20,7 +20,7 @@
 
 **一句话结论**：页面层零重叠（上游 61 个类 / 本仓 65 个，29 个上游独有、33 个本仓独有、32 个同名）；可直移的是**引擎类**（MMD 安装器、跨进程设置通道、模型覆盖层工具），必须重写的是**所有页面**。原生侧只有三块需要动：`ui/module.cpp`（PC UI）、`custom_model`（模型覆盖层）、`shared/android_compat`（**只增不覆**）。
 
-**进度（2026-10-07 01:00）**：§六 清单一至五项 **+ 第 8 项（运行时状态串，见 §10.9）已落地并编译验证**，**第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）已落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行），其余为第六至十项的顺手活。
+**进度（2026-10-07 01:00）**：§六 清单一至五项 **+ 第 8 项（运行时状态串，见 §10.9）已落地并编译验证**，**第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）已落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行），其余为第 6、7、10 项（第 8 项本轮完成、第 9 项随第 11 项完成，依赖闭包排序见 §10.9.1）。
 
 ---
 
@@ -145,7 +145,7 @@ comm -13 up.txt our.txt   # 本仓独有
 | 10 | `native/modules/camera/module.cpp`                                | +1390/−91 | +1433/−217     | 169      | 重度分叉 · 绝不整体替换                                         |
 | 11 | `android/.../java/.../BemInstaller.java`                          | +187/−6   | +263/−77       | 147      | BEM 安装器                                               |
 | 12 | `native/modules/custom_model/bem.cpp`                             | +444/−71  | +561/−88       | 134      | 中度分叉                                                  |
-| 13 | `android/.../cpp/native_bridge.cpp` | **+192/−2** | +242/−42 | **90** | JNI 桥 · pc-mouse 面**已按上游移植并真机通过（§11.2）** ⇒ gap **194 → 90**，**不再是欠账**；原第 9 名 |
+| 13 | `android/.../cpp/native_bridge.cpp` | **+244/−2** | +242/−42 | **40**（第 8 项后） | JNI 桥 · pc-mouse 面**已按上游移植并真机通过（§11.2）**，第 8 项又在此回填 `runtimeStatus` 导出（§10.9）⇒ gap **194 → 90 → 40**，**两轮都不是欠账**；名次 **第 9 → 第 13 → 第 23** |
 | 14 | `native/modules/custom_model/mod_registry.cpp`                    | +42/−4    | +119/−12       | 85       | 注册表                                                   |
 | 15 | `android/.../java/.../BemOptions.java`                            | +22/−1    | +100/−3        | 80       | 选项 · v3.5.2 又改                                        |
 | 16 | `README.en.md`                                                    | +32/−148  | +130/−122      | 72       | 文档                                                    |
