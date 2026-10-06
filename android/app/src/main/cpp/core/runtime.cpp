@@ -152,6 +152,14 @@ bool Il2CppRuntime::Connect() {
         library, "il2cpp_field_get_offset");
     const auto field_get_value_object = ResolveExport<decltype(field_get_value_object_)>(
         library, "il2cpp_field_get_value_object");
+    const auto field_get_flags = ResolveExport<decltype(field_get_flags_)>(
+        library, "il2cpp_field_get_flags");
+    const auto field_get_parent = ResolveExport<decltype(field_get_parent_)>(
+        library, "il2cpp_field_get_parent");
+    const auto field_get_name = ResolveExport<decltype(field_get_name_)>(
+        library, "il2cpp_field_get_name");
+    const auto class_is_enum = ResolveExport<decltype(class_is_enum_)>(
+        library, "il2cpp_class_is_enum");
     const auto string_chars = ResolveExport<decltype(string_chars_)>(
         library, "il2cpp_string_chars");
     const auto string_length = ResolveExport<decltype(string_length_)>(
@@ -183,7 +191,7 @@ bool Il2CppRuntime::Connect() {
         method_get_return_type == nullptr || type_get_name == nullptr ||
         class_get_type == nullptr || type_get_object == nullptr ||
         class_get_field_from_name == nullptr || field_get_offset == nullptr ||
-        field_get_value_object == nullptr ||
+        field_get_value_object == nullptr || field_get_flags == nullptr ||
         string_chars == nullptr || string_length == nullptr || string_new == nullptr ||
         object_new == nullptr || object_unbox == nullptr ||
         gchandle_new == nullptr || gchandle_free == nullptr ||
@@ -217,6 +225,10 @@ bool Il2CppRuntime::Connect() {
     class_get_field_from_name_ = class_get_field_from_name;
     field_get_offset_ = field_get_offset;
     field_get_value_object_ = field_get_value_object;
+    field_get_flags_ = field_get_flags;
+    field_get_parent_ = field_get_parent;
+    field_get_name_ = field_get_name;
+    class_is_enum_ = class_is_enum;
     string_chars_ = string_chars;
     string_length_ = string_length;
     string_new_ = string_new;
@@ -567,14 +579,36 @@ ResolvedField Il2CppRuntime::ResolveField(
 
 void* Il2CppRuntime::ReadFieldObject(
     const ResolvedField& field, void* instance) const {
-    return field.info == nullptr || instance == nullptr ||
-        field_get_value_object_ == nullptr
-        ? nullptr : field_get_value_object_(field.info, instance);
+    return ReadFieldObject(field.info, instance);
 }
 
 void* Il2CppRuntime::ReadFieldObject(const FieldInfo* field, void* instance) const {
-    return field == nullptr || instance == nullptr || field_get_value_object_ == nullptr
-        ? nullptr : field_get_value_object_(field, instance);
+    if (!field || !field_get_value_object_ || !field_get_flags_) return nullptr;
+    constexpr int kStatic = 0x10, kLiteral = 0x40;
+    const int flags = field_get_flags_(field);
+    // A static member lives outside any object: enum literals and the backing
+    // fields behind static properties are read with a null instance, and the
+    // object is ignored. Only an instance member has to have one.
+    if (!(flags & kStatic) && !instance) return nullptr;
+    if (void* boxed = field_get_value_object_(field, instance)) return boxed;
+    // Some players cannot box enum literals through FieldInfo. A named enum
+    // reflection lookup is a fallback, never a hard-coded numeric value.
+    if (!(flags & kStatic) || !(flags & kLiteral) || !field_get_parent_ ||
+            !field_get_name_ || !class_is_enum_) return nullptr;
+    auto* owner = field_get_parent_(field);
+    const char* name = field_get_name_(field);
+    if (!owner || !name || !class_is_enum_(owner)) return nullptr;
+    auto parse = ResolveMethodExact("mscorlib.dll", "System", "Enum", "Parse",
+        "System.Type|System.String", "System.Object", 2);
+    if (!parse.info) return nullptr;
+    const auto* type = class_get_type_(owner);
+    void* type_object = type ? type_get_object_(type) : nullptr;
+    void* text = NewString(name);
+    if (!type_object || !text) return nullptr;
+    void* args[]{type_object, text};
+    void* exception = nullptr;
+    void* result = Invoke(parse.info, nullptr, args, &exception);
+    return exception ? nullptr : result;
 }
 
 Il2CppThreadScope::Il2CppThreadScope(const Il2CppRuntime& runtime)

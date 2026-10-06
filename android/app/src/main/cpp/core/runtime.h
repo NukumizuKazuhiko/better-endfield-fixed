@@ -116,6 +116,14 @@ private:
     const FieldInfo* (*class_get_field_from_name_)(Il2CppClass*, const char*) = nullptr;
     size_t (*field_get_offset_)(const FieldInfo*) = nullptr;
     void* (*field_get_value_object_)(const FieldInfo*, void*) = nullptr;
+    // Field metadata that decides how a member has to be read: a static field
+    // needs no object, and an enum literal cannot be boxed through the direct
+    // call on every player, so it needs the named lookup in ReadFieldObject.
+    // Without the flags there is no way to tell those cases apart.
+    int (*field_get_flags_)(const FieldInfo*) = nullptr;
+    Il2CppClass* (*field_get_parent_)(const FieldInfo*) = nullptr;
+    const char* (*field_get_name_)(const FieldInfo*) = nullptr;
+    bool (*class_is_enum_)(const Il2CppClass*) = nullptr;
     const char16_t* (*string_chars_)(void*) = nullptr;
     int32_t (*string_length_)(void*) = nullptr;
     void* (*string_new_)(const char*) = nullptr;
