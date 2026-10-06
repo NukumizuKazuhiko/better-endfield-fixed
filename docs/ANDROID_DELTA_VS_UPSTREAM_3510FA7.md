@@ -4,13 +4,15 @@
 
 | 角色   | 提交        | 说明                                                                            |
 | ---- | --------- | ----------------------------------------------------------------------------- |
-| 本仓   | `cbbca19` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / versionCode 30402 |
+| 本仓   | `b0d7382` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / versionCode 30402 |
 | 上游   | `d514f2f` | `Dr-hydra/Better-Endfield`，**v3.5.2**（2026-10-06，14 个提交）                      |
 | 共同基线 | `9b1e895` | "Expand BEM v1.1/v1.2 runtime and tooling"                                    |
 
 > **复核记录**：§零 / §零点五 / §0.3 / §一 的数字于 2026-10-06 23:25 按新锚点（本仓 `8b8a0b5 → 1c65eab`、上游 `3521627 → d514f2f`）**全部重算**。上一版数字为「上游领先 40 / 本仓领先 75 / 功能面 545 与 361 / 冲突面 201」，凡与其不同处一律以本版为准；差异来源见 §10.8 与 §11。**上游这 14 个提交（v3.5.2）含本仓 Android 编译面内的实质内容，分类见 §11。**
 >
 > **2026-10-07 00:25 再记**：本仓锚点第二次前移 `1c65eab → cbbca19`（第 11 项的三次实现 + 一次回归修复，共 4 个提交）。**§零 的桶计数有一处变动**：冲突面 207 → **208**、上游新增 270 → **269**（`core/jni_binding.h`、`RuntimeBootstrap.java` 由「纯未同步」升为「双方都改」），本仓功能面 367 → **368**；「本仓有旧版 122 / 独有独改 138 / 主动删除 22」三桶**不变**。§零点五 榜仍是 36 件（`jni_binding.h` gap = 0 不入榜），但 **`native_bridge.cpp` 由 gap 194 收敛到 90、名次第 9 → 第 13**。§十一 已按最终形态重写。
+>
+> **2026-10-07 01:00 再记（第 8 项落地）**：本仓锚点第三次前移 `cbbca19 → b0d7382`（第 8 项「运行时状态串」1 个提交，另两条为文档提交）。**§零 桶计数全部重算**：纯未同步 391 → **389**（= 本仓有旧版 **122** + 上游新增 **269 → 267**）、冲突面 208 → **210**、本仓独有 160 → **162**（独有独改 138 → **140**，主动删除 **22** 不变），本仓功能面 368 → **372**（新增 4 件）。校验：`389 + 210 = 599` ✓、`210 + 162 = 372` ✓。**§零点五 榜仍是 36 件**（两个新件 gap = 0 不入榜），但 **`native_bridge.cpp` 由 gap 90 收敛到 40、名次第 13 → 第 23**，`camera/module.cpp` 169 → **154**、`GameOverlay.java` 184 → **161**。执行记录见 §10.9。
 
 **口径**：`git diff 9b1e895 3521627`，`+` = 上游有而本仓无，`−` = 本仓有而上游无。`.behw` 不计入差异——它是构建期产物（工作树里 1668 个，全在 `android/app/build/` 下），由 `android/.gitignore:3:**/build/` 忽略，两侧版本库均无此物，来源是 `-PheadwearCatalogDir`。
 
@@ -18,7 +20,7 @@
 
 **一句话结论**：页面层零重叠（上游 61 个类 / 本仓 65 个，29 个上游独有、33 个本仓独有、32 个同名）；可直移的是**引擎类**（MMD 安装器、跨进程设置通道、模型覆盖层工具），必须重写的是**所有页面**。原生侧只有三块需要动：`ui/module.cpp`（PC UI）、`custom_model`（模型覆盖层）、`shared/android_compat`（**只增不覆**）。
 
-**进度（2026-10-07 00:25）**：§六 清单一至五项 **+ 第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）全部落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行），其余为第六至十项的顺手活。
+**进度（2026-10-07 01:00）**：§六 清单一至五项 **+ 第 8 项（运行时状态串，见 §10.9）已落地并编译验证**，**第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）已落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行），其余为第六至十项的顺手活。
 
 ---
 
@@ -37,11 +39,11 @@ git rev-list --count $BASE..HEAD            # 81
 | ------- | --------------------------------------------------------------- |
 | 共同基线    | `9b1e895`「Expand BEM v1.1/v1.2 runtime and tooling」（2026-09-26） |
 | 上游 HEAD | `d514f2f`（**v3.5.2**，2026-10-06），领先 **54** 个提交                  |
-| 本仓 HEAD | `cbbca19`（2026-10-07 00:23），领先 **81** 个提交                       |
+| 本仓 HEAD | `b0d7382`（2026-10-07 01:00），领先 **84** 个提交                       |
 | 上游改动文件  | 功能面 **599**（剔 `research/` + `docs/`）                            |
-| 本仓改动文件  | 功能面 **368**                                                     |
+| 本仓改动文件  | 功能面 **372**                                                     |
 
-> 与上一版（`3521627` / `8b8a0b5`）的差：上游 +14 提交（v3.5.2：PC 布局鼠标捕获、custom-model BEM 1.4 与 Android LOD 一批、Workshop 导航、mod-center 双语）⇒ 功能面 545 → **599**；本仓 +6 提交（第 11 项的三次实现 + 一次回归修复 + 文档）⇒ 功能面 361 → **368**（2026-10-07 再记：`1c65eab` 时为 367；锚点前移到 `cbbca19` 后本仓新增 `core/jni_binding.h`，`RuntimeBootstrap.java` 由「未改」升为「已改」）。
+> 与上一版（`3521627` / `8b8a0b5`）的差：上游 +14 提交（v3.5.2：PC 布局鼠标捕获、custom-model BEM 1.4 与 Android LOD 一批、Workshop 导航、mod-center 双语）⇒ 功能面 545 → **599**；本仓 +6 提交（第 11 项的三次实现 + 一次回归修复 + 文档）⇒ 功能面 361 → **368**（2026-10-07 再记：`1c65eab` 时为 367；锚点前移到 `cbbca19` 后本仓新增 `core/jni_binding.h`，`RuntimeBootstrap.java` 由「未改」升为「已改」）。**2026-10-07 01:00 再记**：本仓 +3 提交（第 8 项 1 个 + 文档 2 个）⇒ 功能面 368 → **372**（新增 `core/runtime_status.h`、`RuntimeSnapshot.java`、`testHost/runtime_snapshot_fixture.py`、`testHost/.../RuntimeSnapshotHostTest.java` 共 4 件）。
 
 ### 0.2 文件层四分法（功能面）
 
@@ -57,12 +59,12 @@ comm -13 up.txt our.txt   # 本仓独有
 | 桶                | 数       | 定义                   | 处置                           |
 | ---------------- | ------- | -------------------- | ---------------------------- |
 | **纯未同步 · 本仓有旧版** | **122** | 上游改、本仓自基线未动，且文件在本仓树里 | 直接取上游版（无冲突）                  |
-| **纯未同步 · 上游新增**  | **269** | 上游改、本仓树里根本没有         | 按 §三 编译面分级取舍                 |
-| **冲突面**          | **208** | 双方自基线都改过             | 逐 hunk / 小侧前向移植，**绝不整文件覆盖**  |
-| **本仓独有 · 独有独改**  | **138** | 本仓新增或改、上游未动          | **保护**，合并时不得被覆盖              |
+| **纯未同步 · 上游新增**  | **267** | 上游改、本仓树里根本没有         | 按 §三 编译面分级取舍                 |
+| **冲突面**          | **210** | 双方自基线都改过             | 逐 hunk / 小侧前向移植，**绝不整文件覆盖**  |
+| **本仓独有 · 独有独改**  | **140** | 本仓新增或改、上游未动          | **保护**，合并时不得被覆盖              |
 | **本仓独有 · 主动删除**  | **22**  | 本仓删、上游未动             | 本仓有意为之（Compose 迁移删 View/XML） |
 
-**校验**：`122 + 269 + 208 = 599` = 上游功能面 ✓；`208 + 138 + 22 = 368` = 本仓功能面 ✓
+**校验**：`122 + 267 + 210 = 599` = 上游功能面 ✓；`210 + 140 + 22 = 372` = 本仓功能面 ✓
 
 > **较上一版的变化**（逐件核对，非估算）：
 >
@@ -70,6 +72,8 @@ comm -13 up.txt our.txt   # 本仓独有
 > - **冲突面 201 → 207 → 208（+7）**：v3.5.2 触及的 `native/modules/ui/module.cpp`、`native/shared/android_compat/android_frame.cpp`、`native_bridge.cpp`、`XposedEntry.java`、`BemOptions.java`、`tools/CustomModel/bem_tool.py`；**再记（10-07）**另加 `core/jni_binding.h`（本仓新增）与 `RuntimeBootstrap.java`（本仓新增改动）。其中 `ui/module.cpp`、`android_frame.cpp`、`XposedEntry.java`、`native_bridge.cpp` 本轮**均已按上游同步**（§11）—— `native_bridge.cpp` 的差异**不再是"有意保留"**，它的 pc-mouse JNI 面已移植并真机通过。
 > - **本仓有旧版 113 → 122（+9）**：上游在新批次里又改了一批自基线未动的文件（`native/tests/android_world_binding_tests.cpp`、`native/modules/custom_model/model_job_runtime.inc` 等）。
 > - **本仓独有（138 独改 + 22 主动删除）两桶三轮完全不变** —— 这两桶才是"零冲突可直接取"的口径。
+>
+> - **2026-10-07 01:00 第 8 项落地后的移动**（逐件复核）：**纯未同步 391 → 389**（`core/runtime_status.h`、`RuntimeSnapshot.java` 两件由「上游新增」升为「双方都改」⇒ 上游新增 269 → **267**；本仓有旧版 **122** 不变）；**冲突面 208 → 210**（同两件）+ 本仓独有 **160 → 162**（新增 2 件宿主夹具，属独有独改 ⇒ 138 → **140**）。**注意**：这两件是"上游新增、本仓也新增"⇒ 落入冲突面而**不是**"本仓独有"，判据仍是 §0.2 的四分法口径，不要按"我新写的文件就算我独有"直觉归类。
 
 > **"上游独有"≠"上游新增"**：22 个本仓主动删除的文件（`ColorWheelView.java`、`ValueSlider.java`、15 个 `res/drawable/bg_*.xml`、3 个 `res/color/*.xml`、2 个 `res/layout/bem_spinner_*.xml`）在 `git diff 本仓 上游` 里同样显示为"上游新增"，实际是本仓删掉的。判"真缺 vs 被替换"必须过一遍 `git cat-file -e HEAD:<path>`。
 
@@ -123,9 +127,9 @@ comm -13 up.txt our.txt   # 本仓独有
 
 ---
 
-## 零点五、冲突面 208 件：按上游领先排序
+## 零点五、冲突面 210 件：按上游领先排序
 
-`gap = (上游 +/−) − (本仓 +/−)`，按**总改动行数**（`+` 与 `−` 之和）之差排序；`git diff --numstat $BASE..<ref>` 双测后 join。**gap ≥ 7 的 36 件全列于下；其余 171 件 gap ≤ 6（其中 124 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
+`gap = (上游 +/−) − (本仓 +/−)`，按**总改动行数**（`+` 与 `−` 之和）之差排序；`git diff --numstat $BASE..<ref>` 双测后 join。**gap ≥ 7 的 36 件全列于下；其余 174 件 gap ≤ 6（其中 126 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
 
 | #  | 文件                                                                | 本仓        | 上游             | gap      | 判定                                                    |
 | -- | ----------------------------------------------------------------- | --------- | -------------- | -------- | ----------------------------------------------------- |
@@ -168,12 +172,13 @@ comm -13 up.txt our.txt   # 本仓独有
 
 > 路径缩写：`android/.../` = `android/app/src/main/`；`android/.../java/.../` = `android/app/src/main/java/dev/betterendfield/android/`；`android/.../cpp/` = `android/app/src/main/cpp/`；`android/.../cpp/modules/…` 同理。
 
-**榜面变动（逐件复核，非估算）**：上一版 31 件 → 本版 **36 件**。**再记（2026-10-07）**：锚点前移 `1c65eab → cbbca19` 后 **`native_bridge.cpp` 由 gap 194 收敛到 90（第 9 → 第 13）**，其余 35 行数字全部未变（第 11 项触及的另外 3 个 Java/native 文件 gap 均为负，不进榜）。**掉出的仍是 `native/modules/ui/module.cpp`**（第 2 项与第 11 项两次并入上游，**本轮再次同步后仍不在榜**）；**新进榜 6 件**全部来自 v3.5.2：`native/modules/custom_model/{mod_registry.cpp, bem.cpp, bem.h, mod_registry.h}`（上游 BEM 1.4 重构）、`android/.../BemOptions.java`、`tools/CustomModel/{bem_v11.py, bem_tool.py, bem_export.py}`。三处值得注意：
+**榜面变动（逐件复核，非估算）**：上一版 31 件 → 本版 **36 件**。**再记（2026-10-07）**：锚点前移 `1c65eab → cbbca19` 后 **`native_bridge.cpp` 由 gap 194 收敛到 90（第 9 → 第 13）**，其余 35 行数字全部未变（第 11 项触及的另外 3 个 Java/native 文件 gap 均为负，不进榜）。**2026-10-07 01:00 再记（第 8 项）**：榜仍是 **36 件**；`core/runtime_status.h` 与 `RuntimeSnapshot.java` 两侧行数相同 ⇒ **gap = 0，不入榜**；`native_bridge.cpp` gap 90 → **40、第 13 → 第 23 名**，`camera/module.cpp` 169 → **154**（仍第 10），`GameOverlay.java` 184 → **161**（仍第 9）。**掉出的仍是 `native/modules/ui/module.cpp`**（第 2 项与第 11 项两次并入上游，**本轮再次同步后仍不在榜**）；**新进榜 6 件**全部来自 v3.5.2：`native/modules/custom_model/{mod_registry.cpp, bem.cpp, bem.h, mod_registry.h}`（上游 BEM 1.4 重构）、`android/.../BemOptions.java`、`tools/CustomModel/{bem_v11.py, bem_tool.py, bem_export.py}`。三处值得注意：
 
 - `camera/module.cpp` **269 → 169**（本仓 +1290/−91 → +1390/−91，持续投入）；
 - `BemInstaller.java` **173 → 140**（本轮新增 `saveChanges()` 后向上游靠拢，见 §10.6）；
 - `core/runtime.cpp` **11**（自 §10.7 起未动；余下 11 是本仓独有的其他改动，不是未同步量）；
-- `native_bridge.cpp` **180 → 194 → 90**（先纳入 v3.5.2 的 pc-mouse JNI 入口，本轮又**按上游移植该面**并真机通过 ⇒ 本仓侧由 `+89/−1` 涨到 `+192/−2`，gap 收敛到 **90**，**不再是欠账**；剩余 90 为本仓独有部分，如 relay 侧的历史导出）。
+- `native_bridge.cpp` **180 → 194 → 90 → 40**（先纳入 v3.5.2 的 pc-mouse JNI 入口，第 11 项又**按上游移植该面**并真机通过，本轮回填第 8 项的 `runtimeStatus` 导出 ⇒ 本仓侧由 `+192/−2` 涨到 `+244/−2`，gap 收敛到 **40**，**名次第 13 → 第 23**；剩余 40 为本仓独有部分，如 relay 侧的历史导出）；
+- `camera/module.cpp` **169 → 154**、`GameOverlay.java` **184 → 161**（第 8 项在这两个文件内的落点，见 §10.9）。
 
 **其中 6 件是「本仓整文件删除、上游同期又改写」**（本仓侧 `+0/−N`）：
 
@@ -446,14 +451,25 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | 5  | **全局 FOV 运行时下发** — **已完成**（`d3c7fa4`）             | 走本仓既有的 `command_pump`：原生 `DrainGlobalFovCommand()` + 设置 app 在"仅 `global_fov=` 行变化"时改发 `global_fov` 命令                      | **149 行**（原生 +100 / Java +49）                                        | 已落地并编译验证；**须真机**确认生效（§10.5）                                                                                                              |
 | 6  | **MMD 安装器统一**                                     | `MmdInstaller` + `MmdImportArchive` + `MmdInstalledResources` + `MmdAudio`                                                 | 710 行可直移                                                             | 中。要与本仓 `MmdPage.kt` 接口对齐                                                                                                                 |
 | 7  | **模型热切换**                                         | `BemHotSwitchUpdater` + `BemHotSwitchUpdate`                                                                               | 82 行                                                                 | 中。上游 native 侧依赖 `model_overlay_host.h`                                                                                                   |
-| 8  | **运行时状态串**                                        | `RuntimeSnapshot` + `core/runtime_status.h`                                                                                | 46 + 22                                                              | 低。可替换本仓 `RuntimeLog` 或并存                                                                                                                 |
+| 8  | **运行时状态串** — **已完成**（`b0d7382`，2026-10-07）                                        | `RuntimeSnapshot` + `core/runtime_status.h`                                                                                | 46 + 22                                                              | 已落地并编译验证：原生侧 13 处写入 + JNI `runtimeStatus`（与 pc-mouse 同法绑定）；Java 侧 `RuntimeSnapshot` 逐字照搬；消费点接在本仓悬浮窗日志头 —— **刻意不重演"有生产者、无消费者"**（§11.2.3 的教训），并有**设备外**宿主夹具（23 项断言，§10.9）。遗留：上游第二个消费点 `OverlaySettingsPage` 本仓是 Compose，未接；`camera.speed/fov` 尚未被本仓 UI 读取（上游用浮点解析器读，`number()` 只解析整数）                                                                                                                 |
 | 9 | ~~**JNI 注册收敛**~~ — **本轮顺带完成**（`460dd11`） | `core/jni_binding.h` | 45 | **已落地**：为接回 pc-mouse / `frame` 的 JNI 面而引入 `BindContextLoaderNatives`，与上游**逐字相同**（§11.2.2） |
 | 10 | **构建配置化**                                         | `workspace.gradle.kts` + `settings.gradle.kts`                                                                             | 87                                                                   | 低。本仓已有 CI 路径，按需                                                                                                                          |
 | 11 | **PC 布局相对鼠标桥** — **已完成并真机通过**（`1c65eab` → `460dd11` → `6541856`，收尾 `cbbca19`） | `android_pc_mouse.h` + `android_frame.cpp` + 两个 `.inc` + `ui/module.cpp`（原生，逐字）+ `core/jni_binding.h`（逐字）+ `PcUiMouseBridge.java`（逐字）+ `native_bridge.cpp` 的 4 个 JNI 导出 + `XposedEntry` 帧泵 | 上游 1458 行；本仓净 **+1430 / −12，13 文件**（新增 6 件） | **已真机通过**：滑动连续转向、点击生效（§11.3）。走三版 —— 真根因是**帧泵缺链**（§11.2.3），非传输层 |
 
-> **进度（2026-10-07 00:25）**：**第 1~5 项与第 11 项全部落地，第 11 项已真机通过**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3` / `1c65eab`+`460dd11`+`6541856`+`cbbca19`，另宿主同步 `af1d9cd`）。第 11 项来自**上游 v3.5.2**，不在本文档原清单内 —— 它是第 2 项（PC UI）的直系后续：强制桌面输入类型之后，游戏隐藏光标并改读 `Mouse X`/`Mouse Y`，而 Android 的绝对触摸路径永远不喂这两个轴，视角到屏幕边缘就停住。三版演进、真根因与证据见 §11。
+> **进度（2026-10-07 01:00）**：**第 1~5、8、11 项全部落地**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3` / `b0d7382` / `1c65eab`+`460dd11`+`6541856`+`cbbca19`，另宿主同步 `af1d9cd`），其中第 8 项已编译验证 + 设备外夹具 23 项断言全过（§10.9）、第 11 项已真机通过（§11.3）。第 11 项来自**上游 v3.5.2**，不在本文档原清单内 —— 它是第 2 项（PC UI）的直系后续：强制桌面输入类型之后，游戏隐藏光标并改读 `Mouse X`/`Mouse Y`，而 Android 的绝对触摸路径永远不喂这两个轴，视角到屏幕边缘就停住。三版演进、真根因与证据见 §11。
 >
-> **第 6~8、10 项未动**（第 9 项已随第 11 项顺带完成），且都不是"上游领先一整块功能"级别：第 6 项（MMD 安装器统一，710 行）是最大的一件，需与本仓 `MmdPage.kt` 接口对齐；第 7 项（模型热切换，82 行）的 native 侧依赖 `model_overlay_host.h`，**该头在 `#if defined(_WIN32)` 内（§八 8.1）⇒ Android 落点须先确认**；第 8、10 项（46+22 / 87 行）是低风险顺手活。
+> **剩余项：第 6、7、10 项**（第 9 项已随第 11 项顺带完成、第 8 项本轮完成）。**执行序按「依赖闭包从小到大」定，且实测后与"行数"排序不同**（§10.9.1）：
+>
+> | 序 | 项 | 新增文件 | 需改文件 | 跨子系统依赖 | 实测结论 |
+> |---|---|---|---|---|---|
+> | 1 | 第 8 项 运行时状态串 | 2 | 3 | 无 | **本轮完成** |
+> | 2 | 第 7 项 模型热切换 | 2 | 3 | **custom_model**（最大缺口内） | "82 行"是表象 |
+> | 3 | 第 10 项 构建配置化 | 2 | 2 | `config/` 整个目录 + `scripts/` 解析器 | 文件数最少、**破坏面最大** |
+> | 4 | 第 6 项 MMD 安装器统一 | 4 | 4+ | MMD 链 + 2 个上游独有 Activity | 最大的一件 |
+> | 5 | `custom_model` 最大缺口 | ~8 | 5+ | 自成体系 | gap 1845 |
+>
+> - **第 7 项不是"低风险顺手活"**：它的 Java 侧只有 82 行，但原生落点是 `CustomModelModule::QueueConfiguration`，依赖 `g_update_ready` / `g_update_mutex` / `g_pending_update` / `ApplyPendingConfiguration` / `UpdateSharedReplacement` / `SharedRegistryText` 整套「共享替换事务」，本仓**全无**（只有 `instance_` / `replacement_api_` / `InitializeSharedReplacement`）⇒ 闭包跨进最大缺口。原判"native 侧依赖 `model_overlay_host.h`，该头在 `_WIN32` 内"**仍是事实，但已不是主要障碍**。
+> - **第 10 项不是最小**：它的依赖是 `scripts/workspace_config.py` + `config/workspace.defaults.json` + `config/documents.json` + `config/game-discovery.json`（本仓 `config/` **整个目录都不存在**），且 `settings.gradle.kts` 会 `check(ANDROID_HOME == tools.android_sdk)`、改写 `java.io.tmpdir` / `android.home` / `projectCacheDir` ⇒ 与本机 SDK（`C:/Users/Vens_/AppData/Local/Android/Sdk`）+ NDK（`D:/android-toolchain`）分离的布局相冲，**落地即需先改本机工作区配置**。
 >
 > **上游 v3.5.2（14 提交）已分类完毕**（§11）：Android 编译面内 1 件已**完成并真机通过**（PC 鼠标桥）、4 件已按上游同步（`ui/module.cpp`、`android_frame.cpp`、`native_bridge.cpp` 的 pc-mouse 面、`XposedEntry.java` 的挂点）、**0 件"有意不取"**（原判"不可直移"已被 §11.2.2 推翻）、其余为 `custom_model`（最大缺口扩大至 gap 1845）、上游自带测试与不进编译面的 WPF / web / tools。
 
@@ -481,7 +497,7 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **A 本仓不编译**        | `native/modules/{camera,custom_model}/overlay/*`（伴生进程 + `.rc`）、`native/shared/host/hook_diagnostics.{h,cpp}`、`tools/HookInlineScan`、`tools/ThirdPartyModules/echo`、桌面 WPF `ui/BetterEndfield.UI`、`tools/CustomModel/CreatorProjectChecks`（C#） | **只记不移**；只取源文件、**不取构建条目**（依赖 minhook / ws2_32 / mfplat / `.rc`）                                            |
 | **B 本仓编译、仍是旧实现**   | `custom_model/module.cpp`、`world_resource_adapter.inc`、`camera/module.cpp`、`GameOverlay.java`、`BemInstaller.java` 等（`native_bridge.cpp` 的 pc-mouse 面已于 2026-10-07 按上游同步，见 §11.2）                                                                                                       | 子系统级前向移植，**绝不整文件覆盖**                                                                                       |
-| **B′ 曾属 B、已同步**    | `native/modules/ui/module.cpp`（PC UI §10.3；PC 鼠标桥 §11）、`native/shared/android_compat/android_frame.cpp`（PC 鼠标状态机 §11）、`android/app/src/main/cpp/core/runtime.{cpp,h}`（`ReadFieldObject` §10.7）                                                | **保持与上游一致，勿再退回旧版** —— `runtime.cpp` 的旧简版曾让 PC UI 开关在两平台行为不同、静默失效；`ui/module.cpp` 现仅余本仓两处日志 summary（+16/−2） |
+| **B′ 曾属 B、已同步**    | `native/modules/ui/module.cpp`（PC UI §10.3；PC 鼠标桥 §11）、`native/shared/android_compat/android_frame.cpp`（PC 鼠标状态机 §11）、`android/app/src/main/cpp/core/runtime.{cpp,h}`（`ReadFieldObject` §10.7）、**`android/app/src/main/cpp/native_bridge.cpp` 的 `runtimeStatus` 面与 `native/modules/camera/module.cpp` 的 `AndroidCameraValuesStatus()`（第 8 项 §10.9 —— 后者的 `camera.global_fov_ready` 一行本仓无对应标志位，**有意少报**）**                                                | **保持与上游一致，勿再退回旧版** —— `runtime.cpp` 的旧简版曾让 PC UI 开关在两平台行为不同、静默失效；`ui/module.cpp` 现仅余本仓两处日志 summary（+16/−2） |
 | **C 数据 / 资源 / 版本** | `android/resources` 缺 6 件、`values-en/ja/ko/zh-rTW` 4 套、`combat_stats` 缺 2 头像、`tools/CustomModel` 缺 9 件                                                                                                                                        | 纯增量，风险低                                                                                                    |
 | **D 反向：本仓领先**      | 兼容层陀螺仪（`AddVirtualMouseDelta`）、命令通道分帧、第一人称扩展、悬浮窗 Compose、MMD 作品库、CI                                                                                                                                                                           | **合并时不得被覆盖**                                                                                               |
 
@@ -535,9 +551,9 @@ D=D:/android-toolchain/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64
 BASE=$(git merge-base HEAD upstream/main)   # 9b1e895
 git -c core.quotepath=false diff --name-only $BASE..upstream/main | grep -vE '^(research|docs)/' | sort > up.txt
 git -c core.quotepath=false diff --name-only $BASE..HEAD          | grep -vE '^(research|docs)/' | sort > our.txt
-comm -23 up.txt our.txt | wc -l    # 391 纯未同步（内分 122 本仓有旧版 / 269 上游新增）
-comm -12 up.txt our.txt | wc -l    # 208 冲突面
-comm -13 up.txt our.txt | wc -l    # 160 本仓独有（138 独改 + 22 主动删除）
+comm -23 up.txt our.txt | wc -l    # 389 纯未同步（内分 122 本仓有旧版 / 267 上游新增）
+comm -12 up.txt our.txt | wc -l    # 210 冲突面
+comm -13 up.txt our.txt | wc -l    # 162 本仓独有（140 独改 + 22 主动删除）
 git diff --numstat $BASE..HEAD > ns_our.txt ; git diff --numstat $BASE..upstream/main > ns_up.txt   # 再 join 得 gap 排名
 ```
 
@@ -834,6 +850,67 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 | **最大剩余缺口 = `native/modules/custom_model/module.cpp`**（gap 1491，且在 Android 编译面内） | §零点五 #1 |
 | 本仓改动方向已反转：`android/app` 本仓改 **133** > 上游 97 | §0.3(a) |
 | 以上结论均不含 `web` / `scripts` / `config` / `manifests` / WPF —— 那些不进本仓 Android 编译面 | §0.3(c) |
+
+---
+
+### 10.9 第 8 项已完成：运行时状态串（`b0d7382`，2026-10-07）
+
+**指令**：「接管移植」+「按照依赖分布 从小到大」。⇒ 先对全部剩余项量出**依赖闭包**，再按升序执行。**第 8 项的闭包最小** —— 它不触碰最大缺口、也不动构建基建，所以是起点。
+
+#### 10.9.1 依赖闭包实测（两处与 §六 原估不符）
+
+| 序 | 项 | 新增文件 | 需改文件 | 跨子系统依赖 | 与原估的差 |
+|---|---|---|---|---|---|
+| **1** | 第 8 项 运行时状态串 | 2 | 3 | 无 | 一致 ⇒ **本轮完成** |
+| 2 | 第 7 项 模型热切换 | 2 | 3 | **custom_model（最大缺口内）** | ★ "82 行"是**表象** |
+| 3 | 第 10 项 构建配置化 | 2 | 2 | `config/` 整目录 + `scripts/` 解析器 | ★ "87 行顺手活"是**表象** |
+| 4 | 第 6 项 MMD 安装器统一 | 4 | 4+ | MMD 链 + 2 个上游独有 Activity | 一致（最大的一件） |
+| 5 | `custom_model` 最大缺口 | ~8 | 5+ | 自成体系（gap 1845） | 一致 |
+
+判定两处"表象"的依据（均为只读核查）：
+
+- **第 7 项**：Java 侧确实只有 `BemHotSwitchUpdater`(50) + `BemHotSwitchUpdate`(32)，但其原生落点 `CustomModelModule::QueueConfiguration` 依赖 `g_update_ready` / `g_update_mutex` / `g_pending_update` / `ApplyPendingConfiguration` / `UpdateSharedReplacement` / `SharedRegistryText` 整套「共享替换事务」——本仓 `custom_model_module.cpp` 只有 `instance_` / `replacement_api_` / `InitializeSharedReplacement`，**上述六项一个都没有**。
+- **第 10 项**：`settings.gradle.kts` 的新增块会 `resolveWorkspace()` 调 `scripts/workspace_config.py`，后者读 `config/workspace.defaults.json` + `config/documents.json` + `config/game-discovery.json`，而**本仓 `config/` 整个目录都不存在**；且该块 `check(ANDROID_HOME == tools.android_sdk)` 并改写 `java.io.tmpdir` / `android.home` / `projectCacheDir`。本机 SDK 与 NDK 本就分离（`C:/Users/Vens_/AppData/Local/Android/Sdk` vs `D:/android-toolchain`）⇒ **落地前必须先改本机工作区配置**，不是"顺手"。
+
+#### 10.9.2 改动面（8 文件，+289/−1，新增 4 件）
+
+| 文件 | 净变化 | 与上游的关系 |
+|---|---|---|
+| `android/app/src/main/cpp/core/runtime_status.h` | +22（新增） | **逐字**（blob `3b866215` == 上游 `3b866215`） |
+| `android/app/src/main/java/.../RuntimeSnapshot.java` | +46（新增） | **逐字**（blob `610972f8` == 上游 `610972f8`） |
+| `android/app/src/main/cpp/native_bridge.cpp` | +50/−0 | 派生：`runtimeStatus` 导出 + 绑定 + **13 处写入**（全部落在本仓自己的模块启动序列上）；**两条既有日志串逐字保留**（`PC mouse and frame JNI natives bound` / `PC mouse bridge: JNI call path live`），新绑定单独一行日志 |
+| `android/app/src/main/java/.../NativeCommandBridge.java` | +9 | 新增 `static native String runtimeStatus();`（与上游同名同签名） |
+| `android/app/src/main/java/.../GameOverlay.java` | +24/−1 | **本仓独有**：消费点接在本仓 Compose 悬浮窗的**日志头摘要行**（上游是 View 的 `status` TextView） |
+| `native/modules/camera/module.cpp` | +15 | `AndroidCameraValuesStatus()`；**比上游少 `camera.global_fov_ready` 一行**（本仓无该标志位，第 5 项的全局 FOV 走了另一条路 ⇒ 宁可少报也不伪造） |
+| `android/app/src/testHost/java/.../RuntimeSnapshotHostTest.java` | +92（新增） | **本仓独有**夹具（上游无），不进 APK |
+| `android/app/src/testHost/runtime_snapshot_fixture.py` | +31（新增） | **本仓独有** runner，沿用 `pcui_mouse_fixture.py` 的约定 |
+
+#### 10.9.3 关键设计点：消费点与生产者同轮落地
+
+§11.2.3 的教训是「**有生产者、无消费者**」——第 11 项的 `.so` / 符号 / 字符串 / 夹具四项全绿，真机却一行诊断都不出，因为驱动源没接。⇒ 本轮**刻意不重复**：`runtimeStatus` 的读取在同一个提交里接进了悬浮窗日志头（`snapshotSummary()`，绑定失败降级为 `offline()` 而不吞掉整行）。
+
+原生侧的绑定也与 pc-mouse **同法**（`BindContextLoaderNatives` + 独立数组），且**单独绑定**：一次被拒只损失状态行，不会连带打掉鼠标路径。
+
+#### 10.9.4 证据
+
+| 判据 | 结果 |
+|---|---|
+| 原生编译 | `:app:assembleDebug` **BUILD SUCCESSFUL**（6 条既有 `unused function` 告警，无新增） |
+| Java 编译 | `compileDebugJavaWithJavac` 通过 |
+| JNI 导出（`llvm-nm`，`T`） | `Java_*` **9 → 10**，新增 `Java_..._NativeCommandBridge_runtimeStatus`；`_ZN14betterendfield25AndroidCameraValuesStatusEv` 为 `T` |
+| `.so` | 48,973,792 → **49,047,944**（+74,152；Debug 不 strip，与新增 DWARF 同量级 ⇒ **无"悄悄变大"**） |
+| APK | `app-debug.apk` **81,559,821** B，SHA-256 `ab1ea7e2…`（debug 变体，按既定规则**不作为交付物**） |
+| 设备外夹具 | `python android/app/src/testHost/runtime_snapshot_fixture.py --output …` ⇒ **23 项断言全过**：跑的是本仓这份真 `RuntimeSnapshot`，喂的是原生**实际会产出**的字节形状 |
+| 行尾 | 补丁后复核 `native_bridge.cpp` CRLF 331 → 375 / LF-only 41 → 47（该文件本就混合）；其余三个被改文件仍单一风格；两个新件逐字 LF（`autocrlf=true` ⇒ 与上游 blob 一致） |
+
+**夹具顺带钉死的一条契约**（本轮实测发现，不是缺陷）：`RuntimeSnapshot.number()` **只解析整数**，而生产端 `std::to_string(float)` 产出 `5.000000` ⇒ 浮点键（`camera.speed` / `camera.fov`）**必须用浮点解析器**。上游 `GameOverlay` 正是用 `finiteNumber(...)` 读它们，从不拿 `number()` 读 ⇒ 本仓接线时须遵守同一分工。
+
+#### 10.9.5 遗留
+
+1. **无真机验收**。第 8 项的可观测面是悬浮窗日志头那一行摘要 ⇒ 需装机 + LSPosed + 游戏内看日志。本轮止于构建 + 设备外夹具。
+2. **上游第二个消费点未接**：`OverlaySettingsPage.java`（View/XML，本仓是 Compose）会 `settingsPage.runtime(snapshot)`；本仓未接，也不打算接（页面层不跟进，同 §10.8-3 口径）。
+3. **`camera.speed` / `camera.fov` 目前无人读取**：本仓 UI 未取（上游用于初始化速度/FOV 滑条）。
+4. **`Map.of()` 与 minSdk 29 的隐患（记录，未改）**：`Map.of` 是 API 30 的 API，本仓 `minSdk = 29` 且未开 `coreLibraryDesugaring` ⇒ API 29 设备上会 `NoSuchMethodError`。**上游同样如此**（上游 minSdk 也是 29），且本仓既有产品码已有同类用法（`Set.of` / `List.of`，第 3 项逐字移植件）⇒ 本轮**保持逐字、不擅自偏离**，只记录待你决策。
 
 ---
 
