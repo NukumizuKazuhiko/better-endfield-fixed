@@ -10,6 +10,8 @@
 //   "c <payload>\n"     submit a runtime command (single-slot pump)
 //   "r\n"               release every latched key
 //   "m <dx> <dy>\n"     accumulate a mouse-look delta (screen pixels, y down)
+//   "p <dx> <dy>\n"     accumulate a PC-layout relative mouse delta (floats)
+//   "P <0|1>\n"         report platform pointer capture for the PC layout
 // The look deltas are summed rather than queued, so the panel can send a drag at
 // whatever rate its gesture recogniser reports without the runtime having to
 // keep up event by event.
@@ -19,15 +21,20 @@
 // those newlines raw would end the event after "BE_COMMAND_V1" and the pump
 // would reject the fragment.
 // The status file is rewritten whenever the runtime command status changes.
+// The PC-layout capture request travels the other way (native to the panel),
+// and the status file carries the runtime command status only, so it gets a
+// sibling file the relay rewrites whenever the flag flips.
 
 #include "android_virtual_keys.h"
 #include "core/command_pump.h"
 #include "core/log.h"
+#include "android_pc_mouse.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -105,6 +112,26 @@ void HandleLine(const std::string& line) {
             std::clamp(dy, -1000L, 1000L)));
         return;
     }
+    if (line[0] == 'p' && line.size() >= 3 && line[1] == ' ') {
+        const char* first = line.c_str() + 2;
+        char* end = nullptr;
+        const float dx = std::strtof(first, &end);
+        if (end == nullptr || end == first || *end != ' ') return;
+        const char* second = end + 1;
+        const float dy = std::strtof(second, &end);
+        if (end == nullptr || end == second) return;
+        // The state machine drops non-finite values itself; refusing them
+        // here as well keeps a garbled line from reading as a delivery.
+        if (!std::isfinite(dx) || !std::isfinite(dy)) return;
+        AddAndroidPcMouseMotion(dx, dy);
+        return;
+    }
+    if (line[0] == 'P' && line.size() >= 3 && line[1] == ' ') {
+        const char* value = line.c_str() + 2;
+        if (value[0] == '1' && value[1] == '\0') SetAndroidPcMouseCaptured(true);
+        else if (value[0] == '0' && value[1] == '\0') SetAndroidPcMouseCaptured(false);
+        return;
+    }
     char* end = nullptr;
     const long vk = std::strtol(line.c_str(), &end, 10);
     if (end == nullptr || end == line.c_str() || *end != ' ') return;
@@ -141,6 +168,9 @@ void RelayLoop(const std::string& input, const std::string& status,
         const std::string& nativeLog) {
     LogInfo("relay", "input file relay active");
     WriteStatusFile(status, "relay alive; native runtime starting\n");
+    // Absent means not requested, so this only has to be accurate once the
+    // native state machine can answer at all.
+    const std::string pcMouse = status + ".pcmouse";
     // A fresh session must not replay the previous one's log.
     close(open(nativeLog.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
     int fd = -1;
@@ -148,6 +178,7 @@ void RelayLoop(const std::string& input, const std::string& status,
     std::size_t logCursor = 0;
     std::string pending;
     std::string lastStatus;
+    int lastCaptureRequested = -1;
     auto nextStatus = std::chrono::steady_clock::now();
     for (;;) {
         std::string buffer;
@@ -157,6 +188,15 @@ void RelayLoop(const std::string& input, const std::string& status,
         while ((newline = pending.find('\n')) != std::string::npos) {
             HandleLine(pending.substr(0, newline));
             pending.erase(0, newline + 1);
+        }
+        // Polled every pass instead of with the 500 ms status tick: a cursor
+        // hide has to reach the panel within one relay interval, and the file
+        // is only touched when the flag actually flips.
+        const int capture_requested = AndroidPcMouseCaptureRequested() ? 1 : 0;
+        if (capture_requested != lastCaptureRequested) {
+            lastCaptureRequested = capture_requested;
+            WriteStatusFile(pcMouse, std::string("pc_capture=") +
+                (capture_requested ? "1" : "0") + "\n");
         }
         const auto now = std::chrono::steady_clock::now();
         if (now >= nextStatus) {
