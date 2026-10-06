@@ -195,4 +195,9 @@ final class NativeCommandBridge {
             }
         }
     }
+    // Called through the explicitly bound module ClassLoader from native.
+    static long audioOpen(String path) { return MmdAudio.open(path); }
+    static int audioControl(long token, int operation, double value) { return MmdAudio.control(token, operation, value); }
+    static double[] audioStatus(long token) { return MmdAudio.status(token); }
+    static String audioError(long token) { return MmdAudio.error(token); }
 }

@@ -73,3 +73,23 @@
 # The in-game journal is the only debugging channel on a device we do not own;
 # without these attributes a stack trace written there is unreadable.
 -keepattributes SourceFile,LineNumberTable
+
+# --- MMD audio transport ----------------------------------------------------
+# src/main/cpp/core/local_music_android.cpp resolves four statics on the bridge
+# class by name and signature:
+#   GetStaticMethodID(owner, "audioOpen",    "(Ljava/lang/String;)J")
+#   GetStaticMethodID(owner, "audioControl", "(JID)I")
+#   GetStaticMethodID(owner, "audioStatus",  "(J)[D")
+#   GetStaticMethodID(owner, "audioError",   "(J)Ljava/lang/String;")
+# The player behind them is Java, so these are plain methods -- the default
+# `-keepclasseswithmembernames class * { native <methods>; }` that keeps the
+# class name does not keep their names. Renamed, every lookup returns null,
+# InitializeAndroidMusic refuses the interface, and MMD works play silently
+# without their music track. verifyReleaseEntryPoints asserts the names survive
+# in the dex, so a lost rule fails the build instead of the feature.
+-keepclassmembers class dev.betterendfield.android.NativeCommandBridge {
+    static long audioOpen(java.lang.String);
+    static int audioControl(long, int, double);
+    static double[] audioStatus(long);
+    static java.lang.String audioError(long);
+}

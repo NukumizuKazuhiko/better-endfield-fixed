@@ -334,12 +334,22 @@ val verifyReleaseEntryPoints by tasks.registering {
             "Ldev/betterendfield/android/OverlaySettingsProvider;",
             "Lio/github/libxposed/service/XposedProvider;"
         )
-        // Methods the native code reaches by name without being an export:
-        // GetStaticMethodID(owner, "conversionProgress", "(Ljava/lang/String;IIIIF)V")
-        // in src/main/cpp/installer/install_jni.cpp. A renamed method here
-        // returns null and the conversion aborts with no progress at all.
+        // Methods the native code reaches by name without being an export. Both
+        // owners declare natives, so the default member-name rule already keeps
+        // the *class*; what it does not keep is the name of a plain method, and
+        // these four are plain: the MMD player behind them is Java
+        // (MmdAudio.java) and the native side only ever holds their names.
+        //   * conversionProgress - GetStaticMethodID(owner, "conversionProgress",
+        //     "(Ljava/lang/String;IIIIF)V") in src/main/cpp/installer/install_jni.cpp.
+        //     A renamed method returns null and the conversion aborts with no
+        //     progress at all.
+        //   * audioOpen/audioControl/audioStatus/audioError - resolved by
+        //     src/main/cpp/core/local_music_android.cpp. Renamed, the interface
+        //     is refused and MMD works play silently without their music track.
         val jniCallbacks = mapOf(
-            "dev.betterendfield.android.BemInstaller" to listOf("conversionProgress")
+            "dev.betterendfield.android.BemInstaller" to listOf("conversionProgress"),
+            "dev.betterendfield.android.NativeCommandBridge" to listOf(
+                "audioOpen", "audioControl", "audioStatus", "audioError")
         )
         // Exports with no Java declaration behind them any more. The panel-to-
         // runtime channel moved from JNI to plain files (see the

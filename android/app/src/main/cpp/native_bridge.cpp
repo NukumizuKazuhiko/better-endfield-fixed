@@ -16,6 +16,7 @@
 #include "android_pc_mouse.h"
 #include "android_camera.h"
 #include "core/jni_binding.h"
+#include "core/local_music_android.h"
 #include "core/runtime_status.h"
 
 #include <jni.h>
@@ -264,6 +265,10 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
                 || environment == nullptr) {
             betterendfield::LogError("runtime", "PC mouse/frame JNI natives not bound: no environment");
         } else {
+            // The same class is needed again below: the MMD director's local
+            // track is played by Java, so the native player has to resolve its
+            // four audio statics on the one class it can reach.
+            jclass bridge_class = nullptr;
             static const JNINativeMethod kPcMouseMethods[]{
                 {"pcMouseCaptureRequested", "()Z", reinterpret_cast<void*>(
                     &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptureRequested)},
@@ -276,7 +281,8 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
             };
             if (!betterendfield::BindContextLoaderNatives(environment,
                     "dev.betterendfield.android.NativeCommandBridge", kPcMouseMethods,
-                    static_cast<jint>(sizeof(kPcMouseMethods) / sizeof(kPcMouseMethods[0])))) {
+                    static_cast<jint>(sizeof(kPcMouseMethods) / sizeof(kPcMouseMethods[0])),
+                    &bridge_class)) {
                 // The rest of the panel channel is the file relay and keeps
                 // working, so a refused binding costs the PC layout its
                 // relative-mouse path instead of the whole runtime. Clear the
@@ -303,6 +309,15 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
                 betterendfield::LogError("runtime", "runtime status JNI native not bound");
             } else {
                 betterendfield::LogInfo("runtime", "runtime status JNI native bound");
+            }
+            // The MMD director drives its local track through
+            // BE_LocalMusicApiV1, and on Android that interface is four Java
+            // statics on this bridge (see local_music_android.cpp, which
+            // resolves them by name). A refusal costs the music track only.
+            if (!bridge_class || !betterendfield::InitializeAndroidMusic(vm, environment, bridge_class)) {
+                betterendfield::LogError("mmd.music", "Java media API unavailable; body and camera remain usable");
+            } else {
+                betterendfield::LogInfo("mmd.music", "Java media API bound");
             }
         }
         // The panel presses keys through a file relay (see input_relay.cpp):
