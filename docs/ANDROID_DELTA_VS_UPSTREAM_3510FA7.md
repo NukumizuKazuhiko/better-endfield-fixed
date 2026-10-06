@@ -449,27 +449,26 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | 3  | **跨进程设置通道** — **已完成**（`30503d3`）                  | `OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization` + Manifest 组件                                      | **269 行**新增 + 补齐 §10.4-4 的 3 处缺口（另 2 处由 §10.5 的 `command_pump` 路线免掉） | `exported=true` 组件已按安全审落地：只实现 `call()`，UID + 令牌双因子（§10.6）                                                                                |
 | 4  | **模型管理悬浮窗页** — **已完成**（`30503d3`）                 | 按功能重写为 Compose 页（`OverlayModelPage.kt`，含 3 个自绘控件）                                                                          | 约 560 行；`OverlayFeatures` 已加 `models` 第 8 字段门禁                       | 已落地并真机跑通；**滑条/选择器的实际交互须人工确认**（§10.6）                                                                                                     |
 | 5  | **全局 FOV 运行时下发** — **已完成**（`d3c7fa4`）             | 走本仓既有的 `command_pump`：原生 `DrainGlobalFovCommand()` + 设置 app 在"仅 `global_fov=` 行变化"时改发 `global_fov` 命令                      | **149 行**（原生 +100 / Java +49）                                        | 已落地并编译验证；**须真机**确认生效（§10.5）                                                                                                              |
-| 6  | **MMD 安装器统一**                                     | `MmdInstaller` + `MmdImportArchive` + `MmdInstalledResources` + `MmdAudio`                                                 | 710 行可直移                                                             | 中。要与本仓 `MmdPage.kt` 接口对齐                                                                                                                 |
-| 7  | **模型热切换**                                         | `BemHotSwitchUpdater` + `BemHotSwitchUpdate`                                                                               | 82 行                                                                 | 中。上游 native 侧依赖 `model_overlay_host.h`                                                                                                   |
+| 6  | **MMD 安装器统一** | `MmdAudio` + `MmdInstalledResources`（**真新增**）；`MmdInstaller` / `MmdImportArchive`（←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`，**同源分叉对账**）；2 个上游独有 Activity 属页面层不合并 | 139 + 85（真新增）/ 263 + 223（对账） | 中。新增 gradle 依赖 `commons-compress:1.28.0` + `xz:1.10`；本仓 MMD 作品库在 §八 D 列为「本仓领先」⇒ **先定架构**（§10.10.3） |
+| 7  | **模型热切换** | Java 侧 `BemHotSwitchUpdater` + `BemHotSwitchUpdate` **确实只有 82 行**；但消费方在 `native/modules/custom_model/`（`ReloadRegistryAtDelivery` + `g_hot_switch_runtime` + `model_job_runtime.inc`） | 82（Java）；原生 **16 文件 / ~2,700 行** | **与 `custom_model` 最大缺口合并为一项**（§10.10.1）。原判「native 侧依赖 `model_overlay_host.h`」仍属实但非主要障碍；照抄 JNI 会静默无效 —— 本仓 `ResourceConfigurationChanged` 缺 `[CustomModel]` 分支 |
 | 8  | **运行时状态串** — **已完成**（`b0d7382`，2026-10-07）                                        | `RuntimeSnapshot` + `core/runtime_status.h`                                                                                | 46 + 22                                                              | 已落地并编译验证：原生侧 13 处写入 + JNI `runtimeStatus`（与 pc-mouse 同法绑定）；Java 侧 `RuntimeSnapshot` 逐字照搬；消费点接在本仓悬浮窗日志头 —— **刻意不重演"有生产者、无消费者"**（§11.2.3 的教训），并有**设备外**宿主夹具（23 项断言，§10.9）。遗留：上游第二个消费点 `OverlaySettingsPage` 本仓是 Compose，未接；`camera.speed/fov` 尚未被本仓 UI 读取（上游用浮点解析器读，`number()` 只解析整数）                                                                                                                 |
 | 9 | ~~**JNI 注册收敛**~~ — **本轮顺带完成**（`460dd11`） | `core/jni_binding.h` | 45 | **已落地**：为接回 pc-mouse / `frame` 的 JNI 面而引入 `BindContextLoaderNatives`，与上游**逐字相同**（§11.2.2） |
-| 10 | **构建配置化**                                         | `workspace.gradle.kts` + `settings.gradle.kts`                                                                             | 87                                                                   | 低。本仓已有 CI 路径，按需                                                                                                                          |
+| 10 | **构建配置化** ~~不适用~~ | `workspace.gradle.kts` + `settings.gradle.kts` + `scripts/workspace_config.py` + `config/` 11 件 | 87 + 208 + configs | **判为「不适用（Android-only 本仓）」**（§10.10.2）：上游 schema 是 Windows 桌面多平台工作区（ResConv / EndfieldUnpacker / wwiser / dobby / iscc / `resource_update`）；本仓 `config/` 不存在、`app/build.gradle.kts` 不读 `beWorkspace`；SDK 位置归一已由 `android/local.properties` 承担 |
 | 11 | **PC 布局相对鼠标桥** — **已完成并真机通过**（`1c65eab` → `460dd11` → `6541856`，收尾 `cbbca19`） | `android_pc_mouse.h` + `android_frame.cpp` + 两个 `.inc` + `ui/module.cpp`（原生，逐字）+ `core/jni_binding.h`（逐字）+ `PcUiMouseBridge.java`（逐字）+ `native_bridge.cpp` 的 4 个 JNI 导出 + `XposedEntry` 帧泵 | 上游 1458 行；本仓净 **+1430 / −12，13 文件**（新增 6 件） | **已真机通过**：滑动连续转向、点击生效（§11.3）。走三版 —— 真根因是**帧泵缺链**（§11.2.3），非传输层 |
 
 > **进度（2026-10-07 01:00）**：**第 1~5、8、11 项全部落地**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3` / `b0d7382` / `1c65eab`+`460dd11`+`6541856`+`cbbca19`，另宿主同步 `af1d9cd`），其中第 8 项已编译验证 + 设备外夹具 23 项断言全过（§10.9）、第 11 项已真机通过（§11.3）。第 11 项来自**上游 v3.5.2**，不在本文档原清单内 —— 它是第 2 项（PC UI）的直系后续：强制桌面输入类型之后，游戏隐藏光标并改读 `Mouse X`/`Mouse Y`，而 Android 的绝对触摸路径永远不喂这两个轴，视角到屏幕边缘就停住。三版演进、真根因与证据见 §11。
 >
-> **剩余项：第 6、7、10 项**（第 9 项已随第 11 项顺带完成、第 8 项本轮完成）。**执行序按「依赖闭包从小到大」定，且实测后与"行数"排序不同**（§10.9.1）：
+> **剩余项：第 6、7、10 项**（第 9 项已随第 11 项顺带完成，第 8 项本轮完成）。**执行序按「依赖闭包从小到大」定**，但两轮实测下来，三项**性质互不相同、不可按文件数排序**（第二轮逐符号/逐文件实测见 §10.10）：
 >
-> | 序 | 项 | 新增文件 | 需改文件 | 跨子系统依赖 | 实测结论 |
-> |---|---|---|---|---|---|
-> | 1 | 第 8 项 运行时状态串 | 2 | 3 | 无 | **本轮完成** |
-> | 2 | 第 7 项 模型热切换 | 2 | 3 | **custom_model**（最大缺口内） | "82 行"是表象 |
-> | 3 | 第 10 项 构建配置化 | 2 | 2 | `config/` 整个目录 + `scripts/` 解析器 | 文件数最少、**破坏面最大** |
-> | 4 | 第 6 项 MMD 安装器统一 | 4 | 4+ | MMD 链 + 2 个上游独有 Activity | 最大的一件 |
-> | 5 | `custom_model` 最大缺口 | ~8 | 5+ | 自成体系 | gap 1845 |
+> | 序 | 项 | 第二轮实测 | 处置 |
+> |---|---|---|---|
+> | 1 | **第 6 项 MMD 安装器统一** | 与上游**同源分叉**（`installed_mmd_works` 索引键两边相同）；4 件里 **2 件真新增**（`MmdAudio` 139 / `MmdInstalledResources` 85），另 2 件是分叉对账（上游 `MmdInstaller` 263 + `MmdImportArchive` 223 ←→ 本仓 `MmdLibraryInstaller`+`MmdLibraryFiles`）；新增依赖 `commons-compress` + `xz`；2 个 Activity 属页面层 ⇒ §七.5 **不合并**，按功能名重写 | **唯一剩下的 Android-only 产品项** ⇒ 下一步，但**先定架构**（取上游后端 / 保留本仓后端只补真新增件 / 全量对账），见 §10.10.3 |
+> | 2 | 第 7 项 模型热切换 | **不是独立项**：Java 侧 82 行属实，但消费方在 `custom_model` 内部（`ReloadRegistryAtDelivery` + `g_hot_switch_runtime` + `model_job_runtime.inc` 1129 行）。上游同批缺席 **16 个文件 / 约 2,700 行**；本仓目录 14 件 vs 上游 32 件；`hot_switch` 命中 **0** | 与 `custom_model` 缺口**合并为一项**，子系统级前向移植，见 §10.10.1 |
+> | 3 | 第 10 项 构建配置化 | 上游 `config/workspace.defaults.json` 的 schema 是 **Windows 桌面多平台工作区**（ResConv.exe / EndfieldUnpacker / wwiser / dobby / Inno Setup / `resource_update` 指向 1.5.3 Windows 游戏输入）；本仓 `config/` 不存在、`app/build.gradle.kts` 也不读 `beWorkspace` | **判为「不适用（Android-only 本仓）」**，唯一有价值子集（SDK 位置归一）已由 `android/local.properties` 承担，见 §10.10.2 |
 >
-> - **第 7 项不是"低风险顺手活"**：它的 Java 侧只有 82 行，但原生落点是 `CustomModelModule::QueueConfiguration`，依赖 `g_update_ready` / `g_update_mutex` / `g_pending_update` / `ApplyPendingConfiguration` / `UpdateSharedReplacement` / `SharedRegistryText` 整套「共享替换事务」，本仓**全无**（只有 `instance_` / `replacement_api_` / `InitializeSharedReplacement`）⇒ 闭包跨进最大缺口。原判"native 侧依赖 `model_overlay_host.h`，该头在 `_WIN32` 内"**仍是事实，但已不是主要障碍**。
-> - **第 10 项不是最小**：它的依赖是 `scripts/workspace_config.py` + `config/workspace.defaults.json` + `config/documents.json` + `config/game-discovery.json`（本仓 `config/` **整个目录都不存在**），且 `settings.gradle.kts` 会 `check(ANDROID_HOME == tools.android_sdk)`、改写 `java.io.tmpdir` / `android.home` / `projectCacheDir` ⇒ 与本机 SDK（`C:/Users/Vens_/AppData/Local/Android/Sdk`）+ NDK（`D:/android-toolchain`）分离的布局相冲，**落地即需先改本机工作区配置**。
+> - **第 7 项不是"低风险顺手活"**：它的原生落点 `CustomModelModule::QueueConfiguration` 依赖 `g_update_ready` / `g_update_mutex` / `g_pending_update` / `ApplyPendingConfiguration` / `UpdateSharedReplacement` / `SharedRegistryText` 整套「共享替换事务」，本仓**全无**。第二轮再往下量一层，连**消费方**都不在本仓：`module.cpp:3316 ReloadRegistryAtDelivery()` + `module.cpp:49 g_hot_switch_runtime` + `module.cpp:3258 g_pending_registry_text/g_registry_request_mutex` + **`model_job_runtime.inc`（1129 行，本仓整个文件不存在）**。原判"native 侧依赖 `model_overlay_host.h`，该头在 `_WIN32` 内"**仍是事实，但已不是主要障碍**。唯一好消息：`ModuleApi.h` 的 `configuration_changed` 本仓已有，缝不用动 —— **但本仓的 `ResourceConfigurationChanged` 没有 `[CustomModel]` 分支**（上游 `module.cpp:3887` 才有），照抄 JNI 只会静默无效。
+> - **第 10 项判为不适用**：它的依赖是 `scripts/workspace_config.py`（208 行）+ `config/` 11 件，而 `workspace.defaults.json` 声明的是**桌面**工具链与 Windows 资源更新流水线。本仓既无 ResConv / EndfieldUnpacker / wwiser / dobby / iscc，SDK 也不在仓库内（本机 `android/local.properties` = `sdk.dir=C:/Users/Vens_/AppData/Local/Android/Sdk` + `ndk.dir=D:/android-toolchain/android-ndk-r27c`，与上游"SDK 在 `toolchains/android/sdk`"正相反）。只落 `settings.gradle.kts` + `workspace.gradle.kts` 而不落 `config/` 会**立刻断构建**。
+> - **第 6 项的关键判据**：本仓 `MmdLibraryInstaller` 与上游 `MmdInstaller` 的公共面**逐项对得上**（`busy` / `status` / `MAX_WORK_BYTES` / `WORKER = newSingleThreadExecutor()` / `start(Context,MmdImportSession,…)` / `remove(Context,generation)`），且索引键同为 `installed_mmd_works` ⇒ 同源分叉，**不是"710 行可直移"**。该库在 §八 D 列为「本仓领先」，整取会覆盖它。
 >
 > **上游 v3.5.2（14 提交）已分类完毕**（§11）：Android 编译面内 1 件已**完成并真机通过**（PC 鼠标桥）、4 件已按上游同步（`ui/module.cpp`、`android_frame.cpp`、`native_bridge.cpp` 的 pc-mouse 面、`XposedEntry.java` 的挂点）、**0 件"有意不取"**（原判"不可直移"已被 §11.2.2 推翻）、其余为 `custom_model`（最大缺口扩大至 gap 1845）、上游自带测试与不进编译面的 WPF / web / tools。
 
@@ -911,6 +910,72 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 2. **上游第二个消费点未接**：`OverlaySettingsPage.java`（View/XML，本仓是 Compose）会 `settingsPage.runtime(snapshot)`；本仓未接，也不打算接（页面层不跟进，同 §10.8-3 口径）。
 3. **`camera.speed` / `camera.fov` 目前无人读取**：本仓 UI 未取（上游用于初始化速度/FOV 滑条）。
 4. **`Map.of()` 与 minSdk 29 的隐患（记录，未改）**：`Map.of` 是 API 30 的 API，本仓 `minSdk = 29` 且未开 `coreLibraryDesugaring` ⇒ API 29 设备上会 `NoSuchMethodError`。**上游同样如此**（上游 minSdk 也是 29），且本仓既有产品码已有同类用法（`Set.of` / `List.of`，第 3 项逐字移植件）⇒ 本轮**保持逐字、不擅自偏离**，只记录待你决策。
+
+---
+
+### 10.10 剩余三项的第二轮实测：三项各自的性质与原判都不同（2026-10-07，未落地）
+
+§10.9.1 的排序只量了"新增/需改文件数"，这一轮把三项**逐符号、逐文件**量到底，结论是**三项都不可比**：一项其实是最大缺口的别名，一项的上游 schema 在本仓根本不适用，一项是与上游同源分叉的对账。
+
+#### 10.10.1 第 7 项（模型热切换）≡ `custom_model` 最大缺口
+
+Java 侧确实只有 82 行（`BemHotSwitchUpdater` 50 + `BemHotSwitchUpdate` 28），但热切换的本体在原生，且**消费方不在 Android 包装层**：
+
+| 环节 | 上游落点 | 本仓 |
+| --- | --- | --- |
+| JNI | `native_bridge.cpp:253` `updateCustomModelConfig` + `:352` 注册 | 无 |
+| 帧泵 | `native_bridge.cpp:267` `frame()` 内每帧 `ApplyPendingConfiguration()` | 无（本仓 `frame()` 只有 `DispatchAndroidFrame`） |
+| 事务 | `custom_model_module.cpp:266-296`（`QueueConfiguration` / `ApplyPendingConfiguration` / `UpdateSharedReplacement`）+ `h:23-25` | **无**（本仓只有 `InitializeSharedReplacement`） |
+| 注册表文本 | `SharedRegistryText()`（含 `/data/local/tmp` 相对路径归一 + 三个开关键） | 无（本仓在 `InitializeSharedReplacement` 内**内联**一份简版，无三个开关键） |
+| **消费方** | `module.cpp:3316` `ReloadRegistryAtDelivery()` → `g_pending_registry_text`；`module.cpp:49` `g_hot_switch_runtime`；`module.cpp:3258` `g_last/pending_registry_text` + `g_registry_request_mutex`；`module.cpp:3734` `g_hot_switch_runtime.store(g_registry.hot_switch)` | 本仓 `native/modules/custom_model/` **14 文件 vs 上游 32 文件**；`hot_switch` 命中 = 0 |
+| **作业运行时** | `model_job_runtime.inc`（**1129 行，本仓整个文件不存在**）：`PumpInstanceRebind` / `PumpModelJobs` / `ScanSceneInstancesForRebind` / `RestoreDisabledResource` / `RememberModelTarget` / `RefreshModelTargetPriorities` | 无 |
+
+⇒ **第 7 项不是独立项，它就是最大缺口的入口面**。上游同批缺席的 16 个文件合计 **约 2,700 行**（`model_job_runtime.inc` 1129、`async_loading.h` 638、`model_lod_state.inc` 140、`bem_targets.inc` 138、`generic_model_matcher.inc` 118、`explicit_android_shadows.inc` 114、`runtime_ini.h` 111、`model_overlay_host.h` 70、`model_asset_cache.inc` 58、`model_content_identity.h` 48，另 `android_lod_relations.generated.h`、`model_overlay_hotkey.h`、`model_overlay_protocol.h`、`runtime_ini_win32.h`、`overlay/`、`tests/`）。
+唯一的好消息：`ModuleApi.h` 的 `configuration_changed` **本仓已有**（`kResourceApi` 第二项 = `ResourceConfigurationChanged`），所以接口缝不用动；但本仓的 `ResourceConfigurationChanged` **没有 `[CustomModel]` 分支**（上游 `module.cpp:3887` 才有），照抄 JNI 会让每次热切换都落到「未知配置行」⇒ 静默无效。
+
+#### 10.10.2 第 10 项（构建配置化）的上游 schema 在本仓不适用
+
+`settings.gradle.kts`（+63 行）会 shell 两趟 `scripts/workspace_config.py resolve`（208 行，bootstrap python → 配置里的 python），然后 `check(ANDROID_HOME/ANDROID_SDK_ROOT/local.properties 三者 == tools.android_sdk)`、改写 `java.io.tmpdir` / `android.home` / `projectCacheDir`；`workspace.gradle.kts`（24 行）再把每个模块的 `buildDirectory` 挪到 `<paths.build>/android/gradle/<segment>`，并给**每个 `Exec` 任务**注入 `BE_WORKSPACE_DOBBY_ROOT`。
+
+问题在 `config/workspace.defaults.json` 的 schema 是**上游 Windows 桌面多平台工作区**，不是 Android 工作区：
+
+```json
+"game": {"version": "1.5.3", "platform": "Windows", ...},
+"tools": {"cmake":…, "dotnet":…, "iscc":null, "resconv":"toolchains/FkArkEnd/ResConv/bin/Release/net10.0/ResConv.exe",
+          "endfield_unpacker_root":…, "wwiser_root":…, "native_asset_reader":"…/NativeAssetReader.exe",
+          "archive_backend":"toolchains/bem-archive-backend/7zip",
+          "android_sdk":"toolchains/android/sdk", "android_dobby":"toolchains/android/dobby-1.0.5"},
+"resource_update": {"input_root":"inputs/1.5.3/Windows/baseline", "outputs":{"avatars":…, "web_combat_dictionary":…}},
+"android_signing": {"properties_file":"config/android-signing.local.properties", "certificate_sha256":"6f157402…"}
+```
+
+本仓（`config/` **整个目录不存在**、无 `scripts/workspace_config.py`）没有 ResConv / EndfieldUnpacker / wwiser / dobby / Inno Setup / Windows 资源更新输入，且 `app/build.gradle.kts` 也**没有**读 `beWorkspace`（本仓 116 新 / 462 删，是另一份文件）⇒ 只落 `settings.gradle.kts` + `workspace.gradle.kts` 而不落 `config/` 会**立刻断构建**；落 `config/` 则要给本仓凭空发明一套 Android-only 的 schema 并改 `app/build.gradle.kts`。
+**实测环境**：`ANDROID_HOME` / `ANDROID_SDK_ROOT` 均未设置（`check` 的第一半可通过），`android/local.properties` 为 `sdk.dir=C:/Users/Vens_/AppData/Local/Android/Sdk` + `ndk.dir=D:/android-toolchain/android-ndk-r27c` —— 与上游"SDK 在仓库内 `toolchains/android/sdk`"的假设**相反**。
+⇒ **判为「不适用（Android-only 本仓）」**，除非将来确实要接上游的 Windows 资源更新流水线。第 10 项的**唯一有价值子集**是「把 SDK 位置显式归一」——而本仓已有 `local.properties` 承担同一职责。
+
+#### 10.10.3 第 6 项（MMD 安装器统一）是**同源分叉对账**，不是「710 行可直移」
+
+上游 4 件与本仓既有件的对应关系（`installed_mmd_works` 索引键两边相同，证明同源）：
+
+| 上游 | 行 | 本仓对应 | 行 | 性质 |
+| --- | --- | --- | --- | --- |
+| `MmdInstaller.java` | 263 | `MmdLibraryInstaller.java` + `MmdLibraryFiles.java` | ~330 | **分叉**：同名的 `busy` / `status` / `MAX_WORK_BYTES` / `WORKER=newSingleThreadExecutor` / `start(Context,MmdImportSession,…)` / `remove(Context,generation)` 全部对得上 |
+| `MmdImportArchive.java` | 223 | 内联在 `MmdLibraryFiles` | — | **架构分歧**：上游走 `org.apache.commons:commons-compress:1.28.0` + `org.tukaani:xz:1.10`（zip + 7z），**本仓一个都没引**，是自己解压 |
+| `MmdInstalledResources.java` | 85 | `MmdSlotFiles.prepareWorks` 部分覆盖 | — | **真新增**：启动前把工作**原子发布**（`.stage-<gen>` → rename，失败即撤回）并剪除未广告代际 |
+| `MmdAudio.java` | 139 | **无** | 0 | **真新增**：`MediaPlayer` + `HandlerThread` 单曲播放，Unity 读快照（游戏内 MMD 配乐） |
+| `MmdImportPlan/Session` | 191 / 220 | 本仓 372 / 388 | — | **本仓更大**（本仓自带 set.ini 解析/写回与槽位表）⇒ 只能小侧前向移植 |
+| 2 个 Activity | 195 / 423 | `MmdPage.kt`（Compose） | — | §七.5：**页面层不合并**，只按功能名重写 |
+
+⇒ 第 6 项会**替换本仓 MMD 作品库的后端**（该库在 §八 D 列为「本仓领先」），并新增两个 gradle 依赖（`--offline` 下若缓存没有则构建直接失败）。**必须先定架构**：取上游后端 / 保留本仓后端只补 `MmdAudio` + 原子发布 / 全量对账。
+
+#### 10.10.4 第二轮排序结论
+
+| 序 | 项 | 第二轮实测 | 处置建议 |
+| --- | --- | --- | --- |
+| — | 第 8 项 | 已完成（`b0d7382`） | — |
+| **1** | **第 6 项 MMD 安装器统一** | 同源分叉对账；**2 件真新增**（`MmdAudio` / `MmdInstalledResources`）+ 2 个新 gradle 依赖；页面层不合并 | **唯一剩下的 Android-only 产品项** ⇒ 建议下一步，但先定架构（见 §10.10.3） |
+| **2** | 第 7 项 ≡ `custom_model` 最大缺口 | 16 个文件 / ~2,700 行不出现在本仓；`hot_switch` 命中 0 | 与 `custom_model` 合并为一项，子系统级前向移植 |
+| **3** | 第 10 项 构建配置化 | 上游 schema 是 Windows 桌面多平台工作区（ResConv/EndfieldUnpacker/wwiser/dobby/iscc + resource_update） | **不适用**；本仓只需 `local.properties`（已有） |
 
 ---
 
