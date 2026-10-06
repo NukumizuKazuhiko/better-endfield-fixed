@@ -872,11 +872,11 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 
 #### 三版演进总表
 
-| 版本 | 提交 | 做法 | 结局 |
+| 版本 | 提交 | 做法 | **该提交之后**的状态（不是当前状态；当前见 §11.3） |
 |---|---|---|---|
 | ① 中继替换 | `1c65eab` | 按当时"JNI 不可直移"的判断，把三个调用改造成 relay 动词 `p`/`P` + `<status>.pcmouse` 状态文件 | 构建绿、上游 39 项夹具全过，**但从未真机验证** |
-| ② 上游 JNI 路径 | `460dd11` | 新增 `core/jni_binding.h`（`BindContextLoaderNatives`）+ `RuntimeBootstrap` 的 context classloader 前置；三个调用改回 `static native`；删去中继实现 | 真机绑定成功（`PC mouse JNI natives bound` → `call path live`），**但鼠标仍然完全无效** |
-| ③ 帧泵接线 | `6541856` | `nativeRender` 钩子在运行时加载后**保持挂载**并每帧调 `frame()` | **真机通过**：滑动连续转向、点击生效 |
+| ② 上游 JNI 路径 | `460dd11` | 新增 `core/jni_binding.h`（`BindContextLoaderNatives`）+ `RuntimeBootstrap` 的 context classloader 前置；三个调用改回 `static native`；删去中继实现 | 真机绑定成功（`PC mouse JNI natives bound` → `call path live`），**但轴仍恒 `(0,0)`** —— `frame()` 在 Java 侧那时还不存在，渲染钩子在运行时加载后照旧被摘除。**这一步只换传输层，不解决"能不能动"** |
+| ③ 帧泵接线 | `6541856` | `nativeRender` 钩子在运行时加载后**保持挂载**并每帧调 `frame()` | **真机通过**（到这一步鼠标才可用）：滑动连续转向、点击生效 |
 | 收尾 | `cbbca19` | 修复 ② 误删的一行中继注释，去掉不再需要的 `<cmath>` | `input_relay.cpp` 回到第 11 项开始前的**逐字节原状** |
 
 > **②与③的分工必须分清**：②是**架构对齐**（按"直接按照上游来"的指示把传输层换成上游形态），**不是修 bug**；③才是**功能修复**。①→②的替换并不改变鼠标能否使用 —— 真正断掉的那一环（帧泵）与传输层无关。**中继版若真机跑，症状会与 `460dd11` 一模一样。**
@@ -928,6 +928,13 @@ current.setContextClassLoader(NativeCommandBridge.class.getClassLoader());
 #### 11.2.3 ③ 帧泵缺链：鼠标无效的真正根因
 
 `460dd11` 之后绑定成功了，但**鼠标依然完全无效**（视角完全不动）。定位过程：
+
+> **「② 会不会其实已经有效？」的代码级反证**（2026-10-07 追问后追加）。两条只读命令即可判定：
+>
+> - `git diff 1c65eab 460dd11 -- .../XposedEntry.java` ⇒ **输出为空**。② 根本没碰帧泵那段；当时的 `installFrames` 仍是 `complete.set(true)` 之后立刻 `hooks.forEach(HookHandle::unhook)`。
+> - `git show 460dd11:.../NativeCommandBridge.java | grep 'static native'` ⇒ 只有 3 条（`pcMouseCaptureRequested` / `pcMouseCaptured` / `pcMouseMotion`），**没有 `frame()`**；那条"每帧驱动"的 Java 入口是 `6541856` 才加上的（该提交给 `NativeCommandBridge.java` +9 行）。
+>
+> ⇒ ② 与 ① 在"能不能动"这件事上**完全等价**：都没有任何调用方去驱动 `DispatchAndroidFrame()`。`6541856` 的提交信息（当时所写）也记着同一件事：*"The mouse bridge was bound and its capture gate opened, yet the axes stayed at zero: DispatchAndroidFrame() had no caller anywhere in this tree."* ② 拿到的是**绑定成功 + 闸门可开**，拿不到**轴动**。
 
 1. 拉日志：**`Android PC mouse: lock=…` 一行都没有**。而 `PumpAndroidPcMouseDiagnostics()` 的闸门只有 `g_pc_ui_enabled && g_diagnostics_enabled && !suspend`，且同源的 `cursor request` 行**能**打出 ⇒ 两个开关是开的，卡的是 `suspend = g_suspend || !AndroidForeground()`。
 2. 查 `g_foreground`：默认 `true`，本仓无人调 `SetAndroidForeground(false)` ⇒ 不该是它。
