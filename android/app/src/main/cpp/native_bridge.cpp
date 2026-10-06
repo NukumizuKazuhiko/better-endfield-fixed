@@ -12,6 +12,7 @@
 #include "../../../../../native/shared/third_party_modules/third_party_host.h"
 
 #include "android_virtual_keys.h"
+#include "android_frame.h"
 #include "android_pc_mouse.h"
 #include "core/jni_binding.h"
 
@@ -49,6 +50,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured(JNIEnv*, jclass, jboolean);
 extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion(JNIEnv*, jclass, jfloat, jfloat);
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_frame(JNIEnv*, jclass);
 
 namespace betterendfield {
 namespace {
@@ -59,6 +62,10 @@ constexpr int kMaximumAttempts = 1200;
 std::atomic_bool g_runtime_started{false};
 std::vector<std::unique_ptr<Module>> g_modules;
 std::unique_ptr<Il2CppRuntime> g_il2cpp_runtime;
+// The JNI frame entry reads this from the engine's render thread while the
+// worker that owns it is still starting up, so publish it with a release store
+// rather than letting the two threads race on the unique_ptr itself.
+std::atomic<Il2CppRuntime*> g_il2cpp_published{nullptr};
 BetterEndfield::ThirdParty::ThirdPartyHost g_third_party;
 HookBroker g_third_party_hooks;
 std::unique_ptr<DesktopModule> g_third_party_helper;
@@ -87,6 +94,7 @@ void RunModules() {
 
     g_il2cpp_runtime = std::make_unique<Il2CppRuntime>();
     Il2CppRuntime& runtime = *g_il2cpp_runtime;
+    g_il2cpp_published.store(&runtime, std::memory_order_release);
     for (int attempt = 1; attempt <= kMaximumAttempts; ++attempt) {
         if (runtime.Connect()) {
             break;
@@ -228,16 +236,16 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         // so setting it here is what actually stops a second copy from
         // starting a second runtime (and double-installing every hook).
         setenv("BETTER_ENDFIELD_RUNTIME_STARTED", "1", 1);
-        // The PC mouse bridge is the one panel-facing path served over JNI, the
-        // way upstream serves it. The bridge class is not visible from the
-        // namespace this library loads into, so bind it explicitly against the
-        // class the calling thread's *context* classloader resolves --
-        // RuntimeBootstrap points that loader at the module's own for this call.
+        // The panel-facing paths served over JNI, the way upstream serves them.
+        // The bridge class is not visible from the namespace this library loads
+        // into, so bind them explicitly against the class the calling thread's
+        // *context* classloader resolves -- RuntimeBootstrap points that loader
+        // at the module's own for this call.
         JNIEnv* environment = nullptr;
         if (vm == nullptr
                 || vm->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6) != JNI_OK
                 || environment == nullptr) {
-            betterendfield::LogError("runtime", "PC mouse JNI natives not bound: no environment");
+            betterendfield::LogError("runtime", "PC mouse/frame JNI natives not bound: no environment");
         } else {
             static const JNINativeMethod kPcMouseMethods[]{
                 {"pcMouseCaptureRequested", "()Z", reinterpret_cast<void*>(
@@ -246,6 +254,8 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
                     &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured)},
                 {"pcMouseMotion", "(FF)V", reinterpret_cast<void*>(
                     &Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion)},
+                {"frame", "()V", reinterpret_cast<void*>(
+                    &Java_dev_betterendfield_android_NativeCommandBridge_frame)},
             };
             if (!betterendfield::BindContextLoaderNatives(environment,
                     "dev.betterendfield.android.NativeCommandBridge", kPcMouseMethods,
@@ -257,9 +267,10 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
                 // otherwise report the module as unloaded.
                 if (environment->ExceptionCheck()) environment->ExceptionClear();
                 betterendfield::LogError("runtime",
-                    "PC mouse JNI natives not bound; PC layout keeps its touch path");
+                    "PC mouse/frame JNI natives not bound; PC layout keeps its touch path "
+                    "and the frame clients stay idle");
             } else {
-                betterendfield::LogInfo("runtime", "PC mouse JNI natives bound");
+                betterendfield::LogInfo("runtime", "PC mouse and frame JNI natives bound");
             }
         }
         // The panel presses keys through a file relay (see input_relay.cpp):
@@ -335,4 +346,27 @@ Java_dev_betterendfield_android_NativeCommandBridge_pcMouseCaptured(JNIEnv*, jcl
 extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion(JNIEnv*, jclass, jfloat dx, jfloat dy) {
     betterendfield::AddAndroidPcMouseMotion(dx, dy);
+}
+
+// One frame as the engine hands it to the scriptable render pipeline. This is
+// the only per-frame tick the native layer gets, and the one a frozen world
+// cannot silence, so every frame client is driven from here: the PC layout's
+// relative mouse reads its motion snapshot once per frame, and a snapshot that
+// never advances hands the game the same zero for every later read.
+extern "C" JNIEXPORT void JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_frame(JNIEnv*, jclass) {
+    betterendfield::Il2CppRuntime* runtime =
+        betterendfield::g_il2cpp_published.load(std::memory_order_acquire);
+    if (runtime != nullptr) {
+        // The render thread outlives every frame and is not attached on every
+        // player, so attach it once and leave it attached. Attaching and
+        // detaching around each call would tear down a thread state the engine
+        // also uses, and the frame clients enter the domain on this thread.
+        static thread_local bool attached = false;
+        if (!attached) {
+            attached = runtime->AttachCurrentThread() != nullptr;
+        }
+        if (!attached) return;
+    }
+    betterendfield::DispatchAndroidFrame();
 }

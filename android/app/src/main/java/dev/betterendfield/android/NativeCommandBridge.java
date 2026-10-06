@@ -125,6 +125,15 @@ final class NativeCommandBridge {
     static native void pcMouseMotion(float dx, float dy);
 
     /**
+     * One frame, the way the engine hands it to the scriptable render pipeline.
+     * The native frame clients advance only here -- the PC layout's relative
+     * mouse reads its motion snapshot once per frame -- so this has to be called
+     * for every rendered frame, and the hook that drives it has to stay
+     * installed for as long as the runtime is.
+     */
+    static native void frame();
+
+    /**
      * The runtime command status the native relay publishes. Empty until the
      * native runtime has loaded — the same "not ready yet" signal the JNI
      * version used to give through exceptions.

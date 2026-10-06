@@ -370,26 +370,41 @@ public final class XposedEntry extends XposedModule {
                 HookHandle handle = hook(method).intercept(chain -> {
                     Object result = chain.proceed();
                     // Frame probes: the pipeline previously stalled here with
-                    // zero evidence. Record the first frames and a periodic
-                    // heartbeat so a dead hook is visible in the journal.
+                    // zero evidence. Record the opening frames so a dead hook is
+                    // visible in the journal; after that the per-frame dispatch
+                    // below is itself the evidence that frames keep arriving.
                     int seen = frames.incrementAndGet();
-                    if (seen <= 3 || seen == 30 || seen % 300 == 0) {
+                    if (seen <= 3 || seen == 30) {
                         RuntimeLog.record("nativeRender frame " + seen
                                 + " result=" + result);
                     }
-                    if (Boolean.TRUE.equals(result) && !complete.get()) {
-                        if (announced.compareAndSet(false, true)) {
-                            RuntimeLog.record("first successful Unity frame; loading native runtime");
-                        }
-                        if (callback.getAsBoolean()) {
+                    if (Boolean.TRUE.equals(result)) {
+                        if (!complete.get() && callback.getAsBoolean()) {
+                            if (announced.compareAndSet(false, true)) {
+                                RuntimeLog.record("first successful Unity frame; loading native runtime");
+                            }
                             complete.set(true);
+                        }
+                        // nativeRender is the engine's per-frame tick and the
+                        // only one a frozen world still runs. The native frame
+                        // clients are driven from it, so the hook stays
+                        // installed while the runtime is live instead of being
+                        // removed the moment the runtime has loaded.
+                        if (RuntimeBootstrap.loaded()) {
+                            try {
+                                NativeCommandBridge.frame();
+                            } catch (Throwable error) {
+                                hooks.forEach(HookHandle::unhook);
+                                report("PC layout frame dispatch unavailable: " + error);
+                            }
+                        } else if (complete.get()) {
                             hooks.forEach(HookHandle::unhook);
                         }
                     }
                     return result;
                 });
                 hooks.add(handle);
-                if (complete.get()) handle.unhook();
+                if (complete.get() && !RuntimeBootstrap.loaded()) handle.unhook();
             }
             RuntimeLog.record("hooked " + hooks.size()
                     + " UnityPlayer.nativeRender method(s), waiting for frames");

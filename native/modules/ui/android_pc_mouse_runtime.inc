@@ -17,12 +17,17 @@ void __fastcall DetourAndroidPcCursorToggle(
     betterendfield::SetAndroidPcCursorRequest(show_cursor);
     if (g_pc_ui_enabled.load(std::memory_order_acquire) &&
         g_diagnostics_enabled.load(std::memory_order_relaxed)) {
+        // Report on a change of either argument. This state is the only gate on
+        // pointer capture, and the two arguments arrive together on the calls
+        // that matter, so keying on the pair keeps the transition visible
+        // without repeating a settled value the game keeps re-asserting.
         static thread_local int32_t last_request = -1;
-        const int32_t request = show_cursor ? 1 : 0;
+        const int32_t request = (show_cursor ? 1 : 0) | (force_update ? 2 : 0);
         if (request != last_request) {
             last_request = request;
             Log(std::string("Android PC mouse cursor request: show=") +
-                (show_cursor ? "true" : "false") + ", relative_capture=" +
+                (show_cursor ? "true" : "false") + ", force=" +
+                (force_update ? "true" : "false") + ", relative_capture=" +
                 (betterendfield::AndroidPcMouseCaptureRequested() ? "requested" : "off"));
         }
     }
@@ -58,6 +63,14 @@ float __fastcall DetourAndroidPcGetAxis(void* instance, void* axis_name, void* m
         if (g_host->copy_managed_string(g_host->context, axis_name, name, sizeof(name)) > 0) {
             const std::string_view axis(name);
             if (axis == "Mouse X" || axis == "Mouse Y") {
+                static std::atomic<uint64_t> s_axis_hits{0};
+                const uint64_t hits = s_axis_hits.fetch_add(1, std::memory_order_relaxed);
+                if (g_diagnostics_enabled.load(std::memory_order_relaxed) &&
+                    (hits < 5 || hits % 600 == 0)) {
+                    Log(std::string("Android PC mouse: game read ") + std::string(axis) +
+                        ", hit " + std::to_string(hits) + ", relative_capture=" +
+                        (betterendfield::AndroidPcMouseCaptureRequested() ? "requested" : "off"));
+                }
                 PrimeAndroidPcCursorIntent(instance);
                 float x = 0.0f, y = 0.0f;
                 if (betterendfield::ReadAndroidPcMouseMotion(x, y)) {
