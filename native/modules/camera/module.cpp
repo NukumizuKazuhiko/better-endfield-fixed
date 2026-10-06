@@ -2227,6 +2227,11 @@ void DrainMmdPanelCommand() {
 // restart. Everything after that is live.
 BE_Result BE_CALL ConfigurationChanged(const char* raw_configuration);
 
+// Defined beside the key=value parsers because it reads the same text a
+// configuration does. Declared here so the engine tick below drains it in the
+// same pass as the reload it exists to spare.
+void DrainGlobalFovCommand();
+
 void DrainConfigurationReload() {
     std::string configuration;
     if (!betterendfield::AcquirePanelCommand("camera_config", configuration)) {
@@ -2249,6 +2254,7 @@ void PumpFromEngineTick(const char* source) {
     // configuration that must not be skipped just because this tick was entered
     // from inside another one.
     DrainConfigurationReload();
+    DrainGlobalFovCommand();
     DrainMmdPanelCommand();
     FoldPanelLookInput();
 #endif
@@ -2430,6 +2436,100 @@ float ParseFloat(std::string_view value, float default_value) {
     return end && end != text.c_str() && std::isfinite(parsed)
         ? parsed
         : default_value;
+}
+
+// The settings app sends the live field of view as the same flat key=value text
+// a camera configuration uses, so one value means one thing on both paths.
+// Deliberately not ParseBoolean: its fallback would turn a misspelt key such as
+// "enable=" into a silent "off", and a switch that quietly does nothing is the
+// exact failure this channel exists to rule out. Both keys are required, because
+// a request carrying only one of them would leave the other at whatever the
+// previous request happened to be.
+bool ParseGlobalFovCommand(std::string_view text, bool& enabled, float& fov) {
+    bool have_enabled = false;
+    bool have_value = false;
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const std::size_t newline = text.find('\n', start);
+        const std::string_view raw_line = text.substr(start,
+            newline == std::string_view::npos ? std::string_view::npos : newline - start);
+        start = newline == std::string_view::npos ? text.size() : newline + 1;
+        const std::string line = Trim(raw_line);
+        if (line.empty()) {
+            continue;
+        }
+        const std::size_t equals = line.find('=');
+        if (equals == std::string::npos) {
+            return false;
+        }
+        const std::string key = Trim(line.substr(0, equals));
+        const std::string raw = Trim(line.substr(equals + 1));
+        if (key == "enabled") {
+            if (raw == "1" || raw == "true" || raw == "yes" || raw == "on") {
+                enabled = true;
+            } else if (raw == "0" || raw == "false" || raw == "no" || raw == "off") {
+                enabled = false;
+            } else {
+                return false;
+            }
+            have_enabled = true;
+        } else if (key == "value") {
+            char* end = nullptr;
+            const float parsed = std::strtof(raw.c_str(), &end);
+            if (!end || end == raw.c_str() || !std::isfinite(parsed)) {
+                return false;
+            }
+            fov = parsed;
+            have_value = true;
+        } else {
+            // An unknown key is a malformed request rather than a no-op: the
+            // settings app and this parser are supposed to spell the same way.
+            return false;
+        }
+    }
+    return have_enabled && have_value;
+}
+
+// The field-of-view slider reports on every step of a drag, so a value-only
+// change has to reach the camera without reloading the configuration: a reload
+// rebuilds every camera state to change one number, and it takes the free camera
+// and the MMD director down with it while it does. This writes the two atomics
+// the lens override already reads (see ScopedGlobalFovState) and nothing else -
+// no camera state, no layout, no hotkey. Switching the feature on or off is
+// deliberately not accepted here; that decides whether the module runs at all,
+// which a reload has to settle.
+void DrainGlobalFovCommand() {
+    std::string text;
+    if (!betterendfield::AcquirePanelCommand("global_fov", text)) {
+        return;
+    }
+    bool enabled = false;
+    float fov = g_global_fov.load(std::memory_order_relaxed);
+    if (!ParseGlobalFovCommand(text, enabled, fov) ||
+        !std::isfinite(fov) || fov < kFreeMinFov || fov > kFreeMaxFov) {
+        betterendfield::AcknowledgePanelCommand("rejected");
+        Log("Global FOV rejected: expected enabled=<bool> and value=<5..150>.");
+        return;
+    }
+    // Neither of these can be created on demand: the push hook has to have been
+    // installed and the camera state layout resolved when the configuration
+    // loaded. Accepting the value without them would report success for an
+    // override that never runs.
+    if (!g_push_state_hook_ready || !g_state_layout.ready) {
+        betterendfield::AcknowledgePanelCommand("rejected");
+        Log("Global FOV unavailable: the camera state or the push hook was not resolved.");
+        return;
+    }
+    // The lens override reads the flag first and the value second, so publish the
+    // value first: an enabled flag must never be visible ahead of the degree it
+    // is enabling.
+    g_global_fov.store(fov, std::memory_order_release);
+    g_global_fov_enabled.store(enabled, std::memory_order_release);
+    betterendfield::AcknowledgePanelCommand("applied");
+    char summary[128];
+    std::snprintf(summary, sizeof(summary),
+        "Global FOV set to %.1f degrees without reloading the configuration.", fov);
+    Log(summary);
 }
 
 int ParseVirtualKey(std::string_view value, int fallback) {

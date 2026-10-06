@@ -1360,8 +1360,56 @@ final class ModuleSettings {
         // boot-time entry point. An empty configuration is delivered too; it is
         // a valid instruction ("turn the camera module's features off") and the
         // native reload carries the exits that assignment alone cannot express.
-        boolean delivered = ModuleCommandRouter.issue(context, "camera_config", configuration);
+        // The field-of-view slider reports on every step of a drag, and every step
+        // used to reload the whole configuration: the native side rebuilds every
+        // camera state and takes the free camera and the MMD director down to
+        // apply one number. Nothing else in this text depends on the global_fov
+        // line - the lens override reads it as a plain atomic - so a value-only
+        // change travels on its own command instead. The text is still committed
+        // above, so a restart still boots into the same field of view.
+        boolean delivered = onlyGlobalFovChanged(previous, configuration)
+                ? ModuleCommandRouter.issue(context, "global_fov", globalFovCommand(configuration))
+                : ModuleCommandRouter.issue(context, "camera_config", configuration);
         return new CameraWrite(true, !configuration.isEmpty() && previous.isEmpty(), delivered);
+    }
+
+    /**
+     * True when the only line that changed between two camera configurations is
+     * the live field of view.
+     *
+     * <p>Both texts are built by {@link #setCameraSettings}, so their lines are in
+     * the same order and the same count. Requiring that shape keeps a comparison
+     * from matching two texts that were assembled by different code, which is
+     * what would let a mismatched pair silently stop delivering either one.
+     *
+     * <p>An on/off change is deliberately not covered: switching the feature
+     * decides whether the override exists at all, and only a reload settles that.
+     */
+    static boolean onlyGlobalFovChanged(String previous, String configuration) {
+        if (previous == null || previous.isEmpty() || configuration.isEmpty()) return false;
+        String[] before = previous.split("\n", -1);
+        String[] after = configuration.split("\n", -1);
+        if (before.length != after.length) return false;
+        boolean differed = false;
+        for (int index = 0; index < after.length; ++index) {
+            if (after[index].equals(before[index])) continue;
+            // Note the trailing '=': "global_fov_enabled=" is a different line,
+            // and changing it has to fall through to the reload.
+            if (!after[index].startsWith("global_fov=") || !before[index].startsWith("global_fov=")) return false;
+            differed = true;
+        }
+        return differed;
+    }
+
+    /** The two fields the live field-of-view command carries, read out of the configuration just built. */
+    static String globalFovCommand(String configuration) {
+        String enabled = "false";
+        String value = "60";
+        for (String line : configuration.split("\n", -1)) {
+            if (line.startsWith("global_fov_enabled=")) enabled = line.substring("global_fov_enabled=".length());
+            else if (line.startsWith("global_fov=")) value = line.substring("global_fov=".length());
+        }
+        return "enabled=" + enabled + "\nvalue=" + value;
     }
 
     // ----------------------------------------------------------- sustained dash
