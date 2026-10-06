@@ -531,7 +531,7 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 | `.so` | `48716592 → 48790264` 字节；SHA-256 `5433acc9… → 0e727f8f…`；`llvm-nm` 中 `AndroidUiFrame` = 96 字节本地符号 |
 | **设置写入器 JVM 验证** | 真实 `ModuleSettings.interfaceConfiguration()` 跑 8 种开关组合：三开关全关时输出**空配置**（= 模块不进游戏进程），任一开启才写出；`pc_ui_enabled` 随标志位正确变化；**写出的每个键都落在原生解析器认得的 8 个键之内**（`schema_version` 除外——版本标记，非开关） |
 
-**未完成 / 未验证**：`DeviceInfo/InputType.Keyboard` 的 IL2CPP 解析是否成功**须真机日志**——成功为 `Android PC layout: resolved InputType.Keyboard by metadata.`，失败为 `Android PC layout: Keyboard enum unavailable; leaving game layout unchanged.`。设备未接入，该项待 `PJX110`。
+**未完成 / 未验证**（2026-10-06 当晚已闭合，见 §10.7）：`DeviceInfo/InputType.Keyboard` 的 IL2CPP 解析是否成功**须真机日志**——成功为 `Android PC layout: resolved InputType.Keyboard by metadata.`，失败为 `Android PC layout: Keyboard enum unavailable; leaving game layout unchanged.`。当时设备未接入，该项待 `PJX110`；实测**失败**，根因在宿主封装层而非本项代码。
 
 **上游一致性**：上游**未**在悬浮窗侧（`OverlaySettingsPage` / `FrameworkSettings`）暴露该开关，故不改本仓悬浮窗；悬浮窗暴露属第 4 项（依赖第 3 项的跨进程设置通道）。
 
@@ -653,7 +653,50 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 **（6）顺带纠正两条此前判断**
 
 - **LSPosed 远程偏好不是文件**：`service.getRemotePreferences(group)` 落在 `/data/adb/lspd/config/modules_config.db` 的 `module_configs` 表（value 为 Java 序列化），因此在 app 私有 `shared_prefs/module_settings.xml` 里查不到 `overlay_write_authorization_v1` 是**正确**行为，此前误判为"发布失败"。
-- **`XposedServiceHelper` 经 Provider 代理取 Binder，不要求设置 app 被注入、也不要求它在 LSPosed scope 中**：实测设置 app 未在 scope 内，令牌仍成功发布、Provider 仍被游戏进程调用。此前"未注入 ⇒ 不发布"的判断被推翻。
+- **`XposedServiceHelper` 经 Provider 代理取 Binder，不要求设置 app 被注入、也不要求它在 LSPosed scope 中**：实测设置 app 未在 scope 内，令牌仍成功发布、Provider 仍被游戏进程调用。此前“未注入 ⇒ 不发布”的判断被推翻。
+
+---
+
+### 10.7 第 2 项真机回归失败并修复：宿主封装层漏同步（2026-10-06）
+
+**（1）症状**：设置 app 里打开「PC 界面布局」、完全重启游戏后，游戏内仍是手机版布局。真机日志（`PJX110`）显示配置**完整到达**、卡在枚举解析：
+
+```
+#81  [betterendfield.ui] Android PC layout: Keyboard enum unavailable; leaving game layout unchanged.
+#94  [betterendfield.ui] UI Configuration applied: enabled=true, mobile_ui_enabled=false,
+     pc_ui_enabled=true, pc_ui_effective=false, keyboard_input_type=-1, ... (effective=ACTIVE)
+```
+
+其余前置条件全绿：`device.input_type_backing` 字段解析成功、UI hooks **5 of 5 installed**、模块初始化 successful。**唯一卡点 = `keyboard_input_type=-1`。**
+
+**（2）根因（两层，同一个漏同步文件）**：本仓 `android/app/src/main/cpp/core/runtime.cpp` 的 `ReadFieldObject` 是**旧简版**，上游 `upstream/main` 早已是强化版——即"上游已修的 bug，我方合并时漏了这个宿主封装文件"：
+
+| 层 | 现象 | 上游做法 |
+|---|---|---|
+| 1 | `Keyboard` 枚举读不出（`-1`） | 直读失败后，对 `static(0x10) && literal(0x40)` 走 `System.Enum.Parse` **命名反射回退**（本机 IL2CPP **不装箱枚举字面量**，同机 `actions` 模块 `#171`"10 enum constants read through the System.Enum.Parse fallback"是同一事实的既有实证） |
+| 2 | 第一层修好后 `PumpInputType` 停在 `waiting for readable inputType backing field`，**永不推送** | 用 `field_get_flags_` 判 `kStatic(0x10)`，**只在非静态字段时才要求实例对象**；旧简版的 `instance == nullptr` 短路把 `DeviceInfo` 的静态 backing field 读一并挡死（`TryReadInputType` 传的正是 `nullptr`）。Windows 侧 host（`native/shared/host/dynamic_resolver.cpp:343`）**从来没有**这个守卫 ⇒ 同一份模块源码在两平台行为不同 |
+
+**（3）改动**：`native/modules/ui/module.cpp` **相对 HEAD 零差异**（第一层我曾在模块内自建 `ResolveEnumConstant` + `Enum.Parse` 回退，属重复劳动，已**完全回退**），修复只落在宿主封装层，与上游逐字一致：
+
+| 文件 | 改动 |
+|---|---|
+| `android/app/src/main/cpp/core/runtime.h` | +8：补 `field_get_flags_` / `field_get_parent_` / `field_get_name_` / `class_is_enum_` |
+| `android/app/src/main/cpp/core/runtime.cpp` | +40/−6：`Connect()` 解析这四个导出（`field_get_flags` 列入**必需清单**，同上游 fail-fast）；两个 `ReadFieldObject` 换成上游实现 |
+
+**（4）证据**（真机日志，无 `[REJECTED]`、无 `[managed exception]`）：
+
+| 判据 | 结果 |
+|---|---|
+| 枚举解析 | `#81 Android PC layout: resolved InputType.Keyboard by metadata.` |
+| 配置生效 | `#94 … pc_ui_effective=true, keyboard_input_type=0 … (effective=ACTIVE)` |
+| 下发 | `#171 UI layout request generation=1, mode=Keyboard` |
+| 落盘生效 | `#203 Input type pushed to 0 (was 1, now 0, active=true)` |
+| 画面 | 截图确认为**桌面(Keyboard)布局**：PC 式图标栏、右上 F1–F4/Esc/Q 键位提示 |
+| 产物 | `.so` 48,837,728 → 48,842,680 B；`assembleDebug` 成功 |
+
+**（5）教训（重要）**：核对"上游改动是否已同步"**不能只看模块文件**。`android/app/src/main/cpp/core/`（IL2CPP 宿主封装）、`native/shared/host/` 这类**宿主层**必须逐文件比对——它们的一个多余守卫就能让整条上层功能**静默失效**，且症状出现在模块里、根因在宿主里，极易误判为模块 bug。本次 §10.3 标注的"唯一真实门槛"实际就是这一个漏同步文件。
+
+**（6）过程坑**：装完新 APK 首次启动曾出现模块**完全没注入**（`native.log` 0 字节、PID 未变、无崩溃迹象），再重启一轮即恢复正常 ⇒ 判"改动把模块弄坏了"之前先重启一轮排除注入偶发失败。
 
 ---
 
