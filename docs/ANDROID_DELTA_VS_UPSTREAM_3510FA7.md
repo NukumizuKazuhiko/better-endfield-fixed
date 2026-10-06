@@ -4,15 +4,19 @@
 
 | 角色 | 提交 | 说明 |
 |---|---|---|
-| 本仓 | `5e09128` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / codec 30402 |
-| 上游 | `3510fa7` | `Dr-hydra/Better-Endfield`，v3.5.1（2026-10-05 20:54） |
+| 本仓 | `8b8a0b5` | 分支 `codex/android-thirdparty-alignment`，versionName 3.4.2 / versionCode 30402 |
+| 上游 | `3521627` | `Dr-hydra/Better-Endfield`，v3.5.1 + 1 提交（2026-10-06，社区下载站） |
 | 共同基线 | `9b1e895` | "Expand BEM v1.1/v1.2 runtime and tooling" |
 
-**口径**：`git diff 5e09128 3510fa7`，`+` = 上游有而本仓无，`−` = 本仓有而上游无。`.behw` 不计入差异——它是构建期产物（工作树里 1668 个，全在 `android/app/build/` 下），由 `android/.gitignore:3:**/build/` 忽略，两侧版本库均无此物，来源是 `-PheadwearCatalogDir`。
+> **复核记录**：§零 / §零点五 的数字于 2026-10-06 22:40 按新锚点（本仓 `5e09128 → 8b8a0b5`、上游 `3510fa7 → 3521627`）**全部重算**。上一版数字为「上游领先 39 / 本仓领先 68 / 功能面 526 与 356 / 冲突面 196」，凡与其不同处一律以本版为准；差异来源见 §10.8。
+
+**口径**：`git diff 9b1e895 3521627`，`+` = 上游有而本仓无，`−` = 本仓有而上游无。`.behw` 不计入差异——它是构建期产物（工作树里 1668 个，全在 `android/app/build/` 下），由 `android/.gitignore:3:**/build/` 忽略，两侧版本库均无此物，来源是 `-PheadwearCatalogDir`。
 
 > **统计前必读**：① `research/`（2718 文件）与 `docs/`（162）必须剔除，否则"上游改了 3418 个文件"虚高一个量级；② `git diff` 默认给非 ASCII 路径加引号，会让 `^(research|docs)/` 过滤**漏掉 12 个文件** ⇒ 一律用 `git -c core.quotepath=false diff --name-only`。本文所有数字均按此重算。
 
 **一句话结论**：页面层零重叠（两侧各 59 个类，32 个上游独有、32 个本仓独有、27 个同名）；可直移的是**引擎类**（MMD 安装器、跨进程设置通道、模型覆盖层工具），必须重写的是**所有页面**。原生侧只有三块需要动：`ui/module.cpp`（PC UI）、`custom_model`（模型覆盖层）、`shared/android_compat`（**只增不覆**）。
+
+**进度（2026-10-06 22:40）**：§六 清单一至五项**全部落地并真机验证**（含宿主封装层的漏同步修复，见 §10.7），原生侧三块中 `ui/module.cpp` **已与上游同步**；**最大剩余缺口收敛为 `native/modules/custom_model/module.cpp`**（上游 +1448/−206，在 Android 编译面内），其余为第六至十项的顺手活。
 
 ---
 
@@ -23,17 +27,19 @@
 ```bash
 git fetch upstream --prune
 BASE=$(git merge-base HEAD upstream/main)   # 9b1e895
-git rev-list --count $BASE..upstream/main   # 39
-git rev-list --count $BASE..HEAD            # 68
+git rev-list --count $BASE..upstream/main   # 40
+git rev-list --count $BASE..HEAD            # 75
 ```
 
 | 项 | 值 |
 |---|---|
 | 共同基线 | `9b1e895`「Expand BEM v1.1/v1.2 runtime and tooling」（2026-09-26） |
-| 上游 HEAD | `3510fa7` **v3.5.1**（2026-10-05 20:54），领先 **39** 个提交（含 1 个 merge） |
-| 本仓 HEAD | `5e09128`（2026-10-05 22:52），领先 **68** 个提交 |
-| 上游改动文件 | 全部 **3418**；功能面 **526**（剔 `research/` 2718 + `docs/` 162） |
-| 本仓改动文件 | 全部 **386**；功能面 **356** |
+| 上游 HEAD | `3521627`（2026-10-06），领先 **40** 个提交（含 1 个 merge） |
+| 本仓 HEAD | `8b8a0b5`（2026-10-06 22:12），领先 **75** 个提交 |
+| 上游改动文件 | 功能面 **545**（剔 `research/` + `docs/`） |
+| 本仓改动文件 | 功能面 **361** |
+
+> 与上一版（`3510fa7` / `5e09128`）的差：上游 +1 提交（`3521627`，新增 `web/mod-center/**` 21 件 + 两处「下载站」入口）⇒ 功能面 526 → **545**；本仓 +7 提交（第 3/4 项、宿主同步与文档）⇒ 功能面 356 → **361**。
 
 ### 0.2 文件层四分法（功能面）
 
@@ -49,45 +55,73 @@ comm -13 up.txt our.txt   # 本仓独有
 | 桶 | 数 | 定义 | 处置 |
 |---|---|---|---|
 | **纯未同步 · 本仓有旧版** | **113** | 上游改、本仓自基线未动，且文件在本仓树里 | 直接取上游版（无冲突） |
-| **纯未同步 · 上游新增** | **217** | 上游改、本仓树里根本没有 | 按 §三 编译面分级取舍 |
-| **冲突面** | **196** | 双方自基线都改过 | 逐 hunk / 小侧前向移植，**绝不整文件覆盖** |
+| **纯未同步 · 上游新增** | **231** | 上游改、本仓树里根本没有 | 按 §三 编译面分级取舍 |
+| **冲突面** | **201** | 双方自基线都改过 | 逐 hunk / 小侧前向移植，**绝不整文件覆盖** |
 | **本仓独有 · 独有独改** | **138** | 本仓新增或改、上游未动 | **保护**，合并时不得被覆盖 |
 | **本仓独有 · 主动删除** | **22** | 本仓删、上游未动 | 本仓有意为之（Compose 迁移删 View/XML） |
 
-**校验**：`113 + 217 + 196 = 526` = 上游功能面 ✓；`196 + 138 + 22 = 356` = 本仓功能面 ✓
+**校验**：`113 + 231 + 201 = 545` = 上游功能面 ✓；`201 + 138 + 22 = 361` = 本仓功能面 ✓
+
+> **较上一版的变化**（逐件核对，非估算）：
+> - **上游新增桶 217 → 231（+14）**：来源是上游 `3521627` 的 `web/mod-center/**`（该提交共 21 件，18 件计入功能面差异，另 3 件与旧桶抵消）。
+> - **冲突面 196 → 201（+5）**：`OverlaySettingsClient.java`、`OverlaySettingsProvider.java`、`OverlayWriteAuthorization.java`、`OverlayWritePolicy.java`（本轮新移植的通道文件，上游自基线已有 ⇒ **实际取上游版，零冲突**）+ `web/package.json`。**无一件冲突面减少**。
+> - **纯未同步·本仓有旧版（113）与主动删除（22）两桶两轮完全不变** —— 这两桶才是"零冲突可直接取"的口径。
 
 > **"上游独有"≠"上游新增"**：22 个本仓主动删除的文件（`ColorWheelView.java`、`ValueSlider.java`、15 个 `res/drawable/bg_*.xml`、3 个 `res/color/*.xml`、2 个 `res/layout/bem_spinner_*.xml`）在 `git diff 本仓 上游` 里同样显示为"上游新增"，实际是本仓删掉的。判"真缺 vs 被替换"必须过一遍 `git cat-file -e HEAD:<path>`。
 
 ### 0.3 目录分布
 
+**（a）进 Android 编译面 / 与安卓功能相关**
+
 | 目录 | 上游改 | 本仓改 | 纯未同步 | 冲突面 |
 |---|---|---|---|---|
 | `native/modules` | 142 | 100 | 64 | **78** |
-| `android/app` | 97 | 128 | 49 | **48** |
-| `native/tests` | 75 | 25 | **67** | 8 |
-| `tools/CustomModel` | 44 | 16 | 28 | 16 |
-| `ui/BetterEndfield.UI` | 37 | 4 | 33 | 4 |
+| `android/app` | 97 | **133** | 45 | **52** |
 | `native/shared` | 29 | 22 | 8 | **21** |
-| `android/resources` | 9 | 3 | 9 | 0 |
-| `tools/HookInlineScan` | 5 | 0 | 5 | 0 |
+| `tools/CustomModel` | 44 | 16 | 28 | 16 |
 | `tools/ThirdPartyModules` | 7 | 6 | 1 | 6 |
+| `tools/FirstPersonProfiles` | 6 | 6 | 0 | 6 |
+| `android/resources` | 9 | 0 | 9 | 0 |
+| `tools/CombatDataExporter` | 4 | 1 | 3 | 1 |
 
-> 两侧都最重的两个目录即主战场：`native/modules` 与 `android/app`。`native/tests` 上游新增 66 件**本仓一件没有** —— 那是上游自带回归测试，是本仓唯一可用的验收判据。
+**（b）上游自带回归测试**
+
+| 目录 | 上游改 | 本仓改 | 纯未同步 | 冲突面 |
+|---|---|---|---|---|
+| `native/tests` | 75 | 25 | **67** | 8 |
+| `ui/tests` | 4 | 0 | 4 | 0 |
+
+**（c）不进本仓 Android 编译面（只记不移）**
+
+| 目录 | 上游改 | 本仓改 | 纯未同步 | 冲突面 | 性质 |
+|---|---|---|---|---|---|
+| `web` | 28 | 6 | 26 | 2 | 下载站 / 数据可视化前端（含本轮 `mod-center`） |
+| `scripts` | 28 | 0 | 28 | 0 | 发布 / 打包脚本 |
+| `config` | 11 | 0 | 11 | 0 | 桌面配置 |
+| `manifests` | 6 | 0 | 6 | 0 | WPF 清单 |
+| `ui/BetterEndfield.UI` | 37 | 4 | 33 | 4 | Windows WPF 桌面端 |
+| `tools/HookInlineScan` | 5 | 0 | 5 | 0 | 依赖 minhook |
+
+> **上一版此表只列了 9 行**，漏掉 `web` / `scripts` / `config` / `manifests` / `ui/tests` / `tools/FirstPersonProfiles` / `tools/CombatDataExporter` 共 7 个目录（其中 `scripts`、`web` 各 28 件，量级与 `native/shared` 相当）。本版补齐，并**明确标注（c）类不进本仓 Android 编译面** —— 这是此前把"上游改了 3400+ 文件"读成压力来源的原因。
+>
+> 两侧都最重的两个目录即主战场：`native/modules` 与 `android/app`（本仓改 133 > 上游 97，方向已反转）。`native/tests` 上游的 67 件里 **66 件本仓一件没有** —— 那是上游自带回归测试，是本仓唯一可用的验收判据。
 
 ### 0.4 与既有清点文档的数字差异（本次更正）
 
-| 项 | `ANDROID_UNPORTED_FEATURES_20261005.md` 原文 | 本次实测 |
-|---|---|---|
-| 上游功能面改动文件 | 538 | **526**（原数含 12 个被引号转义而漏过滤的 `research/` 文件） |
-| 纯未同步 | 342（= 113 + 229） | **330**（= 113 + **217**） |
-| 冲突面 / 本仓功能面 | 196 / 356 | 一致 ✓ |
-| 本仓独有 | 未拆 | **160** = 独有独改 138 + 主动删除 22 |
+| 项 | 清点文档原文 | 上一版实测（`5e09128` / `3510fa7`） | **本版实测（`8b8a0b5` / `3521627`）** |
+|---|---|---|---|
+| 上游功能面改动文件 | 538 | 526（原数含 12 个被引号转义而漏过滤的 `research/` 文件） | **545** |
+| 纯未同步 | 342（= 113 + 229） | 330（= 113 + 217） | **344（= 113 + 231）** |
+| 冲突面 / 本仓功能面 | 196 / 356 | 一致 ✓ | **201 / 361** |
+| 本仓独有 | 未拆 | 160 = 独有独改 138 + 主动删除 22 | **160（两桶均未变）** |
+
+> 三列数字**口径完全一致**，差异只来自锚点前移：上游 +1 提交、本仓 +7 提交。清点文档 `ANDROID_UNPORTED_FEATURES_20261005.md` 的逐条功能面仍以 `3510fa7` 为基线，**数字已再次过时**，但其"未同步功能清单"的条目本身未失效。
 
 ---
 
-## 零点五、冲突面 196 件：按上游领先排序
+## 零点五、冲突面 201 件：按上游领先排序
 
-`gap = (上游 +/−) − (本仓 +/−)`；`git diff --numstat $BASE..<ref>` 双测后 join 排序。**gap ≥ 7 的 32 件全列于下；其余 164 件 gap ≤ 6（其中 157 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
+`gap = (上游 +/−) − (本仓 +/−)`，按**总改动行数**（`+` 与 `−` 之和）之差排序；`git diff --numstat $BASE..<ref>` 双测后 join。**gap ≥ 7 的 31 件全列于下；其余 170 件 gap ≤ 6（其中 126 件 gap = 0，即双方改动量相当，多为同一功能各改各的）。**
 
 | # | 文件 | 本仓 | 上游 | gap | 判定 |
 |---|---|---|---|---|---|
@@ -97,47 +131,54 @@ comm -13 up.txt our.txt   # 本仓独有
 | 4 | `tools/CombatDataExporter/export_combat_data.py` | +25/−7 | +249/−280 | 497 | 工具 |
 | 5 | `native/tests/android_world_binding_tests.cpp` | +168/−0 | +629/−0 | 461 | 上游测试 |
 | 6 | `native/modules/camera/first_person_runtime.inc` | +433/−71 | +775/−77 | 348 | **第一人称专有 ⇒ 取本仓** |
-| 7 | `android/.../custom_model/world_resource_adapter.inc` | +45/−22 | +268/−79 | 280 | Android 世界资源绑定 |
-| 8 | `native/modules/camera/module.cpp` | +1290/−91 | +1433/−217 | 269 | 重度分叉 · 绝不整体替换 |
-| 9 | `ui/BetterEndfield.UI/MainWindow.xaml` | +66/−0 | +289/−5 | 228 | Windows WPF |
-| 10 | `android/.../java/.../GameOverlay.java` | +724/−379 | +785/−502 | 184 | 悬浮窗宿主 |
-| 11 | `android/.../cpp/native_bridge.cpp` | +89/−1 | +228/−42 | 180 | JNI 桥 |
-| 12 | `android/.../java/.../BemInstaller.java` | +154/−6 | +256/−77 | 173 | BEM 安装器 |
-| 13 | `native/modules/ui/module.cpp` | +13/−2 | +119/−35 | 139 | **缺 PC UI**（本仓 `PumpInputType` 仍逐字同基线） |
-| 14 | `native/modules/custom_model/bem.cpp` | +444/−71 | +515/−76 | 76 | 近乎持平 |
-| 15 | `README.en.md` | +32/−148 | +130/−122 | 72 | 文档 |
-| 16 | `android/.../cpp/core/runtime.cpp` | +53/−0 | +89/−21 | 57 | 运行时 |
-| 17 | `android/.../custom_model_module.cpp` | +11/−10 | +61/−17 | 57 | 模块入口 |
-| 18 | `native/modules/custom_model/generic_model_matcher.h` | +158/−0 | +215/−0 | 57 | 通用匹配 |
-| 19 | `native/CMakeLists.txt` | +49/−0 | +94/−1 | 46 | **只增不覆** |
-| 20 | `android/app/src/main/AndroidManifest.xml` | +12/−0 | +56/−1 | 45 | 清单 |
-| 21 | `android/.../java/.../BemOptions.java` | +6/−1 | +38/−3 | 34 | 选项 |
-| 22 | `README.md` | +26/−254 | +104/−206 | 30 | 文档 |
-| 23 | `native/modules/custom_model/mod_registry.cpp` | +42/−4 | +68/−4 | 26 | 注册表 |
-| 24 | `native/tests/generic_model_matching_tests.cpp` | +142/−0 | +167/−0 | 25 | 上游测试 |
-| 25 | `tools/CustomModel/package_toolchain.py` | +6/−3 | +26/−7 | 24 | 工具 |
-| 26 | `android/.../res/layout/activity_main.xml` | +0/−531 | +51/−500 | 20 | ★ 本仓删除、上游改写 |
-| 27 | `android/.../java/.../BemInstalledResources.java` | +18/−5 | +30/−11 | 18 | 资源物化 |
-| 28 | `native/modules/actions/pose_overlay.inl` | +1/−1 | +18/−0 | 16 | actions |
-| 29 | `native/modules/custom_model/bem.h` | +60/−4 | +74/−4 | 14 | 头 |
-| 30 | `android/.../cpp/CMakeLists.txt` | +34/−1 | +39/−4 | 8 | **只增不覆** |
-| 31 | `android/.../java/.../BemInstallActivity.java` | +0/−203 | +26/−185 | 8 | ★ 本仓删除、上游改写 |
-| 32 | `android/.../cpp/installer/install_jni.cpp` | +2/−0 | +6/−3 | 7 | 安装器 |
+| 7 | `android/.../cpp/modules/custom_model/world_resource_adapter.inc` | +45/−22 | +268/−79 | 280 | Android 世界资源绑定 |
+| 8 | `ui/BetterEndfield.UI/MainWindow.xaml` | +66/−0 | +289/−5 | 228 | Windows WPF |
+| 9 | `android/.../java/.../GameOverlay.java` | +724/−379 | +785/−502 | 184 | 悬浮窗宿主 |
+| 10 | `android/.../cpp/native_bridge.cpp` | +89/−1 | +228/−42 | 180 | JNI 桥 |
+| 11 | `native/modules/camera/module.cpp` | +1390/−91 | +1433/−217 | 169 | 重度分叉 · 绝不整体替换 |
+| 12 | `android/.../java/.../BemInstaller.java` | +187/−6 | +256/−77 | 140 | BEM 安装器 |
+| 13 | `native/modules/custom_model/bem.cpp` | +444/−71 | +515/−76 | 76 | 近乎持平 |
+| 14 | `README.en.md` | +32/−148 | +130/−122 | 72 | 文档 |
+| 15 | `android/.../cpp/modules/custom_model/custom_model_module.cpp` | +11/−10 | +61/−17 | 57 | 模块入口 |
+| 16 | `native/modules/custom_model/generic_model_matcher.h` | +158/−0 | +215/−0 | 57 | 通用匹配 |
+| 17 | `native/CMakeLists.txt` | +49/−0 | +94/−1 | 46 | **只增不覆** |
+| 18 | `android/.../AndroidManifest.xml` | +17/−0 | +56/−1 | 40 | 清单 · 本轮新增 `OverlaySettingsProvider` |
+| 19 | `README.md` | +26/−254 | +104/−206 | 30 | 文档 |
+| 20 | `native/modules/custom_model/mod_registry.cpp` | +42/−4 | +68/−4 | 26 | 注册表 |
+| 21 | `native/tests/generic_model_matching_tests.cpp` | +142/−0 | +167/−0 | 25 | 上游测试 |
+| 22 | `tools/CustomModel/package_toolchain.py` | +6/−3 | +26/−7 | 24 | 工具 |
+| 23 | `android/.../res/layout/activity_main.xml` | +0/−531 | +51/−500 | 20 | ★ 本仓删除、上游改写 |
+| 24 | `android/.../java/.../BemInstalledResources.java` | +18/−5 | +30/−11 | 18 | 资源物化 |
+| 25 | `android/.../java/.../BemOptions.java` | +22/−1 | +38/−3 | 18 | 选项 |
+| 26 | `native/modules/actions/pose_overlay.inl` | +1/−1 | +18/−0 | 16 | actions |
+| 27 | `native/modules/custom_model/bem.h` | +60/−4 | +74/−4 | 14 | 头 |
+| 28 | `android/.../cpp/core/runtime.cpp` | +93/−6 | +89/−21 | 11 | 宿主封装 · 本轮已并入上游 `ReadFieldObject`（§10.7） |
+| 29 | `android/.../cpp/CMakeLists.txt` | +34/−1 | +39/−4 | 8 | **只增不覆** |
+| 30 | `android/.../java/.../BemInstallActivity.java` | +0/−203 | +26/−185 | 8 | ★ 本仓删除、上游改写 |
+| 31 | `android/.../cpp/installer/install_jni.cpp` | +2/−0 | +6/−3 | 7 | 安装器 |
 
 > 路径缩写：`android/.../` = `android/app/src/main/`；`android/.../java/.../` = `android/app/src/main/java/dev/betterendfield/android/`；`android/.../cpp/` = `android/app/src/main/cpp/`；`android/.../cpp/modules/…` 同理。
 
+**榜面变动（逐件复核，非估算）**：上一版 32 件 → 本版 **31 件**，**唯一掉出的是 `native/modules/ui/module.cpp`**（原 gap **139**，本仓 `PumpInputType` 与基线逐字相同 ⇒ 现已并入上游全部改动，见 §六 第 2 项与 §10.3）。**其余 31 件与上一版是同一集合**，仅 gap 值随锚点前移变动；三处值得注意：
+
+- `camera/module.cpp` **269 → 169**（本仓 +1290/−91 → +1390/−91，持续投入）；
+- `BemInstaller.java` **173 → 140**（本轮新增 `saveChanges()` 后向上游靠拢，见 §10.6）；
+- `core/runtime.cpp` **57 → 11**（本轮补齐 4 个导出 + `ReadFieldObject`，见 §10.7；余下 11 是本仓独有的其他改动，不是未同步量）。
+
 **其中 6 件是「本仓整文件删除、上游同期又改写」**（本仓侧 `+0/−N`）：
 
-| 文件 | 本仓 | 上游 |
-|---|---|---|
-| `MainActivity.java` | +0/−1031 | +189/−406 |
-| `res/layout/activity_main.xml` | +0/−531 | +51/−500 |
-| `BemInstallActivity.java` | +0/−203 | +26/−185 |
-| `SettingRow.java` | +0/−157 | +2/−44 |
-| `res/layout/activity_bem_install.xml` | +0/−111 | +3/−110 |
-| `SectionCard.java` | +0/−110 | +2/−43 |
+| 文件 | 本仓 | 上游 | gap | 在主榜 |
+|---|---|---|---|---|
+| `MainActivity.java` | +0/−1031 | +189/−406 | **−436** | 否 |
+| `res/layout/activity_main.xml` | +0/−531 | +51/−500 | +20 | 是（#23） |
+| `BemInstallActivity.java` | +0/−203 | +26/−185 | +8 | 是（#30） |
+| `SettingRow.java` | +0/−157 | +2/−44 | **−111** | 否 |
+| `res/layout/activity_bem_install.xml` | +0/−111 | +3/−110 | +2 | 否 |
+| `SectionCard.java` | +0/−110 | +2/−43 | **−65** | 否 |
 
 > 这 6 件**不是"上游新增"**，是本仓 Compose 迁移时删掉的 View/XML，上游同期又改了它们 ⇒ 合并时**不要按上游 resurrect**。
+
+> **⚠ 口径盲区（本版新发现）**：这 6 件里 **4 件的 gap 是负数** —— 本仓删掉整个文件，改动行数（`+0/−N`）**反超**上游的改写量，于是按 gap 排名永远排不上榜。**"gap 排名"会系统性漏掉"本仓已删、上游又改"的文件**，判"上游新增 vs 本仓删除"必须另走 `git cat-file -e HEAD:<path>` 二分（命令见 §九），不能只看本表。（上一版把这 3 件单列在小表里是对的，本版保留此表并补上 gap 实测值。）
 
 ---
 
@@ -145,13 +186,15 @@ comm -13 up.txt our.txt   # 本仓独有
 
 统计口径：`android/app/src/main/java/dev/betterendfield/android/`
 
-| 集合 | 数量 |
-|---|---|
-| 上游类总数 | 59 |
-| 本仓类总数 | 59 |
-| A. 上游独有 | 32 |
-| B. 本仓独有 | 32 |
-| C. 两侧同名（含重度分叉） | 27 |
+| 集合 | 数量 | 较上一版 |
+|---|---|---|
+| 上游类总数 | 59 | 不变 |
+| 本仓类总数 | **64** | 59 → 64（第 3/4 项新增 5 件） |
+| A. 上游独有 | **28** | 32 → 28（其中 4 件已移植入本仓 ⇒ 移入 C 桶） |
+| B. 本仓独有 | **33** | 32 → 33（新增 `OverlayModelPage.kt`） |
+| C. 两侧同名（含重度分叉） | **31** | 27 → 31（`OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization`） |
+
+> **口径**：按 `android/app/src/main/java/dev/betterendfield/android/` 下的 `.java` / `.kt` **文件名集合**比较，与 `git ls-tree -r --name-only <ref> -- <dir>` 一致（校验：`64 − 33 = 31`，`59 − 28 = 31` ✓）。
 
 ### A. 上游独有 32 类（按可移植性分三档）
 
@@ -189,7 +232,7 @@ View/XML + `Activity`。本仓是 Compose，**不可直移**。
 | `BemInstallActivity.java` | 44 | `.bem` 导入口（`exported=true`） | `BemInstallActivity.kt`(70) |
 | `FrameworkServiceWait.java` | 30 | 框架服务等待页 | 本仓 `HomePage.kt` 内 |
 
-#### A3 — 自绘控件/样式类：**并入本仓 Compose 组件库**（14 个，共 1,155 行）
+#### A3 — 自绘控件/样式类：**并入本仓 Compose 组件库**（10 个，共 876 行）
 
 上游手写 `View`/`LinearLayout` 组件。本仓有 `UiComponents.kt`(1019) + `UiTheme.kt`(107) + `UiTokens.kt`(174) 等价体系 ⇒ **不移植，只做视觉/交互对齐**。
 
@@ -200,19 +243,17 @@ View/XML + `Activity`。本仓是 Compose，**不可直移**。
 | `SponsorDialog.java` | 146 | 赞助弹窗（微信/爱发电/PayPal + 保存赞赏码到相册） |
 | `SettingRow.java` | 115 | 开关行（`Switch` + 主副标题） |
 | `ControlIcon.java` | 76 | `Canvas` 手绘悬浮窗图标（7 种） |
-| `ThirdPartyModulesPage.java` | 70 | 第三方模块列表页块 |
+| `ThirdPartyModulesPage.java` | **77** | 第三方模块列表页块（上游 `3521627` 加「下载站」按钮 +7；本仓该页为 `ThirdPartyModulesActivity.kt`，**不跟进**，理由见 §10.8-3） |
 | `SectionCard.java` | 69 | 卡片容器 |
 | `OverlayGeometry.java` | 63 | 悬浮窗布局/贴边几何（`usableArea` / `normalized` / `nearestHorizontalEdge`）— **纯数学，可直移** |
-| `OverlaySettingsProvider.java` | 92 | **`exported=true` ContentProvider**，只实现 `call()` |
-| `OverlayWritePolicy.java` | 93 | 写权限判据（UID / 分割 UID / token 常量时间比对）— **纯逻辑，可直移** |
-| `OverlayWriteAuthorization.java` | 50 | `AtomicFile` 持久化 64 位 hex token |
-| `OverlaySettingsClient.java` | 44 | 游戏进程侧单线程发送端 |
 | `GlobalFovUpdater.java` | 27 | 500 ms 轮询权威 prefs → `NativeCommandBridge.globalFov` |
 | `BemHotSwitchUpdate.java` | 32 | 热切换状态数据类 |
 
-> 注：`OverlayGeometry` / `OverlayWritePolicy` / `OverlayWriteAuthorization` / `OverlaySettingsClient` / `GlobalFovUpdater` 五个虽列在 A3，但**无 View 依赖**，实为可直移项，一并归入 A1 的移植批次。
+> 注：`OverlayGeometry` / `GlobalFovUpdater` 两个虽列在 A3，但**无 View 依赖**，实为可直移项。
+>
+> **已移出 A3（本轮移植入本仓）**：`OverlaySettingsProvider.java`(92) / `OverlayWritePolicy.java`(93) / `OverlayWriteAuthorization.java`(50) / `OverlaySettingsClient.java`(44) 四件 —— 第 3 项**已完成**，它们不再是"上游独有"，现归 §一 C 桶（同名）。因此 A3 由 14 个 1,155 行降为 **10 个 876 行**，A 桶总数 32 → **28**。
 
-### B. 本仓独有 32 类（上游已删除或从未有）
+### B. 本仓独有 33 类（上游已删除或从未有）
 
 | 类 | 行 | 性质 |
 |---|---|---|
@@ -223,8 +264,11 @@ View/XML + `Activity`。本仓是 Compose，**不可直移**。
 | `MmdLibraryFiles.java` / `MmdLibraryInstaller.java` / `MmdSlotFiles.java` | 155 / 358 / 240 | 本仓 MMD 落地链（上游用 `MmdInstaller` 单件） |
 | `CameraVmdFile.java` | 90 | VMD 文件物化（跨 UID 流式落地） |
 | Compose 层：`SettingsShell` `SettingsPages` `SettingsState` `UiComponents` `UiTheme` `UiTokens` `HomePage` `ExperiencePage` `MmdPage` `FirstPersonPage` `CameraMotionPage` `BemInstallScreen` `BemInstallState` `ThirdPartyModulesActivity`(kt) `MainActivity`(kt) `OverlayPanel` `OverlaySurface` `OverlayControls` `OverlayTheme` `FloatingHandle` `ToolPages` | 4,624 | 全部 UI，与上游零交集 |
+| `OverlayModelPage.kt` | **613** | **本轮新增（第 4 项）**：悬浮窗「模型管理 / 游戏视野」页，Compose 重写，含 `OverlaySwitch`/`OverlayPicker`/`OverlaySlider` 三个自绘控件。**上游对应物是 `OverlaySettingsPage.java`（View/XML，在 A2），故本件计入 B 桶而非 C** ⇒ B 桶 32 → **33** |
 
-### C. 两侧同名 27 类（差异规模，按行数降序）
+### C. 两侧同名 31 类（差异规模，按行数降序）
+
+> **本桶 +4（27 → 31）**：`OverlaySettings{Client,Provider}` 与 `OverlayWritePolicy` / `OverlayWriteAuthorization` —— 第 3 项本轮把这 4 件从 A 桶移植入本仓，故由"上游独有"转为"同名"。
 
 | 类 | 上游新增 | 本仓独有 | 判定 |
 |---|---|---|---|
@@ -241,9 +285,13 @@ View/XML + `Activity`。本仓是 Compose，**不可直移**。
 | `BemInstalledResources.java` | 19 | 13 | 轻度 |
 | `BemOptions.java` | 37 | 7 | 轻度 |
 | `Hotkeys.java` | 2 | 31 | 轻度 |
-| `OverlayFeatures.java` | 10 | 18 | 轻度：本仓多了 `vmdCamera` 预留位 |
+| `OverlayFeatures.java` | 10 | 18 | 轻度：本仓多了 `vmdCamera` 与本轮新增的 `models`（第 8 字段，门禁「模型管理」入口） |
 | `ModuleCommandRouter.java` | 2 | 15 | 轻度 |
 | `ModuleConfigurations.java` | 7 | 15 | 轻度 |
+| `OverlayWritePolicy.java` | 93 | 93 | **本轮移植** · 逐字直移（纯逻辑、Android-free；另有设备外 harness 56 项断言全绿） |
+| `OverlaySettingsProvider.java` | 92 | **97** | **本轮移植** · 本仓版比上游多 5 行（fov 分支改用 `OverlayWritePolicy.requireRevision`，模型分支接 `BemInstaller.saveChanges/disableAll`，见 §10.6） |
+| `OverlayWriteAuthorization.java` | 50 | 50 | **本轮移植** · 逐字直移（`AtomicFile` 令牌，读取上限 65 字节） |
+| `OverlaySettingsClient.java` | 44 | 44 | **本轮移植** · 逐字直移（单线程 daemon executor + post 回主 Looper） |
 | `ThirdPartyModuleStore.java` | 2 | 16 | 轻度 |
 | `ThirdPartyRuntimeMaterializer.java` | 1 | 1 | 基本一致 |
 | `ActionPoseAssets` `AstcSupport` `BemParameters` `ModelPresetIndex` `ModuleApplication` `ThirdPartyModuleActivity` `ThirdPartyModulePackage` `VoiceCatalogIndex` `VoiceCatalogMaterializer` | 0 | 0 | **逐字相同** |
@@ -261,30 +309,36 @@ View/XML + `Activity`。本仓是 Compose，**不可直移**。
 | `res/values*/` | 8→6 个 | 上游把 `model_overlay.xml` **改名**为 `model_management.xml`，新增 `overlay_settings.xml`（透明度/自动贴边） | 上游新增 |
 | `AndroidManifest.xml` | M | 见下 | 双方都改 |
 
+> **第 2 / 4 项落地后的变化**：上游 `res/values*/` 的 `overlay_settings.xml`（悬浮窗设置页的 View 布局）**本仓不需要** —— 第 4 项用 Compose 重写（`OverlayModelPage.kt`，§一 B 桶）；上游 `strings.xml` 里本仓缺的 `ui_pc` / `ui_pc_hint` **已在第 2 项补齐**（照上游中文文案，§10.3）。其余缺失项仍按本表口径：**多数是本仓 Compose 迁移的主动删除，不是上游领先**。
+
 **Manifest 差异**（核验过）：
 
 ```xml
-<!-- 上游 3510fa7 -->
+<!-- 上游 3510fa7（本仓现与之对齐，另保留自己那个只读 provider） -->
 <provider android:name=".OverlaySettingsProvider"
     android:authorities="dev.betterendfield.android.overlay.settings"
     android:exported="true" android:grantUriPermissions="false" />
 
-<!-- 本仓 5e09128 -->
+<!-- 本仓新增（`30503d3`，第 3 项）—— 上面的那份 -->
+<!-- 本仓原有，保留 -->
 <provider android:name=".RuntimeJournalProvider"
     android:authorities="${applicationId}.journal"
     android:exported="true" />
 ```
 
-两侧各有一个 `exported=true` 的 ContentProvider，**不是同一个**：
-- 上游 = `OverlaySettingsProvider`（跨进程**写**设置，只实现 `call()`，query/insert/update/delete 全抛 `SecurityException`）；
-- 本仓 = `RuntimeJournalProvider`（只读日志/运行时状态，上游无此物，属本仓 32 个独有类之一）。
+**本仓现有两个 `exported=true` 的 ContentProvider**（第 3 项落地前只有一个）：
 
-⇒ 若移植第 3 项（跨进程设置通道），需在 Manifest 里**新增**这个 provider，而非替换本仓已有的 journal provider。其余 Activity 两侧均为 `exported=false`，只有导入口不同（上游 `.BemInstallActivity` + `.ThirdPartyModuleActivity`，本仓 `.BemInstallActivity` + `.ThirdPartyModulesActivity` + `.ThirdPartyModuleActivity`）。
+| Provider | 来源 | 职责 |
+|---|---|---|
+| `OverlaySettingsProvider` | **第 3 项新增**（`30503d3`） | 跨进程**写**设置：只实现 `call()`，`query`/`insert`/`update`/`delete` 全抛 `SecurityException("Unsupported")`（已核源码 :92–:96）；鉴权失败抛 `SecurityException("Caller cannot modify module settings")`（:30）。UID + 令牌双因子 + revision 乐观并发 + 有界补丁（`MAX_PATCH=16 KiB`） |
+| `RuntimeJournalProvider` | 本仓原有（上游无此物，属本仓独有类） | 只读日志/运行时状态 |
+
+⇒ **Manifest 是"新增"而非"替换"**：本仓保留自己的 journal provider。其余 Activity 两侧均为 `exported=false`，只有导入口不同（上游 `.BemInstallActivity` + `.ThirdPartyModuleActivity`，本仓 `.BemInstallActivity` + `.ThirdPartyModulesActivity` + `.ThirdPartyModuleActivity`）。
 
 **strings 差量**：本仓 282 条 vs 上游 170 条（命名体系不同，不可直接比对）。上游独有的 74 条中，**属于功能声明**的关键项：
 
 ```
-ui_pc / ui_pc_hint                      ← PC 界面布局开关（界面增强卡片第 3 个开关）
+ui_pc / ui_pc_hint                      ← PC 界面布局开关（界面增强卡片第 3 个开关）【第 2 项已落地并真机验证，§10.3 / §10.7】
 camera_advanced_* / camera_motion_* / camera_orbit_speed / camera_smoothing
 camera_keyframe_* / camera_fp_side_limit / camera_fp_turn_speed
 mmd_enable / mmd_loop / mmd_body / mmd_face / mmd_cloth_* / mmd_terrain / mmd_gain
@@ -303,7 +357,8 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 |---|---|
 | 上游**新增** | `core/jni_binding.h`（统一 `BindContextLoaderNatives`：走当前线程 `ClassLoader.loadClass` 注册 natives，**不做双命名空间兜底**）、`core/runtime_status.h`（`RuntimeStatus` 类，产出 `BE_RUNTIME_V1\n<id>=<state>\n`） |
 | 上游**删除**（本仓独有） | `core/panel_commands.cpp`、`input_relay.cpp`、`modules/camera/first_person_look_probe.{cpp,h}`、`modules/custom_model/android_headwear_canary.cpp` |
-| 双方都有、内容不同 | `CMakeLists.txt`、`core/command_pump.{cpp,h}`、`core/hook_broker.cpp`、`core/log.{cpp,h}`、`core/runtime.{cpp,h}`、`installer/install_jni.cpp`、`modules/custom_model/*`(10 件)、`modules/desktop/desktop_module.{cpp,h}`、`modules/login_model/login_model_module.cpp`、`native_bridge.cpp` |
+| 双方都有、内容不同 | `CMakeLists.txt`、`core/command_pump.{cpp,h}`、`core/hook_broker.cpp`、`core/log.{cpp,h}`、`installer/install_jni.cpp`、`modules/custom_model/*`(10 件)、`modules/desktop/desktop_module.{cpp,h}`、`modules/login_model/login_model_module.cpp`、`native_bridge.cpp` |
+| `core/runtime.{cpp,h}` — **本轮已同步上游** | 上游强化版 `ReadFieldObject`（`field_get_flags` 判静态 + 枚举字面量的 `System.Enum.Parse` 回退）原是本仓最致命的漏同步项：它让 `ui/module.cpp` 在两平台行为不同、PC UI 开关静默失效。现已按上游实现补齐（`af1d9cd`，§10.7），本仓仅余文件内的既有分叉（gap 11） |
 
 > **注意**：上游删除 `panel_commands.cpp` / `input_relay.cpp` 是**架构重整**，不是功能删除——上游把面板命令与输入中继的 JNI 面收进 `jni_binding.h` + `RuntimeStatus`。本仓这套文件是**本仓 MMD 命令分帧链的载体**（`input_relay.cpp` 承担 `\u001f` 折叠还原），**不可照上游删除**。
 
@@ -311,7 +366,7 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 
 | 路径 | 上游新增 | 本仓独有 | 处置 |
 |---|---|---|---|
-| `native/modules/ui/module.cpp` | 121 | 48 | **缺 PC UI**：上游 `pc_ui_enabled` 解析 + `g_keyboard_input_type` + PC 分支 + 250 ms 漂移重检 + `DetourChangeInputType`。本仓 `PumpInputType` 与基线 `9b1e895` 逐字相同 ⇒ 仍保留**隐式 Keyboard 推送**副作用 |
+| `native/modules/ui/module.cpp` | ~~121~~ **已并入** | ~~48~~ | **已完成（`2d4ef64` + `f2c79f5`）**：`pc_ui_enabled` 解析 + `g_keyboard_input_type` + PC 分支 + 250 ms 漂移重检 + `DetourChangeInputType` 全部合入；**本仓已从冲突面 gap 榜掉出**（原 gap 139 → 现不在榜）。真机证据见 §10.3 / §10.7 |
 | `native/modules/custom_model/module.cpp` | 1451 | 262 | **缺模型覆盖层**：上游加了 `model_job_runtime.inc`(1021) `async_loading.h`(638) `generic_model_matcher.{h,inc}` `model_asset_cache.inc` `model_content_identity.h` `model_overlay_host.h` `model_overlay_protocol.h` `model_overlay_hotkey.h` `android_lod_relations.generated.h` 等（含 Windows-only 的 `overlay/` 目录，本仓不适用） |
 | `native/modules/camera/*` | A 3 / D 21 / M 6 | — | **本仓保留 21 件上游已删的第一人称文件**（`first_person_cap_upload.inc`、`facing_runtime.inc`、`motion_runtime.inc`、`readback_runtime.inc`、`retract_runtime.inc`、`scale_runtime.inc`、`headwear_fixture.h` …）；`first_person_runtime.inc` 双方重度分叉（上游 +792 / 本仓 −456）。**第一人称区域一律保留我方** |
 | `native/shared/android_compat/android_win32.cpp` | 35 | 227 | ⚠️ **禁区**：本仓含 `AddVirtualMouseDelta` / `DrainVirtualMouseDelta`（陀螺仪 + look pad 注入链），上游没有。**只增不覆** |
@@ -329,7 +384,7 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 
 | 文件 | 上游新增 | 本仓独有 | 处置 |
 |---|---|---|---|
-| `android/app/build.gradle.kts` | 116 | 457 | **重度分叉**。上游 v3.5.1 新增 `signingConfigs.persistentRelease`（pin 到 3.5.0 已发布证书）+ `buildStagingDirectory` + `noCompress += "bin"`；本仓有 CI 签名与 headwear 相关配置 |
+| `android/app/build.gradle.kts` | 116 | 457 | **重度分叉**。上游 v3.5.1 新增 `signingConfigs.persistentRelease`（pin 到 3.5.0 已发布证书）+ `buildStagingDirectory` + `noCompress += "bin"`；本仓有 CI 签名与 headwear 相关配置。**本轮新增**：`verifyReleaseEntryPoints` 的 `manifestComponents` 加入 `Ldev/betterendfield/android/OverlaySettingsProvider;`（R8 keep 门禁，§10.6） |
 | `android/settings.gradle.kts` | 63 | 0 | 上游把构建根与工具链路径配置化 |
 | `android/workspace.gradle.kts` | 24 | 0 | 上游**新增文件**：工作区路径配置 |
 | `android/build.gradle.kts` | 2 | 17 | 轻度 |
@@ -364,8 +419,8 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 
 | # | 项 | 落点 | 规模 | 风险 |
 |---|---|---|---|---|
-| 1 | **修 PC UI 隐式推送** | `native/modules/ui/module.cpp` 的 `PumpInputType()` | ~5 行（`!active && restore < 0` 直接返回） | 低。改前先真机取 `Input type pushed to 0` 证据 |
-| 2 | **移植完整 PC UI**（含 `ui_pc` 开关） | 同上 + Compose 界面增强页加第 3 个开关 | 上游 +121 行 | 中。需 IL2CPP 解析 Keyboard(=0)，失败则整功能不启用 |
+| 1 | **修 PC UI 隐式推送** — **已完成**（`2d4ef64`） | `native/modules/ui/module.cpp` 的 `PumpInputType()` | ~5 行（`!active && restore < 0` 直接返回） | 已落地（§10.1） |
+| 2 | **移植完整 PC UI**（含 `ui_pc` 开关） — **已完成**（`f2c79f5`） | 同上 + Compose 界面增强页加第 3 个开关 | 上游 +121 行 | 已落地并**真机验证**：`pc_ui_effective=true`、`Input type pushed to 0`、游戏切到桌面 Keyboard 布局。唯一前置（IL2CPP 解析 `Keyboard`）曾失败，根因在宿主封装层，已修（§10.3 / §10.7） |
 | 3 | **跨进程设置通道** — **已完成**（`30503d3`） | `OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization` + Manifest 组件 | **269 行**新增 + 补齐 §10.4-4 的 3 处缺口（另 2 处由 §10.5 的 `command_pump` 路线免掉） | `exported=true` 组件已按安全审落地：只实现 `call()`，UID + 令牌双因子（§10.6） |
 | 4 | **模型管理悬浮窗页** — **已完成**（`30503d3`） | 按功能重写为 Compose 页（`OverlayModelPage.kt`，含 3 个自绘控件） | 约 560 行；`OverlayFeatures` 已加 `models` 第 8 字段门禁 | 已落地并真机跑通；**滑条/选择器的实际交互须人工确认**（§10.6） |
 | 5 | **全局 FOV 运行时下发** — **已完成**（`d3c7fa4`） | 走本仓既有的 `command_pump`：原生 `DrainGlobalFovCommand()` + 设置 app 在"仅 `global_fov=` 行变化"时改发 `global_fov` 命令 | **149 行**（原生 +100 / Java +49） | 已落地并编译验证；**须真机**确认生效（§10.5） |
@@ -374,6 +429,12 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | 8 | **运行时状态串** | `RuntimeSnapshot` + `core/runtime_status.h` | 46 + 22 | 低。可替换本仓 `RuntimeLog` 或并存 |
 | 9 | **JNI 注册收敛** | `core/jni_binding.h` | 45 | 低。收益是注册路径统一 |
 | 10 | **构建配置化** | `workspace.gradle.kts` + `settings.gradle.kts` | 87 | 低。本仓已有 CI 路径，按需 |
+
+> **进度（2026-10-06 22:40）**：**第 1~5 项全部落地**（`2d4ef64` / `f2c79f5` / `d3c7fa4` / `30503d3`，另宿主同步 `af1d9cd`），其中第 2、5 项与第 3+4 项均已在 `PJX110` 上取得运行时证据（§10.3 / §10.5 / §10.6 / §10.7）。
+>
+> **第 6~10 项未动**，且都不是"上游领先一整块功能"级别：第 6 项（MMD 安装器统一，710 行）是最大的一件，需与本仓 `MmdPage.kt` 接口对齐；第 7 项（模型热切换，82 行）的 native 侧依赖 `model_overlay_host.h`，**该头在 `#if defined(_WIN32)` 内（§八 8.1）⇒ Android 落点须先确认**；第 8~10 项（46+22 / 45 / 87 行）是低风险顺手活。
+>
+> **真正的技术缺口不在本表** —— 是 `native/modules/custom_model/module.cpp`（上游 +1448/−206，在 Android 编译面内），见 §零点五 #1 与 §八 8.1。
 
 ---
 
@@ -397,7 +458,8 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 | 级 | 内容 | 处置 |
 |---|---|---|
 | **A 本仓不编译** | `native/modules/{camera,custom_model}/overlay/*`（伴生进程 + `.rc`）、`native/shared/host/hook_diagnostics.{h,cpp}`、`tools/HookInlineScan`、`tools/ThirdPartyModules/echo`、桌面 WPF `ui/BetterEndfield.UI`、`tools/CustomModel/CreatorProjectChecks`（C#） | **只记不移**；只取源文件、**不取构建条目**（依赖 minhook / ws2_32 / mfplat / `.rc`） |
-| **B 本仓编译、仍是旧实现** | `custom_model/module.cpp`、`world_resource_adapter.inc`、`camera/module.cpp`、`native_bridge.cpp`、`GameOverlay.java`、`BemInstaller.java`、`core/runtime.cpp`、`ui/module.cpp` 等 | 子系统级前向移植，**绝不整文件覆盖** |
+| **B 本仓编译、仍是旧实现** | `custom_model/module.cpp`、`world_resource_adapter.inc`、`camera/module.cpp`、`native_bridge.cpp`、`GameOverlay.java`、`BemInstaller.java` 等 | 子系统级前向移植，**绝不整文件覆盖** |
+| **B′ 曾属 B，2026-10-06 已同步** | `native/modules/ui/module.cpp`（PC UI，§10.3）、`android/app/src/main/cpp/core/runtime.{cpp,h}`（`ReadFieldObject`，§10.7） | **保持与上游一致，勿再退回旧版** —— `runtime.cpp` 的旧简版曾让 PC UI 开关在两平台行为不同、静默失效 |
 | **C 数据 / 资源 / 版本** | `android/resources` 缺 6 件、`values-en/ja/ko/zh-rTW` 4 套、`combat_stats` 缺 2 头像、`tools/CustomModel` 缺 9 件 | 纯增量，风险低 |
 | **D 反向：本仓领先** | 兼容层陀螺仪（`AddVirtualMouseDelta`）、命令通道分帧、第一人称扩展、悬浮窗 Compose、MMD 作品库、CI | **合并时不得被覆盖** |
 
@@ -450,13 +512,15 @@ D=D:/android-toolchain/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64
 BASE=$(git merge-base HEAD upstream/main)   # 9b1e895
 git -c core.quotepath=false diff --name-only $BASE..upstream/main | grep -vE '^(research|docs)/' | sort > up.txt
 git -c core.quotepath=false diff --name-only $BASE..HEAD          | grep -vE '^(research|docs)/' | sort > our.txt
-comm -23 up.txt our.txt | wc -l    # 330 纯未同步（内分 113 本仓有旧版 / 217 上游新增）
-comm -12 up.txt our.txt | wc -l    # 196 冲突面
+comm -23 up.txt our.txt | wc -l    # 344 纯未同步（内分 113 本仓有旧版 / 231 上游新增）
+comm -12 up.txt our.txt | wc -l    # 201 冲突面
 comm -13 up.txt our.txt | wc -l    # 160 本仓独有（138 独改 + 22 主动删除）
 git diff --numstat $BASE..HEAD > ns_our.txt ; git diff --numstat $BASE..upstream/main > ns_up.txt   # 再 join 得 gap 排名
 ```
 
-**二分「真缺 vs 被替换」**（判 217 个上游新增里哪些是真缺口）：
+> **gap 的算法**：`gap = (上游 +行 + 上游 −行) − (本仓 +行 + 本仓 −行)`，按**总改动行数**而非净值 ⇒ **本仓整文件删除的条目 gap 会是负数、永不进榜**（§零点五 已注明该盲区）。
+
+**二分「真缺 vs 被替换」**（判 231 个上游新增里哪些是真缺口）：
 
 ```bash
 while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓有旧版: $f" || echo "上游新增: $f"; done < <(comm -23 up.txt our.txt)
@@ -676,7 +740,7 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 | 1 | `Keyboard` 枚举读不出（`-1`） | 直读失败后，对 `static(0x10) && literal(0x40)` 走 `System.Enum.Parse` **命名反射回退**（本机 IL2CPP **不装箱枚举字面量**，同机 `actions` 模块 `#171`"10 enum constants read through the System.Enum.Parse fallback"是同一事实的既有实证） |
 | 2 | 第一层修好后 `PumpInputType` 停在 `waiting for readable inputType backing field`，**永不推送** | 用 `field_get_flags_` 判 `kStatic(0x10)`，**只在非静态字段时才要求实例对象**；旧简版的 `instance == nullptr` 短路把 `DeviceInfo` 的静态 backing field 读一并挡死（`TryReadInputType` 传的正是 `nullptr`）。Windows 侧 host（`native/shared/host/dynamic_resolver.cpp:343`）**从来没有**这个守卫 ⇒ 同一份模块源码在两平台行为不同 |
 
-**（3）改动**：`native/modules/ui/module.cpp` **相对 HEAD 零差异**（第一层我曾在模块内自建 `ResolveEnumConstant` + `Enum.Parse` 回退，属重复劳动，已**完全回退**），修复只落在宿主封装层，与上游逐字一致：
+**（3）改动**：`native/modules/ui/module.cpp` **相对 HEAD 零差异**（第一层我曾在模块内自建 `ResolveEnumConstant` + `Enum.Parse` 回退，属重复劳动，已**完全回退**）。修复只落在宿主封装层，两个 `ReadFieldObject` 重载与上游**逐字一致**（文件其余部分保留本仓既有分叉 ⇒ `core/runtime.cpp` 的 gap 由 57 降到 **11**，不是 0）：
 
 | 文件 | 改动 |
 |---|---|
@@ -700,4 +764,50 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 
 ---
 
+### 10.8 锚点前移与文档全量复核（2026-10-06 22:40）
 
+**（1）锚点**：本仓 `5e09128 → 8b8a0b5`（+7 提交：第 3/4 项、宿主同步、文档写回），上游 `3510fa7 → 3521627`（+1 提交）。§零 / §零点五 / §0.3 / §九 的全部数字按新锚点**重算**（非估算），重算口径与上一版完全一致，因此三版数字可直接对比（§0.4）。
+
+**（2）上游这笔提交是什么**（`3521627 feat: add community download site and desktop/android entry points`）：
+
+- 新增 `web/mod-center/**` **21 件**：Vite + TSX 前端（`src/App.tsx`、`styles.css`）、`server/server.mjs`(+269) 与其单测 `server.test.mjs`(+120)、`deploy/`（systemd unit + 装机器 + 反代脚本）、`shared/types.json`。
+- 在**两个第三方模块页**各加一个「下载站」入口：`ThirdPartyModulesPage.java`(+7)、`ThirdPartyModulesPage.cs`(+8)，另两份 locale 各 +2。
+- **该入口的 URL 硬编码为 `https://146.235.16.65:8443/endfield/`（裸 IP + 非标端口）**。
+
+**（3）对本仓的影响：不跟进。** 21 件全在 Android 编译面**外**（`web/` 归 §0.3(c)）；唯一沾到本仓的是那 +7 行入口按钮，而本仓该页是 Compose 实现、本就要重写。不跟进的三个理由：① 入口指向裸 IP + 非标端口，上游服务器一撤即 404，我方无法保证可达性；② 下载站产物（模型 / 语音资源）的**格式与许可**不在本仓验证链内，接进来等于引入一条未验证的供应链；③ 本仓第三方模块的获取路径尚未定义，此时不应由上游替我们定。
+
+**（4）本轮刷新范围**（本文档，共 10 处）：
+
+| 节 | 刷新内容 |
+|---|---|
+| 锚点表 / 一句话结论 | 新锚点 `8b8a0b5` / `3521627`；加进度行（1~5 项落地、缺口收敛到 `custom_model`） |
+| §0.1 / §0.2 / §0.4 | 领先量 40 / 75、功能面 545 / 361、四分法 113+231+201 / 201+138+22，三版数字并列对比 |
+| §0.3 | **补齐此前漏列的 7 个目录**（`web` `scripts` `config` `manifests` `ui/tests` `tools/FirstPersonProfiles` `tools/CombatDataExporter`），并分「进编译面 / 上游测试 / 不进编译面」三类 |
+| §零点五 | 32 → **31** 行；逐件复核榜面变动（唯一掉出 = `ui/module.cpp`）；**新增 gap 算法盲区说明** |
+| §一 | 类清点 59/59/32/32/27 → **59/64/28/33/31**；A3 表格移出 4 件 Overlay 类、B 桶加 `OverlayModelPage.kt`、C 桶加 4 行 |
+| §二 | Manifest 段改为「本仓现有两个 `exported=true` provider」（第 3 项已落地，不再是「若移植需新增」）；标注 `ui_pc` 缺失已补 |
+| §三.1 / §三.2 | `core/runtime.{cpp,h}`、`ui/module.cpp` 标为**已同步**；前者另立一行说明其危害 |
+| §四 | `build.gradle.kts` 行补记 R8 门禁新增 Provider |
+| §六 | 第 1、2 项标**已完成**（含提交号）；表后加进度说明与第 6~10 项的现状 |
+| §八 8.1 / §九 | 新增「**B′ 曾属 B、已同步**」级；复现命令数字更新 + gap 算法说明 |
+
+> **§一 类清点的变化明细**（`64 − 33 = 31`、`59 − 28 = 31` ✓）：A 桶 32 → 28（4 件 Overlay 通道类移植入本仓 ⇒ 移入 C 桶）；C 桶 27 → 31（同 4 件）；B 桶 32 → 33（第 4 项的 `OverlayModelPage.kt` 613 行 —— 上游对应物是 View/XML 的 `OverlaySettingsPage.java`，故本件属本仓独有）。
+
+**（5）本轮新增的两处口径修正**：
+
+| 修正 | 说明 |
+|---|---|
+| §0.3 目录分布**漏列 7 个目录** | 上一版只列了 9 行，漏掉 `web`(28) / `scripts`(28) / `config`(11) / `manifests`(6) / `ui/tests`(4) / `tools/FirstPersonProfiles`(6) / `tools/CombatDataExporter`(4)。本版补齐并分三类，**明确 (c) 类不进本仓 Android 编译面** |
+| **gap 算法会让"本仓整文件删除"永不进榜** | `gap` 按总改动行数之差计算，而本仓删除整文件时 `+0/−N` 的 N 往往**大于**上游改写量 ⇒ gap 为负（实测 `MainActivity.java` −436、`SettingRow.java` −111、`SectionCard.java` −65）。判"上游新增 vs 本仓删除"必须另走 `git cat-file -e HEAD:<path>` 二分，不能只看榜 |
+
+**（6）复核结论**：
+
+| 结论 | 依据 |
+|---|---|
+| §六 第 1~5 项**全部落地**，且 2 / 3+4 / 5 项均有真机运行时证据 | §10.3 / §10.5 / §10.6 / §10.7 |
+| 原生侧三块中 `ui/module.cpp` **已与上游同步**，已从 gap 榜掉出 | §零点五 榜面变动 |
+| **最大剩余缺口 = `native/modules/custom_model/module.cpp`**（gap 1491，且在 Android 编译面内） | §零点五 #1 |
+| 本仓改动方向已反转：`android/app` 本仓改 **133** > 上游 97 | §0.3(a) |
+| 以上结论均不含 `web` / `scripts` / `config` / `manifests` / WPF —— 那些不进本仓 Android 编译面 | §0.3(c) |
+
+---
