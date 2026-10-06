@@ -18,6 +18,7 @@
 // handing it to the pump, which frames the payload by newlines itself. Sending
 // those newlines raw would end the event after "BE_COMMAND_V1" and the pump
 // would reject the fragment.
+// The status file is rewritten whenever the runtime command status changes.
 
 #include "android_virtual_keys.h"
 #include "core/command_pump.h"
@@ -27,7 +28,6 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
