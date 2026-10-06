@@ -14,7 +14,9 @@
 #include "android_virtual_keys.h"
 #include "android_frame.h"
 #include "android_pc_mouse.h"
+#include "android_camera.h"
 #include "core/jni_binding.h"
+#include "core/runtime_status.h"
 
 #include <jni.h>
 #include <dlfcn.h>
@@ -52,6 +54,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_pcMouseMotion(JNIEnv*, jclass, jfloat, jfloat);
 extern "C" JNIEXPORT void JNICALL
 Java_dev_betterendfield_android_NativeCommandBridge_frame(JNIEnv*, jclass);
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_runtimeStatus(JNIEnv*, jclass);
 
 namespace betterendfield {
 namespace {
@@ -60,6 +64,10 @@ constexpr auto kPollInterval = std::chrono::milliseconds(100);
 constexpr auto kInitialDelay = std::chrono::seconds(1);
 constexpr int kMaximumAttempts = 1200;
 std::atomic_bool g_runtime_started{false};
+// The runtime status string the panel reads over JNI. Every writer lives in
+// this file -- the module startup sequence below -- so a snapshot can never
+// report a module as ready when the loop that starts it did not run.
+RuntimeStatus g_runtime_status;
 std::vector<std::unique_ptr<Module>> g_modules;
 std::unique_ptr<Il2CppRuntime> g_il2cpp_runtime;
 // The JNI frame entry reads this from the engine's render thread while the
@@ -76,6 +84,7 @@ const char* Configured(const char* variable) {
 }
 
 void RunModules() {
+    g_runtime_status.Set("runtime", "waiting_il2cpp");
     // libil2cpp.so is mapped before the IL2CPP domain is safe to enter. The
     // proven read-only POC used this guard; connecting immediately can call
     // il2cpp_thread_attach while domain initialization is still in progress.
@@ -101,6 +110,7 @@ void RunModules() {
         }
         if (attempt == kMaximumAttempts) {
             LogError("runtime", "timed out waiting for libil2cpp.so");
+            g_runtime_status.Set("runtime", "failed_il2cpp_timeout");
             return;
         }
         std::this_thread::sleep_for(kPollInterval);
@@ -109,6 +119,7 @@ void RunModules() {
     Il2CppThreadScope thread(runtime);
     if (!thread.attached()) {
         LogError("runtime", "failed to attach worker to the IL2CPP domain");
+        g_runtime_status.Set("runtime", "failed_thread_attach");
         return;
     }
 
@@ -173,8 +184,13 @@ void RunModules() {
             "same-source desktop sustained-dash module active"));
     }
 
+    // Every module is about to be started. Recording an outcome per module is
+    // what lets the panel tell a module that came up from one that never did.
+    g_runtime_status.Set("runtime", "starting_modules");
     for (const auto& module : g_modules) {
+        g_runtime_status.Set(module->Id(), "starting");
         const ModuleResult result = module->Start(runtime);
+        g_runtime_status.Set(module->Id(), result.active ? "ready" : "failed");
         LogInfo(module->Id(), result.message.c_str());
     }
     // Name what ran. Without this a probe that was compiled in but never
@@ -187,6 +203,7 @@ void RunModules() {
     }
     LogInfo("runtime", (std::string("modules started:") +
         (selected.empty() ? " (none)" : selected)).c_str());
+    g_runtime_status.Set("runtime", "startup_complete");
 }
 
 bool AnyModuleRequested() {
@@ -272,11 +289,27 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
             } else {
                 betterendfield::LogInfo("runtime", "PC mouse and frame JNI natives bound");
             }
+            // The status string is read by the same panel class, so it needs the
+            // same context-classloader binding. Bound separately so that a
+            // refused read costs the status line, not the mouse path.
+            static const JNINativeMethod kRuntimeStatusMethods[]{
+                {"runtimeStatus", "()Ljava/lang/String;", reinterpret_cast<void*>(
+                    &Java_dev_betterendfield_android_NativeCommandBridge_runtimeStatus)},
+            };
+            if (!betterendfield::BindContextLoaderNatives(environment,
+                    "dev.betterendfield.android.NativeCommandBridge", kRuntimeStatusMethods,
+                    static_cast<jint>(sizeof(kRuntimeStatusMethods) / sizeof(kRuntimeStatusMethods[0])))) {
+                if (environment->ExceptionCheck()) environment->ExceptionClear();
+                betterendfield::LogError("runtime", "runtime status JNI native not bound");
+            } else {
+                betterendfield::LogInfo("runtime", "runtime status JNI native bound");
+            }
         }
         // The panel presses keys through a file relay (see input_relay.cpp):
         // JNI resolution is classloader-scoped and the panel's classes live in
         // the LSPosed module classloader, one classloader away from this copy.
         betterendfield::StartInputRelay();
+        betterendfield::g_runtime_status.Set("runtime", "loaded");
         std::thread(betterendfield::RunModules).detach();
     }
     return JNI_VERSION_1_6;
@@ -306,6 +339,23 @@ Java_dev_betterendfield_android_NativeCommandBridge_status(
         JNIEnv* environment, jclass) {
     if (!environment) return nullptr;
     const std::string status = betterendfield::CopyRuntimeCommandStatus();
+    return environment->NewStringUTF(status.c_str());
+}
+
+// The runtime status string: the module startup sequence recorded above, plus
+// the camera module's live counters and the frame clients' own state. Upstream
+// serves it over JNI, and the reader is the panel class -- which name-based
+// lookup cannot reach from the namespace this library loads into, so it is
+// bound the way the PC mouse calls are.
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_betterendfield_android_NativeCommandBridge_runtimeStatus(
+        JNIEnv* environment, jclass) {
+    if (!environment) return nullptr;
+    const std::string status = betterendfield::g_runtime_status.Copy() +
+        betterendfield::AndroidCameraValuesStatus() +
+        "camera.capabilities=" + std::to_string(betterendfield::AndroidCameraCapabilities()) + "\n" +
+        "camera.active=" + std::to_string(betterendfield::AndroidCameraActive()) + "\n" +
+        "ui.hud_hidden=" + (betterendfield::AndroidHudHidden() ? "1\n" : "0\n");
     return environment->NewStringUTF(status.c_str());
 }
 

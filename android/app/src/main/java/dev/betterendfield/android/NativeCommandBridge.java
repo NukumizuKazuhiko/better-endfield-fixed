@@ -134,6 +134,15 @@ final class NativeCommandBridge {
     static native void frame();
 
     /**
+     * The runtime status string: the module startup sequence the native side
+     * recorded, plus the camera module's live counters, one {@code id=state}
+     * per line behind a {@code BE_RUNTIME_V1} header. Served over JNI rather
+     * than the relay, like the PC mouse calls, because the reader is this
+     * class's own caller -- the panel, one classloader away.
+     */
+    static native String runtimeStatus();
+
+    /**
      * The runtime command status the native relay publishes. Empty until the
      * native runtime has loaded — the same "not ready yet" signal the JNI
      * version used to give through exceptions.

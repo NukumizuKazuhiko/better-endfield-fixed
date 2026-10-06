@@ -3260,6 +3260,17 @@ std::string MmdStatusForAndroid() {
     std::lock_guard<std::mutex> lock(Mmd::android_mutex);
     return Mmd::android_status;
 }
+
+// The camera module's live counters, in the same id=state shape the runtime
+// status string uses. It sits next to the MMD bridge for the same reason: the
+// state lives in the anonymous namespace above, and this is the named
+// namespace the JNI layer can reach.
+std::string CameraValuesStatusForAndroid() {
+    return "camera.speed=" + std::to_string(g_movement_speed.load()) + "\n" +
+        "camera.fov=" + std::to_string(g_field_of_view.load()) + "\n" +
+        "camera.global_fov_enabled=" + (g_global_fov_enabled.load() ? "1\n" : "0\n") +
+        "camera.global_fov=" + std::to_string(g_global_fov.load()) + "\n";
+}
 }  // namespace BetterEndfield::CameraModule
 
 namespace betterendfield {
@@ -3271,6 +3282,10 @@ bool AndroidMmdCommand(unsigned type, int argument, double value, const std::str
 
 std::string AndroidMmdStatus() {
     return BetterEndfield::CameraModule::MmdStatusForAndroid();
+}
+
+std::string AndroidCameraValuesStatus() {
+    return BetterEndfield::CameraModule::CameraValuesStatusForAndroid();
 }
 }  // namespace betterendfield
 #endif

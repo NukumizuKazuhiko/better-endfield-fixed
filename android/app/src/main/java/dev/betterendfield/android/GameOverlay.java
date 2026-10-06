@@ -19,6 +19,12 @@ final class GameOverlay {
     private final View panel;
     private final OverlaySurface ui;
     private final boolean preview;
+    /**
+     * What the native modules last reported. Deliberately separate from the
+     * overlay settings: it says what the runtime reached, not what the panel
+     * asked for. Refreshed whenever the journal is redrawn.
+     */
+    private RuntimeSnapshot snapshot = RuntimeSnapshot.offline();
     private final Supplier<SharedPreferences> settings;
     private boolean closed;
     private float xFraction = 0.02f;
@@ -320,8 +326,25 @@ final class GameOverlay {
         String stamp = "构建 " + BuildConfig.VERSION_NAME
                 + " (" + BuildConfig.VERSION_CODE + ") · 点按刷新 · 长按复制 · 下方按钮另存";
         String lines = RuntimeLog.tail(14);
+        String runtime = snapshotSummary();
         ui.renderJournal(lines.isEmpty()
-                ? stamp + "\n（暂无记录）" : stamp + "\n" + lines.trim());
+                ? stamp + "\n" + runtime + "\n（暂无记录）"
+                : stamp + "\n" + runtime + "\n" + lines.trim());
+    }
+
+    /**
+     * Reads the native runtime status over JNI and renders the one-line summary
+     * the journal shows under its header. A failed binding degrades to the
+     * offline summary instead of dropping the line: the journal is the one
+     * surface that has to keep working when the bridge does not.
+     */
+    private String snapshotSummary() {
+        try {
+            snapshot = RuntimeSnapshot.parse(NativeCommandBridge.runtimeStatus());
+        } catch (RuntimeException | LinkageError unavailable) {
+            snapshot = RuntimeSnapshot.offline();
+        }
+        return "运行时：" + snapshot.summary();
     }
 
     private void copyJournal() {
