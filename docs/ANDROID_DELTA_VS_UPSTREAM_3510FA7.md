@@ -366,9 +366,9 @@ about_page / sponsor* / voice_page / voice_list_caption / dash_card_subtitle
 |---|---|---|---|---|
 | 1 | **修 PC UI 隐式推送** | `native/modules/ui/module.cpp` 的 `PumpInputType()` | ~5 行（`!active && restore < 0` 直接返回） | 低。改前先真机取 `Input type pushed to 0` 证据 |
 | 2 | **移植完整 PC UI**（含 `ui_pc` 开关） | 同上 + Compose 界面增强页加第 3 个开关 | 上游 +121 行 | 中。需 IL2CPP 解析 Keyboard(=0)，失败则整功能不启用 |
-| 3 | **跨进程设置通道** | `OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization` + Manifest 组件 | 279 行代码可直移，**但依赖缺口 5 处**（见 §10.4-4） | 中。`exported=true` 组件要过安全审；**唯一消费者是第 4 项 ⇒ 必须与 4 合批**（§10.4-1） |
-| 4 | **模型管理悬浮窗页** | `OverlaySettingsPage` → 按功能重写为 Compose 页 | 293 行 View/XML 需重写，另需接 `OverlayFeatures` 可见性门禁 | 中。依赖 3 |
-| 5 | **全局 FOV 运行时下发** | **本仓须走 relay 行或 `command_pump`，不可直移上游 JNI 路径**（§10.4-2） | **≥120 行**（原生契约 + 通道 + 发送方 + 接线），非 27+7 | **中，须真机**。前置决策：FOV 是否脱离全量重载（§10.4-3） |
+| 3 | **跨进程设置通道** — **已完成**（`30503d3`） | `OverlaySettings{Client,Provider}` + `OverlayWritePolicy/Authorization` + Manifest 组件 | **269 行**新增 + 补齐 §10.4-4 的 3 处缺口（另 2 处由 §10.5 的 `command_pump` 路线免掉） | `exported=true` 组件已按安全审落地：只实现 `call()`，UID + 令牌双因子（§10.6） |
+| 4 | **模型管理悬浮窗页** — **已完成**（`30503d3`） | 按功能重写为 Compose 页（`OverlayModelPage.kt`，含 3 个自绘控件） | 约 560 行；`OverlayFeatures` 已加 `models` 第 8 字段门禁 | 已落地并真机跑通；**滑条/选择器的实际交互须人工确认**（§10.6） |
+| 5 | **全局 FOV 运行时下发** — **已完成**（`d3c7fa4`） | 走本仓既有的 `command_pump`：原生 `DrainGlobalFovCommand()` + 设置 app 在"仅 `global_fov=` 行变化"时改发 `global_fov` 命令 | **149 行**（原生 +100 / Java +49） | 已落地并编译验证；**须真机**确认生效（§10.5） |
 | 6 | **MMD 安装器统一** | `MmdInstaller` + `MmdImportArchive` + `MmdInstalledResources` + `MmdAudio` | 710 行可直移 | 中。要与本仓 `MmdPage.kt` 接口对齐 |
 | 7 | **模型热切换** | `BemHotSwitchUpdater` + `BemHotSwitchUpdate` | 82 行 | 中。上游 native 侧依赖 `model_overlay_host.h` |
 | 8 | **运行时状态串** | `RuntimeSnapshot` + `core/runtime_status.h` | 46 + 22 | 低。可替换本仓 `RuntimeLog` 或并存 |
@@ -587,6 +587,73 @@ while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓�
 | `android/app/src/test/`、`testHost/` 源集 | 本仓**无测试源集**；上游的 `OverlayWritePolicyTest`（106 行）/ `OverlayGeometryTest` / `ModuleSettingsFovTest` 无法直接落地 |
 
 **（5）附带更正**：§六 第 4 项的"293 行需重写"低估了形态差异——本仓悬浮窗已是 **Compose**（`OverlayPanel.kt` + `HomePage.kt` / `CameraMotionPage.kt` / `SettingsPages.kt` / `ToolPages.kt` / `MmdPage.kt` / `ExperiencePage.kt`），上游的 `OverlaySettingsPage` 是 View/XML，因此第 4 项是"**按功能重写一个 Compose 页**"而非"移植页面"，且需一并处理 `OverlayFeatures` 的控件可见性门禁。
+
+### 10.5 第 5 项已完成：全局 FOV 免重载下发（`d3c7fa4`，2026-10-06）
+
+**做法**（比 §10.4 预判的规模小得多——不需要 relay 新行、新 JNI 通道、新契约，也不需要 `GlobalFovUpdater` 轮询线程）：
+
+| 侧 | 改动 |
+|---|---|
+| `native/modules/camera/module.cpp` | 新增 `ParseGlobalFovCommand()` + `DrainGlobalFovCommand()`（+100 行）；前向声明后由 `PumpFromEngineTick` 在 `DrainConfigurationReload()` 之后 drain，与 `mmd` / `camera_config` 共用既有 pump |
+| `ModuleSettings.java` | 新增 `onlyGlobalFovChanged()` / `globalFovCommand()`（+49/−1）；`setCameraSettings` 末尾按前者选择命令名：`global_fov` 或 `camera_config` |
+
+**为什么发送方是设置 app 而不是游戏进程轮询**：本仓 `ModuleCommandRouter.issue()` 已封装"优先 `FrameworkSettings.writeRemoteCommand` → 游戏进程 `command.next` → relay `c` 行 → pump"的完整链路，设置 app 直接调用即可送达。上游需要 `GlobalFovUpdater` + JNI，是因为它的 `NativeCommandBridge` 是 JNI 直调（§10.4-2）；本仓在设置 app 侧发命令反而更短，也符合本仓"app 只是遥控器"的既有分工。
+
+**边界（有意排除）**：只有 **`global_fov=` 值变化**才走轻量命令。`global_fov_enabled=` 变化仍走全量重载——开关决定 override 是否存在，且 `g_state`（`module.cpp:3057`）与 `g_global_fov_enabled` 门禁（`2965-2971`）都由配置应用建立，轻量命令不碰这些。`CAMERA_CONFIGURATION` 偏好**两种情况都照旧提交**，故重启后 FOV 不回退（`ModuleConfigurations.java:25` 读它做引导配置）。
+
+**原生命令体与拒绝语义**：`enabled=<bool>\nvalue=<float>`，**两个键都必须出现**；未知键、不可解析的布尔、非有限值一律 `AcknowledgePanelCommand("rejected")` 并记日志——**不使用 `ParseBoolean`**，因为它的默认值兜底会把拼错的键（如 `enable=`）静默当成 `off`。范围 `[kFreeMinFov, kFreeMaxFov]`（5–150）；门禁 `g_push_state_hook_ready && g_state_layout.ready`，不满足则拒绝并记日志（而非静默接受）。写入顺序**先 `g_global_fov` 后 `g_global_fov_enabled`**，与 `ScopedGlobalFovState`（`free_camera_runtime.inc:773/786`）的读取顺序对齐，避免 enabled 先于度数可见。
+
+**证据**
+
+| 判据 | 结果 |
+|---|---|
+| `aarch64-linux-android24 -fsyntax-only` | 0 错误（6 条既有 `unused function` 告警，均为 `_WIN32` 专有） |
+| `:app:assembleDebug` | BUILD SUCCESSFUL（原生 + Kotlin + Java） |
+| `.so` | `48790264 → 48837728` 字节；SHA-256 `0e727f8f… → 3472b79f…` |
+| `llvm-strings` | 三个新日志字面量 + 命令名 `global_fov` **均在 `.so` 内**；同法对照既有 `Camera configuration reloaded` = 1 命中（证明方法有效） |
+| **设备外判定表**（真实 `onlyGlobalFovChanged` / `globalFovCommand`） | 7 例全过：值变→true；开关变／无关行变／混合变／文本相同／行数不等／无旧文本→**均 false**（落回重载） |
+| **设备外线格式** | `globalFovCommand` 产出的键**恰为 `enabled` / `value`**（与 `ParseGlobalFovCommand` 一致），且值原样穿过（`95.0` / `true`） |
+
+**踩坑记录（本次）**：验证字符串时先用了 `strings`，但**本机无该命令**，`grep -qF` 拿到空输入、全部报"未命中"——差点把"改动没进产物"当成结论。改用 NDK 自带的 `llvm-strings.exe` 后全部命中。**根因**：管道左侧命令不存在时，`2>/dev/null` 会把"命令未找到"也吞掉，只剩恒假的比较结果。**规则**：二进制字符串核验一律用 `$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strings.exe`，并**必须**带一个既有字面量作阳性对照。
+
+**未验证**：真机生效（须 `PJX110` 且相机模块在进程内）。预期日志：`Global FOV set to <n> degrees without reloading the configuration.`；被拒时 `Global FOV rejected: expected enabled=<bool> and value=<5..150>.` 或 `Global FOV unavailable: the camera state or the push hook was not resolved.`；状态串见 `status.txt` 的 `applied` / `rejected`。
+
+### 10.6 第 3+4 项已完成：跨进程设置通道 + 模型管理悬浮窗页（`30503d3`，2026-10-06）
+
+**（1）按 §10.4-1 的判定合批**：通道（第 3 项）与页面（第 4 项）合成一个提交 `30503d3`（16 文件 / +1055 −4）。§10.4-4 列的 5 处缺口，3 处补齐、2 处不再需要：
+
+| §10.4-4 缺口 | 处置 |
+|---|---|
+| `RuntimeBootstrap.loaded()` | 补访问器（`+11`） |
+| `BemOptions.appearance(entry, value)` | 补齐（`+16`）——`OverlayWritePolicy.apply` 依赖它 |
+| `ModuleSettings` 的 FOV 命名不同 | **不逐字对齐上游命名**，改为新增 `applyGlobalFov(ctx, enabled, value)`（`+37`），内部复用本仓既有 `getGlobalFov/setGlobalFov` + `withIniValue` 重写 |
+| `AndroidGlobalFov` / `g_android_global_fov_ready` | **不需要**——FOV 已走 §10.5 的 `command_pump` 路线，通道侧只读 `fovState(app)` 字符串 |
+| `OverlayGeometry.java`（63 行） | 未移植；页面用 Compose 布局 + `Modifier.alphaIf` 自绘 |
+| 上游测试源集（`OverlayWritePolicyTest` 等 106 行） | 本仓无测试源集 ⇒ 改为**设备外 harness 直跑真实生产类**（`OverlayPolicyHarness`，**PASS: 56 checks / 0 failures**），不用"编译通过"代替判定 |
+
+**（2）两处与上游不同的实现口径（有意为之）**
+
+- **令牌交付走远程偏好，不落 app 私有 XML**：`OverlayWriteAuthorization` 只把令牌写进 `AtomicFile("overlay-write-authorization")`（读取上限 65 字节），再由 `FrameworkSettings.publish()` 经 `service.getRemotePreferences("module_settings")` 交给游戏进程。
+- **补丁语义**：`OverlayWritePolicy` 保持零 Android 依赖（可设备外判定），模型分支要求合法 UUID 且数组长度 ≥2，FOV 分支允许 `enabled` / `value` 单独出现且值域 5..150，**空补丁一律拒绝**；`BemInstaller` 侧失败回滚。
+
+**（3）门禁**：`android/app/build.gradle.kts` 的 `verifyReleaseEntryPoints` 已把 `Ldev/betterendfield/android/OverlaySettingsProvider;` 加入 `manifestComponents`（R8 的按名解析面），否则 release 混淆会删掉类而 manifest 仍指向它。
+
+**（4）证据**
+
+| 判据 | 结果 |
+|---|---|
+| `:app:assembleDebug` | BUILD SUCCESSFUL；APK **78,972,061 B**，SHA-256 `2873eb10…c366`，versionName 3.4.2 / versionCode 30402 |
+| dex 扫描（带阳性对照） | `OverlaySettingsProvider` 6 / `OverlaySettingsClient` 6 / `OverlayWritePolicy` 4 / `OverlayWriteAuthorization` 3 / `OverlayModelPageKt` 96，authority 串 `dev.betterendfield.android.overlay.settings` 命中 |
+| `HLK-AL00`（无游戏） | Provider 注册成功、owner-only 鉴权生效、设置 app 四 tab 遍历无崩溃 |
+| `PJX110`（`b992bd53`） | 安装成功（21:34:07）；**令牌 `50c7ba0c…c32e` 与 LSPosed 数据库 `module_configs`（group=`module_settings`）逐字一致**，`schemaVersion`=1 / `generation`=867 |
+| 游戏进程侧 | 日志显示 Provider 被反复调用（`unfreeze uid: 10566` / `reason: Provider` / `SyncBinder`）；模块 attached，`native runtime loaded; ui=true camera=true actions=true`；已进入第一人称游玩 |
+
+**（5）仍未验证**：悬浮窗「模型管理 / 游戏视野」页的**实际点选与拖动**（选模型、拉 FOV 滑条）须在 `PJX110` 上人工确认——设备外只能证到"策略判定与线格式正确"，证不到"触摸命中与落盘"。release 出包仍须走 CI（本机无 release 密钥库）。
+
+**（6）顺带纠正两条此前判断**
+
+- **LSPosed 远程偏好不是文件**：`service.getRemotePreferences(group)` 落在 `/data/adb/lspd/config/modules_config.db` 的 `module_configs` 表（value 为 Java 序列化），因此在 app 私有 `shared_prefs/module_settings.xml` 里查不到 `overlay_write_authorization_v1` 是**正确**行为，此前误判为"发布失败"。
+- **`XposedServiceHelper` 经 Provider 代理取 Binder，不要求设置 app 被注入、也不要求它在 LSPosed scope 中**：实测设置 app 未在 scope 内，令牌仍成功发布、Provider 仍被游戏进程调用。此前"未注入 ⇒ 不发布"的判断被推翻。
 
 ---
 
