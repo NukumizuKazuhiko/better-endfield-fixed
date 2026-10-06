@@ -19,6 +19,11 @@
             android:name=".RuntimeJournalProvider"
             android:authorities="${applicationId}.journal"
             android:exported="true" />
+        <provider
+            android:name=".OverlaySettingsProvider"
+            android:authorities="dev.betterendfield.android.overlay.settings"
+            android:exported="true"
+            android:grantUriPermissions="false" />
         <activity android:name=".BemInstallActivity" android:exported="false" android:theme="@style/AppTheme" />
         <activity android:name=".ThirdPartyModulesActivity" android:exported="false" android:theme="@style/AppTheme" />
         <activity android:name=".ThirdPartyModuleActivity" android:exported="false" android:theme="@style/AppTheme" />

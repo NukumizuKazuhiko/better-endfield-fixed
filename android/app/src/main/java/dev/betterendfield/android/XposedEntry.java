@@ -272,6 +272,11 @@ public final class XposedEntry extends XposedModule {
                 report("unsupported settings schema; native runtime disabled");
                 return;
             }
+            // The overlay's settings channel needs the token the module publishes
+            // in this snapshot. Re-read through the supplier rather than capture
+            // the snapshot itself: the service-backed proxy goes stale after the
+            // settings app commits a new one.
+            OverlaySettingsClient.initialize(() -> getRemotePreferences("module_settings"));
             ModuleConfigurations configs = ModuleConfigurations.read(settings);
             RuntimeLog.record("configs read: " + (configs.none()
                     ? "NONE selected" : configs.summary()));

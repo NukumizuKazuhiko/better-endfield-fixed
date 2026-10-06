@@ -355,4 +355,37 @@ final class BemInstaller {
         }
         if(!FrameworkSettings.open(app).edit().putString(INDEX,entries.toString()).commit()) throw new IOException("保存失败");
     }
+
+    /**
+     * Applies a partial patch per model: the shape the in-game overlay sends.
+     *
+     * <p>{@link #saveAll} takes a whole selection per model, which is what the
+     * settings screen has - it holds every field of every package and writes
+     * them all back. The overlay sees one control at a time (one switch, one
+     * option, one slider) and cannot carry the fields it is not editing, so it
+     * needs the merge in {@link OverlayWritePolicy#apply}. Keeping the two entry
+     * points apart also keeps this from changing what the settings screen
+     * already does: that path has no per-character exclusivity today, and giving
+     * it some is a product decision rather than a side effect of the overlay
+     * arriving.
+     *
+     * <p>Runs under the lock every other writer takes, so an overlay patch and
+     * an import cannot interleave. The caller's revision check is what catches
+     * the index having moved between its read and this call.
+     *
+     * <p>The write is read back on purpose: {@code commit()} can update the
+     * in-memory map even when the disk write fails, and {@link FrameworkSettings}
+     * publishes on every preference change - so an unverified failure would reach
+     * the running game as a setting that only exists in memory.
+     */
+    static synchronized void saveChanges(Context app,JSONArray changes) throws Exception {
+        if(busy) throw new IOException("请等待当前操作完成后修改");
+        android.content.SharedPreferences prefs=FrameworkSettings.open(app);
+        String previous=prefs.getString(INDEX,"[]");
+        String value=OverlayWritePolicy.apply(index(app),changes).toString();
+        if(!prefs.edit().putString(INDEX,value).commit() || !value.equals(prefs.getString(INDEX,"[]"))) {
+            prefs.edit().putString(INDEX,previous).commit();
+            throw new IOException("保存失败");
+        }
+    }
 }

@@ -327,6 +327,11 @@ val verifyReleaseEntryPoints by tasks.registering {
             "Ldev/betterendfield/android/ModuleApplication;",
             "Ldev/betterendfield/android/MainActivity;",
             "Ldev/betterendfield/android/BemInstallActivity;",
+            // The overlay's settings channel. The framework instantiates this
+            // one by name from the game process' call(), so a renamed provider
+            // is not a shrinking win but a ClassNotFoundException at the point
+            // the panel tries to read the model list.
+            "Ldev/betterendfield/android/OverlaySettingsProvider;",
             "Lio/github/libxposed/service/XposedProvider;"
         )
         // Methods the native code reaches by name without being an export:

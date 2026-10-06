@@ -17,6 +17,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -31,6 +35,10 @@ internal fun OverlayPanel(
     journal: String,
     callbacks: OverlaySurface.Callbacks,
 ) {
+    // One page at a time, in the same column. The model page is a screenful of
+    // its own - pickers, switches and sliders per installed model - and inlining
+    // it would bury the camera controls the panel exists for under it.
+    var models by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth()
             .background(Be.Colors.overlayPanel, RoundedCornerShape(17.dp))
@@ -39,6 +47,10 @@ internal fun OverlayPanel(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (models) {
+            OverlayModelPage(preview = preview, onBack = { models = false })
+            return@Column
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text("BETTER ENDFIELD", color = Be.Colors.accent,
@@ -92,6 +104,14 @@ internal fun OverlayPanel(
         if (!features.anyControl()) {
             Text("还没有需要即时操作的功能。请在「体验」页启用控制项。",
                 color = Be.Colors.textSecondary, fontSize = 12.sp)
+        }
+        if (features.models()) {
+            OverlaySection("模型") {
+                // The settings app can also do this, but only after leaving the
+                // game: swapping which model a character wears is something the
+                // player decides while looking at the character.
+                OverlayAction("模型管理 / 游戏视野") { models = true }
+            }
         }
         OverlayAction(if (preview) "结束预览" else "打开体验设置") {
             if (preview) callbacks.collapse() else callbacks.openSettings()

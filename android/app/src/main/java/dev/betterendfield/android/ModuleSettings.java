@@ -309,6 +309,43 @@ final class ModuleSettings {
                 .commit();
     }
 
+    /**
+     * Applies a field-of-view change for a caller that has no settings screen.
+     *
+     * <p>The in-game overlay arrives through the cross-process settings channel.
+     * It holds neither the settings screen's state nor a way to deliver a
+     * command - runtime commands are issued from the module process - so this
+     * does both halves: the preference, which is what the next launch boots
+     * with, and the running runtime, by rewriting the two relevant lines of the
+     * stored camera configuration and handing the result to
+     * {@link ModuleCommandRouter}. The rewrite is line-level for the reason
+     * {@link #withIniValue} gives: regenerating the text from a caller's view of
+     * the settings would reset every other camera option on the way past, and
+     * the overlay never saw those options.
+     *
+     * <p>Which command carries the result is decided by the same comparison the
+     * settings screen uses. A value-only change travels on the lightweight
+     * {@code global_fov} command; switching the override on or off reloads,
+     * because that decides whether the override exists at all. An empty stored
+     * configuration means no camera module was loaded, and then the preference
+     * alone is the whole change.
+     *
+     * @return whether a command for this change was handed to the running game
+     */
+    static boolean applyGlobalFov(Context context, boolean enabled, double value) {
+        if (!setGlobalFov(context, enabled, value)) return false;
+        SharedPreferences prefs = preferences(context);
+        String configuration = prefs.getString(CAMERA_CONFIGURATION, "");
+        if (configuration == null || configuration.isEmpty()) return true;
+        String updated = withIniValue(withIniValue(configuration, "global_fov_enabled",
+                enabled ? "true" : "false"), "global_fov", number(bounded(value, 60.0, 5.0, 150.0)));
+        if (updated.equals(configuration)) return true;
+        prefs.edit().putString(CAMERA_CONFIGURATION, updated).commit();
+        return onlyGlobalFovChanged(configuration, updated)
+                ? ModuleCommandRouter.issue(context, "global_fov", globalFovCommand(updated))
+                : ModuleCommandRouter.issue(context, "camera_config", updated);
+    }
+
     static boolean isFreeCameraFollowCharacter(Context context) {
         return preferences(context).getBoolean(CAMERA_FOLLOW_CHARACTER, false);
     }

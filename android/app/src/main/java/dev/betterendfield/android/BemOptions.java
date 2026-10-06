@@ -41,6 +41,22 @@ final class BemOptions {
         return values;
     }
 
+    /**
+     * Validates a legacy ({@code bem_minor} 0) appearance choice against the
+     * package's own list.
+     *
+     * <p>A package that predates the option groups names its appearances
+     * directly, and the overlay edits that one field at a time instead of
+     * carrying a whole selection the way the settings screen does - so the
+     * validation has to live somewhere the partial-patch path can reach.
+     */
+    static String appearance(JSONObject entry,String value) throws Exception {
+        requireToken(value);
+        JSONArray choices=entry.getJSONArray("appearances");
+        for(int i=0;i<choices.length();++i) if(value.equals(choices.getString(i))) return value;
+        throw new IOException("无效的外观选项");
+    }
+
     static String encode(Map<String,String> values) {
         StringBuilder text=new StringBuilder();
         for(Map.Entry<String,String> item:values.entrySet()) {

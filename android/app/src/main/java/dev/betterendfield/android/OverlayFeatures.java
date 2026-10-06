@@ -17,10 +17,15 @@ public record OverlayFeatures(
         boolean worldPause,
         boolean firstPerson,
         boolean vmdCamera,
-        boolean mmd) {
+        boolean mmd,
+        boolean models) {
 
     static OverlayFeatures read(SharedPreferences settings) {
         boolean freeCamera = settings.getBoolean(ModuleSettings.CAMERA_FREE, false);
+        // The model page edits the installed index. With nothing in it the page
+        // would be a list of one sentence, so the entry is only worth offering
+        // once there is something to manage.
+        String index = settings.getString(BemInstaller.INDEX, "[]");
         return new OverlayFeatures(
                 settings.getBoolean(ModuleSettings.OVERLAY_ENABLED, false),
                 settings.getBoolean(ModuleSettings.UI_HIDE_HUD, false),
@@ -39,11 +44,12 @@ public record OverlayFeatures(
                 // the camera off. What they do need is the module switched on -
                 // the director stops and stays stopped while it is off, and a
                 // play button that queues a discarded command is worse than none.
-                settings.getBoolean("mmd_enabled", false));
+                settings.getBoolean("mmd_enabled", false),
+                index != null && !index.isEmpty() && !"[]".equals(index));
     }
 
     static OverlayFeatures off() {
-        return new OverlayFeatures(false, false, false, false, false, false, false);
+        return new OverlayFeatures(false, false, false, false, false, false, false, false);
     }
 
     boolean anyControl() {

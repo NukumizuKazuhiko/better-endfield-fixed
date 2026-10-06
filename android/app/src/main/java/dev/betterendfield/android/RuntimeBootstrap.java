@@ -33,6 +33,17 @@ final class RuntimeBootstrap {
                 && !"android".equals(packageName);
     }
 
+    /**
+     * Whether the native runtime has finished loading in this process.
+     *
+     * <p>The overlay asks because it has to word a change honestly: before the
+     * library is in, nothing can be applied live, so a setting the panel just
+     * wrote is "on the next launch" rather than "in the game".
+     */
+    static boolean loaded() {
+        return loaded;
+    }
+
     static void prepare(Application application, Context context, ClassLoader loader,
             ModuleConfigurations configs, long vmdBytes, BemInstalledResources.Source vmdSource,
             FrameTrigger trigger, Consumer<String> log) {

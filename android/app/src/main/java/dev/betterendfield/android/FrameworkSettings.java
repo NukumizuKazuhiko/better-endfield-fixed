@@ -25,6 +25,14 @@ final class FrameworkSettings {
     static void initialize(Context context) {
         appContext = context.getApplicationContext();
         local = open(context);
+        // Create the overlay write token early, so the first snapshot to reach a
+        // game process already carries it and the overlay is never briefly
+        // locked out of its own settings.
+        try {
+            OverlayWriteAuthorization.initialize(context);
+        } catch (java.io.IOException unavailable) {
+            Log.e("BetterEndfield.Settings", "overlay authorization unavailable", unavailable);
+        }
         local.registerOnSharedPreferenceChangeListener(listener);
         XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
             @Override public void onServiceBind(XposedService connected) {
@@ -372,6 +380,14 @@ final class FrameworkSettings {
                 else if (value instanceof Float) edit.putFloat(key, (Float) value);
                 else if (value instanceof Set<?>) edit.putStringSet(key, (Set<String>) value);
             }
+            // The write token is the one value that must not travel in the UI
+            // preference map: the overlay's settings channel admits a caller
+            // outside this package only when it presents it, so publishing it
+            // through the framework-protected snapshot is what keeps the channel
+            // closed to every other app on the device.
+            String authorization = OverlayWriteAuthorization.ownerToken();
+            if (OverlayWritePolicy.validToken(authorization)) edit.putString(OverlayWriteAuthorization.PREFERENCE, authorization);
+            else edit.remove(OverlayWriteAuthorization.PREFERENCE);
             edit.putInt("schemaVersion", 1);
             edit.putLong("generation", remote.getLong("generation", 0) + 1);
             if (!edit.commit()) Log.e("BetterEndfield.Settings", "framework snapshot commit failed");

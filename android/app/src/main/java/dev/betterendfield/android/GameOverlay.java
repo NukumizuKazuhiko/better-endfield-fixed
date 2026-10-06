@@ -308,7 +308,7 @@ final class GameOverlay {
         if (preview) {
             current = new OverlayFeatures(true, current.hideHud(), current.freeCamera(),
                     current.worldPause(), current.firstPerson(), current.vmdCamera(),
-                    current.mmd());
+                    current.mmd(), current.models());
         }
         if (current.equals(shown)) return;
         shown = current;
