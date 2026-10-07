@@ -22,7 +22,7 @@
 
 **一句话结论**：页面层零重叠（上游 61 个类 / 本仓 65 个，29 个上游独有、33 个本仓独有、32 个同名）；可直移的是**引擎类**（MMD 安装器、跨进程设置通道、模型覆盖层工具），必须重写的是**所有页面**。原生侧只有三块需要动：`ui/module.cpp`（PC UI）、`custom_model`（模型覆盖层）、`shared/android_compat`（**只增不覆**）。
 
-**进度（2026-10-07 01:00）**：§六 清单一至五项 **+ 第 8 项（运行时状态串，见 §10.9）已落地并编译验证**，**第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）已落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行），其余为第 6、7、10 项（第 8 项本轮完成、第 9 项随第 11 项完成，依赖闭包排序见 §10.9.1）。
+**进度（2026-10-07 02:30）**：§六 清单一至五项 **+ 第 8 项（运行时状态串，见 §10.9）+ 第 6 项（MMD 本地音轨，见 §10.11）已落地并编译验证**，**第 11 项（上游 v3.5.2 的 PC 布局鼠标捕获，见 §11）已落地并真机通过**。第 11 项走了三版（中继 → 上游 JNI → 帧泵接线），真机结论为「滑动连续转向、点击生效」。**两条关键更正**：① §11.2.2 —— 原「`NativeCommandBridge` 上的 JNI 一律不可直移」的铁律**已作废**，可用上游的 `BindContextLoaderNatives` + context classloader 前置越过 classloader 边界；② §11.2.3 —— 鼠标无效的**真根因是帧泵缺链**（`DispatchAndroidFrame()` 本仓全仓无调用方），与传输层无关。原生侧三块中 `ui/module.cpp`、`android_compat/android_frame.cpp`、`android_compat/android_pc_mouse.h` **均已与上游同步**；**最大剩余缺口仍是 `native/modules/custom_model/module.cpp`，gap 1491 → 1845**（上游 v3.5.2 又在该文件加了 815 行）；**剩余项只有第 7 项**（第 6 项本轮完成、第 8 项上一轮完成、第 9 项随第 11 项完成，第 10 项经实测**不适用**，依赖闭包排序见 §10.10 与 §10.11）。
 
 ---
 
@@ -41,11 +41,11 @@ git rev-list --count $BASE..HEAD            # 81
 | ------- | --------------------------------------------------------------- |
 | 共同基线    | `9b1e895`「Expand BEM v1.1/v1.2 runtime and tooling」（2026-09-26） |
 | 上游 HEAD | `d514f2f`（**v3.5.2**，2026-10-06），领先 **54** 个提交                  |
-| 本仓 HEAD | `b0d7382`（2026-10-07 01:00），领先 **84** 个提交                       |
+| 本仓 HEAD | `db021cd`（2026-10-07 02:00），领先 **88** 个提交                       |
 | 上游改动文件  | 功能面 **599**（剔 `research/` + `docs/`）                            |
-| 本仓改动文件  | 功能面 **372**                                                     |
+| 本仓改动文件  | 功能面 **379**                                                     |
 
-> 与上一版（`3521627` / `8b8a0b5`）的差：上游 +14 提交（v3.5.2：PC 布局鼠标捕获、custom-model BEM 1.4 与 Android LOD 一批、Workshop 导航、mod-center 双语）⇒ 功能面 545 → **599**；本仓 +6 提交（第 11 项的三次实现 + 一次回归修复 + 文档）⇒ 功能面 361 → **368**（2026-10-07 再记：`1c65eab` 时为 367；锚点前移到 `cbbca19` 后本仓新增 `core/jni_binding.h`，`RuntimeBootstrap.java` 由「未改」升为「已改」）。**2026-10-07 01:00 再记**：本仓 +3 提交（第 8 项 1 个 + 文档 2 个）⇒ 功能面 368 → **372**（新增 `core/runtime_status.h`、`RuntimeSnapshot.java`、`testHost/runtime_snapshot_fixture.py`、`testHost/.../RuntimeSnapshotHostTest.java` 共 4 件）。
+> 与上一版（`3521627` / `8b8a0b5`）的差：上游 +14 提交（v3.5.2：PC 布局鼠标捕获、custom-model BEM 1.4 与 Android LOD 一批、Workshop 导航、mod-center 双语）⇒ 功能面 545 → **599**；本仓 +6 提交（第 11 项的三次实现 + 一次回归修复 + 文档）⇒ 功能面 361 → **368**（2026-10-07 再记：`1c65eab` 时为 367；锚点前移到 `cbbca19` 后本仓新增 `core/jni_binding.h`，`RuntimeBootstrap.java` 由「未改」升为「已改」）。**2026-10-07 01:00 再记**：本仓 +3 提交（第 8 项 1 个 + 文档 2 个）⇒ 功能面 368 → **372**（新增 `core/runtime_status.h`、`RuntimeSnapshot.java`、`testHost/runtime_snapshot_fixture.py`、`testHost/.../RuntimeSnapshotHostTest.java` 共 4 件）。 **2026-10-07 02:00 再记**：本仓 +2 提交（第 6 项 1 个代码提交 + 台账重算 1 个）⇒ 功能面 372 → **379**（新增 7 件：`MmdAudio.java`、`MmdAudioHostTest.java`、4 个 `android.media` / `android.os` 桩、`testHost/mmd_audio_fixture.py`）；`MmdAudio.java` 与上游**同 blob** ⇒ 落**冲突面**而非纯新增。
 
 ### 0.2 文件层四分法（功能面）
 
@@ -61,12 +61,12 @@ comm -13 up.txt our.txt   # 本仓独有
 | 桶                | 数       | 定义                   | 处置                           |
 | ---------------- | ------- | -------------------- | ---------------------------- |
 | **纯未同步 · 本仓有旧版** | **122** | 上游改、本仓自基线未动，且文件在本仓树里 | 直接取上游版（无冲突）                  |
-| **纯未同步 · 上游新增**  | **267** | 上游改、本仓树里根本没有         | 按 §三 编译面分级取舍                 |
-| **冲突面**          | **210** | 双方自基线都改过             | 逐 hunk / 小侧前向移植，**绝不整文件覆盖**  |
-| **本仓独有 · 独有独改**  | **140** | 本仓新增或改、上游未动          | **保护**，合并时不得被覆盖              |
+| **纯未同步 · 上游新增**  | **266** | 上游改、本仓树里根本没有         | 按 §三 编译面分级取舍                 |
+| **冲突面**          | **211** | 双方自基线都改过             | 逐 hunk / 小侧前向移植，**绝不整文件覆盖**  |
+| **本仓独有 · 独有独改**  | **146** | 本仓新增或改、上游未动          | **保护**，合并时不得被覆盖              |
 | **本仓独有 · 主动删除**  | **22**  | 本仓删、上游未动             | 本仓有意为之（Compose 迁移删 View/XML） |
 
-**校验**：`122 + 267 + 210 = 599` = 上游功能面 ✓；`210 + 140 + 22 = 372` = 本仓功能面 ✓
+**校验**：`122 + 266 + 211 = 599` = 上游功能面 ✓；`211 + 146 + 22 = 379` = 本仓功能面 ✓
 
 > **较上一版的变化**（逐件核对，非估算）：
 >
@@ -76,6 +76,8 @@ comm -13 up.txt our.txt   # 本仓独有
 > - **本仓独有（138 独改 + 22 主动删除）两桶三轮完全不变** —— 这两桶才是"零冲突可直接取"的口径。
 >
 > - **2026-10-07 01:00 第 8 项落地后的移动**（逐件复核）：**纯未同步 391 → 389**（`core/runtime_status.h`、`RuntimeSnapshot.java` 两件由「上游新增」升为「双方都改」⇒ 上游新增 269 → **267**；本仓有旧版 **122** 不变）；**冲突面 208 → 210**（同两件）+ 本仓独有 **160 → 162**（新增 2 件宿主夹具，属独有独改 ⇒ 138 → **140**）。**注意**：这两件是"上游新增、本仓也新增"⇒ 落入冲突面而**不是**"本仓独有"，判据仍是 §0.2 的四分法口径，不要按"我新写的文件就算我独有"直觉归类。
+>
+> - **2026-10-07 02:00 第 6 项落地后的移动**（逐件复核）：**纯未同步 389 → 388**（`MmdAudio.java` 由「上游新增」升为「双方都改」⇒ 上游新增 267 → **266**；本仓有旧版 **122** 不变）；**冲突面 210 → 211**（同件）+ 本仓独有 **162 → 168**（新增 6 件宿主夹具：`testHost/mmd_audio_fixture.py` 1 件 + `testHost/mmd_audio/**` 5 件，属独有独改 ⇒ 140 → **146**）。**判据同前**：`MmdAudio.java` 是「上游新增、本仓也新增」⇒ 落**冲突面**；只有本仓单方面新增的夹具才计入「本仓独有」。
 
 > **"上游独有"≠"上游新增"**：22 个本仓主动删除的文件（`ColorWheelView.java`、`ValueSlider.java`、15 个 `res/drawable/bg_*.xml`、3 个 `res/color/*.xml`、2 个 `res/layout/bem_spinner_*.xml`）在 `git diff 本仓 上游` 里同样显示为"上游新增"，实际是本仓删掉的。判"真缺 vs 被替换"必须过一遍 `git cat-file -e HEAD:<path>`。
 
@@ -86,7 +88,7 @@ comm -13 up.txt our.txt   # 本仓独有
 | 目录                          | 上游改 | 本仓改     | 纯未同步 | 冲突面    |
 | --------------------------- | --- | ------- | ---- | ------ |
 | `native/modules`            | 147 | 102     | 67   | **80** |
-| `android/app`               | 103 | **137** | 47   | **56** |
+| `android/app`               | 103 | **148** | 44   | **59** |
 | `native/shared`             | 30  | 23      | 8    | **22** |
 | `tools/CustomModel`         | 69  | 16      | 53   | 16     |
 | `tools/ThirdPartyModules`   | 7   | 6       | 1    | 6      |
@@ -114,18 +116,18 @@ comm -13 up.txt our.txt   # 本仓独有
 
 > **上一版此表只列了 9 行**，漏掉 `web` / `scripts` / `config` / `manifests` / `ui/tests` / `tools/FirstPersonProfiles` / `tools/CombatDataExporter` 共 7 个目录（其中 `scripts`、`web` 各 28 件，量级与 `native/shared` 相当）。本版补齐，并**明确标注（c）类不进本仓 Android 编译面** —— 这是此前把"上游改了 3400+ 文件"读成压力来源的原因。
 >
-> 两侧都最重的两个目录即主战场：`native/modules` 与 `android/app`（本仓改 133 > 上游 97，方向已反转）。`native/tests` 上游的 67 件里 **66 件本仓一件没有** —— 那是上游自带回归测试，是本仓唯一可用的验收判据。
+> 两侧都最重的两个目录即主战场：`native/modules` 与 `android/app`（`android/app` 本仓改 **148** > 上游 **103**，方向已反转）。`native/tests` 上游的 **84** 件里 **76 件本仓一件没有** —— 那是上游自带回归测试，是本仓唯一可用的验收判据。
 
 ### 0.4 与既有清点文档的数字差异（本次更正）
 
-| 项           | 清点文档原文（`3510fa7`） | 上一版实测（`8b8a0b5` / `3521627`） | **本版实测（`1c65eab` / `d514f2f`）** |
-| ----------- | ----------------- | ---------------------------- | ------------------------------- |
-| 上游功能面改动文件   | 538（`3510fa7`）    | 545（`3521627`）               | **599**                         |
-| 纯未同步        | 342               | 344（= 113 + 231）             | **391（= 122 + 269）**            |
-| 冲突面 / 本仓功能面 | 196 / 356         | 201 / 361                    | **208 / 368**                   |
-| 本仓独有        | 未拆                | 160 = 138 + 22               | **160（三轮均未变）**                  |
+| 项           | 清点文档原文（`3510fa7`） | 更早实测（`8b8a0b5` / `3521627`） | 上一版实测（`1c65eab` / `d514f2f`） | **本版实测（`db021cd` / `d514f2f`）** |
+| ----------- | ----------------- | ---------------------------- | ------------------------------- | -------------------------------- |
+| 上游功能面改动文件   | 538（`3510fa7`）    | 545（`3521627`）               | 599                             | **599（未变）**                       |
+| 纯未同步        | 342               | 344（= 113 + 231）             | 391（= 122 + 269）                | **388（= 122 + 266）**             |
+| 冲突面 / 本仓功能面 | 196 / 356         | 201 / 361                    | 208 / 368                       | **211 / 379**                    |
+| 本仓独有        | 未拆                | 160 = 138 + 22               | 160（三轮均未变）                      | **168 = 146 + 22**               |
 
-> 三列（现为四列）数字**口径完全一致**，差异只来自锚点前移：上游 +15 提交、本仓 +9 提交。清点文档 `ANDROID_UNPORTED_FEATURES_20261005.md` 的逐条功能面仍以 `3510fa7` 为基线，**数字已再次过时**，但其"未同步功能清单"的条目本身未失效。
+> 四列（现为五列）数字**口径完全一致**，差异只来自锚点前移：上游 +15 提交；本仓自 `8b8a0b5` 起已累计前移三次（`1c65eab` / `b0d7382` / `db021cd`）。清点文档 `ANDROID_UNPORTED_FEATURES_20261005.md` 的逐条功能面仍以 `3510fa7` 为基线，**数字已再次过时**，但其"未同步功能清单"的条目本身未失效。
 
 ---
 
@@ -552,15 +554,15 @@ D=D:/android-toolchain/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64
 BASE=$(git merge-base HEAD upstream/main)   # 9b1e895
 git -c core.quotepath=false diff --name-only $BASE..upstream/main | grep -vE '^(research|docs)/' | sort > up.txt
 git -c core.quotepath=false diff --name-only $BASE..HEAD          | grep -vE '^(research|docs)/' | sort > our.txt
-comm -23 up.txt our.txt | wc -l    # 389 纯未同步（内分 122 本仓有旧版 / 267 上游新增）
-comm -12 up.txt our.txt | wc -l    # 210 冲突面
-comm -13 up.txt our.txt | wc -l    # 162 本仓独有（140 独改 + 22 主动删除）
+comm -23 up.txt our.txt | wc -l    # 388 纯未同步（内分 122 本仓有旧版 / 266 上游新增）
+comm -12 up.txt our.txt | wc -l    # 211 冲突面
+comm -13 up.txt our.txt | wc -l    # 168 本仓独有（146 独改 + 22 主动删除）
 git diff --numstat $BASE..HEAD > ns_our.txt ; git diff --numstat $BASE..upstream/main > ns_up.txt   # 再 join 得 gap 排名
 ```
 
 > **gap 的算法**：`gap = (上游 +行 + 上游 −行) − (本仓 +行 + 本仓 −行)`，按**总改动行数**而非净值 ⇒ **本仓整文件删除的条目 gap 会是负数、永不进榜**（§零点五 已注明该盲区）。
 
-**二分「真缺 vs 被替换」**（判 231 个上游新增里哪些是真缺口）：
+**二分「真缺 vs 被替换」**（判 266 个上游新增里哪些是真缺口）：
 
 ```bash
 while IFS= read -r f; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "本仓有旧版: $f" || echo "上游新增: $f"; done < <(comm -23 up.txt our.txt)
@@ -997,9 +999,11 @@ Java 侧确实只有 82 行（`BemHotSwitchUpdater` 50 + `BemHotSwitchUpdate` 28
 3. 其后接 `InitializeAndroidMusic(vm, environment, bridge_class)`：失败只 `LogError("mmd.music", "Java media API unavailable; body and camera remain usable")` 降级成「丢音乐」，**不静默**，也不影响 file relay / 帧泵 / PC 鼠标面。
 4. `proguard-rules.pro` 加 `-keepclassmembers`（4 个方法）、`build.gradle.kts` 的 `jniCallbacks` 加第二个 owner ⇒ `verifyReleaseEntryPoints` 会断言它们没被 R8 改名、且方法名留在 dex。
 
-**证据（全部离线）**：宿主夹具 `android/app/src/testHost/mmd_audio_fixture.py` → **23/23 passed**；`:app:assembleDebug`（带 `-PheadwearCatalogDir`）BUILD SUCCESSFUL，44 任务，APK **79,009,665 B** / SHA-256 `c3766a9b…c873`；`libbetterendfield_android.so` 内 `InitializeAndroidMusic(JavaVM*, JNIEnv*, jclass)` 与 `AndroidLocalMusicApi()` 均为**已定义**符号，6 条接线字面量（`mmd.music` / `Java media API bound` / 不可用串 / 4 个方法名）全部命中；dex 内 `MmdAudio` 与 4 个方法名命中。
+**证据（全部离线）**：宿主夹具 `android/app/src/testHost/mmd_audio_fixture.py` → **23/23 passed**；`:app:assembleDebug`（带 `-PheadwearCatalogDir`）BUILD SUCCESSFUL，44 任务，APK **79,009,665 B** / SHA-256 `c3766a9b…c873`；`libbetterendfield_android.so` 内 `InitializeAndroidMusic(JavaVM*, JNIEnv*, jclass)` 与 `AndroidLocalMusicApi()` 均为**已定义**符号，7 条接线字面量（`mmd.music` / `Java media API bound` / 不可用串 / 4 个方法名）全部命中；dex 内 `MmdAudio` 与 4 个方法名命中。
 
-**未验收**：听声需要装机 + LSPosed + 游戏内跑一个 MMD 作品；`verifyReleaseEntryPoints` 只能在 release 产物上跑，而本机无 release 密钥库 ⇒ 该门禁由 CI 覆盖。
+**未验收**：听声需要装机 + LSPosed + 游戏内跑一个 MMD 作品；`verifyReleaseEntryPoints` 只能在 release 产物上跑，而本机无 release 密钥库 ⇒ 该门禁已由 CI 覆盖（见下）。
+
+**CI 出包与交付（2026-10-07 02:30）**：本机无 release 密钥库（`android/keystore/` 只有 `bem-debug.keystore`，`release.properties` 不存在且被 gitignore）⇒ release 只能走 CI。本次用 `android-release.yml` 的 **`build_only=true`** 输入：只产签名 APK 工件，**不建 tag、不发 GitHub Release**（发不发正式版留给人工决定）。run `37503766805`（ref `codex/android-thirdparty-alignment`）**4m55s 成功**，其中 `verifyReleaseEntryPoints` 与「Assert the APK carries the release identity」均通过、「Publish GitHub Release」按输入跳过 —— **`verifyReleaseEntryPoints` 本机跑不了（依赖 `mapping.txt` 与 release 产物），至此由 CI 覆盖**。产物 `betterendfield-3.4.2-30402.apk`：**50,249,025 B**、SHA-256 `a800b97e30b763628ca44fcfd457a066b1929e40e09c12637b4493b4c4f39af0`、签名 `CN=BEM Release, OU=Android, O=Better-Endfield, C=CN`（SHA-256 `8cd6fdc1…b8efd`，**release 身份**，与 debug 的 `CN=BEM Debug` / `4edd10b9…826f` 不同）、`arm64-v8a` 单 ABI、versionCode **30402 > 30401** ⇒ 可原位覆盖升级。**在签名包内**解出 `libbetterendfield_android.so` 后复扫 7 条接线字面量（`mmd.music` / `Java media API bound` / 不可用串 / `audioOpen` / `audioControl` / `audioStatus` / `audioError`）**全部命中** ⇒ 改动确实进了 release 产物，而不只是「构建成功」。归档于 `D:/CodexData/better-endfield-apk/`。
 
 > 落地过程中配置阶段曾**整体**失败（`NoSuchMethodError: void Settings_gradle.<init>(KotlinScriptHost, PluginDependenciesSpec, Settings)`），根因是 `caches/<ver>/kotlin-dsl/scripts/<内容哈希>` 下被通用 Kotlin 脚本模板编译出的 `Settings_gradle`（丢父类、构造只收 `Settings`，正常应 `extends CompiledKotlinSettingsPluginManagementBlock`）。因为它**按脚本内容哈希命中**，源码怎么改都命中同一份坏类 ⇒ 表现为「HEAD 也编不过」。**与本改动无关**；恢复动作是移走该哈希目录后**再跑一次**。完整判据与三个方法论坑见 `.workbuddy/memory/2026-10-07.md`。
 
